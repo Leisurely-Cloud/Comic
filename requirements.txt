@@ -1,0 +1,6 @@
+# 漫画下载器依赖
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+tqdm>=4.64.0
+lxml>=4.9.0
+urllib3>=1.26.0

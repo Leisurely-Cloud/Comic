@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+.vscode/
+.idea/
+build/
+dist/
+release/
+*.pyc
+*.zip
+download_resume_data.json
+大奉打更人/

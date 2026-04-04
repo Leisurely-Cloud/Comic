@@ -2,6 +2,11 @@
 
 这是一个功能强大的漫画下载器，支持从 baozimh.org 下载漫画章节。
 
+## ⬇️ 下载地址
+
+- GitHub Releases: https://github.com/Leisurely-Cloud/Comic/releases
+- 当前 Windows 发布包：`comic-downloader-v1.0.0-windows.zip`
+
 ## ✨ 主要特性
 
 - **⚡ 高速并发下载**：支持章节和图片双重并发
@@ -211,4 +216,3 @@ Comic/
 ## 📞 支持
 
 如有问题，请检查网络连接和参数设置，或尝试调整并发数。
-# -
