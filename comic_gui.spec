@@ -58,7 +58,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='漫画下载器',
+    name='comic-downloader',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

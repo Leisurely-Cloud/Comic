@@ -2,10 +2,11 @@ import os
 import re
 import time
 import argparse
+import json
 import requests
 import threading
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs, quote
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from requests.adapters import HTTPAdapter
 
 # 🔒 打印锁，防止多线程打印错乱
 print_lock = threading.Lock()
+
+BASE_SITE_URL = "https://baozimh.org"
 
 # User-Agent 池
 USER_AGENTS = [
@@ -40,6 +43,11 @@ class ProxyPool:
         self._last_fetch_time = 0
         self._fetch_interval = 600 # 10分钟更新一次
 
+    def _new_session(self):
+        session = requests.Session()
+        session.trust_env = False
+        return session
+
     def verify_proxy(self, proxy_ip):
         """验证单个代理是否可用"""
         proxy = {
@@ -49,7 +57,7 @@ class ProxyPool:
         try:
             # 尝试访问一个稳定且响应快的地址进行验证
             # 使用 httpbin.org 验证
-            resp = requests.get("http://httpbin.org/ip", proxies=proxy, timeout=5)
+            resp = self._new_session().get("http://httpbin.org/ip", proxies=proxy, timeout=5)
             if resp.status_code == 200:
                 return proxy_ip
         except:
@@ -71,7 +79,7 @@ class ProxyPool:
             # 1. 并发获取原始代理列表
             def fetch_source(url):
                 try:
-                    resp = requests.get(url, timeout=10)
+                    resp = self._new_session().get(url, timeout=10)
                     if resp.status_code == 200:
                         lines = resp.text.strip().splitlines()
                         found = 0
@@ -170,6 +178,7 @@ def get_session():
     """获取线程本地的session，支持连接复用"""
     if not hasattr(SESSION_POOL, 'session'):
         SESSION_POOL.session = requests.Session()
+        SESSION_POOL.session.trust_env = False
         SESSION_POOL.session.headers.update(HEADERS)
         # 配置连接池
         adapter = HTTPAdapter(
@@ -214,7 +223,8 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
         try:
             # 增加 timeout，因为代理通常较慢
             # print(f"DEBUG: Requesting {url} with proxy {proxy}")
-            resp = requests.get(url, headers=headers, timeout=timeout + 5, proxies=proxy)
+            session = get_session()
+            resp = session.get(url, headers=headers, timeout=timeout + 5, proxies=proxy)
             resp.raise_for_status()
             return resp
         except Exception as e:
@@ -239,6 +249,346 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
 def sanitize_filename(name: str) -> str:
     """去除文件名中非法字符"""
     return re.sub(r'[\\/:*?"<>|]', '_', name.strip())
+
+
+def build_absolute_url(url: str) -> str:
+    """将站内相对路径转换为完整 URL。"""
+    return urljoin(f"{BASE_SITE_URL}/", url)
+
+
+def normalize_chapterlist_url(manga_url: str) -> str:
+    """把 /manga/{slug} 详情页 URL 转成 /chapterlist/{slug}。"""
+    parsed = urlparse(manga_url)
+    path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+
+    if len(path_parts) >= 2 and path_parts[0] == "chapterlist":
+        return build_absolute_url(parsed.path)
+
+    if len(path_parts) >= 2 and path_parts[0] == "manga":
+        return build_absolute_url(f"/chapterlist/{path_parts[1]}")
+
+    return build_absolute_url(parsed.path)
+
+
+def unwrap_cover_url(cover_url: str) -> str:
+    """
+    还原 Next/Image 包装后的真实封面地址。
+    例如：
+    https://pro-api.../_next/image?url=https%3A%2F%2Fcover...&w=250&q=60
+    """
+    if not cover_url:
+        return ""
+
+    parsed = urlparse(cover_url)
+    if "/_next/image" not in parsed.path:
+        return cover_url
+
+    query = parse_qs(parsed.query)
+    real_url = query.get("url", [cover_url])[0]
+    return real_url
+
+
+@dataclass
+class HomepageMangaCard:
+    section: str
+    title: str
+    manga_url: str
+    chapterlist_url: str
+    cover_url: str = ""
+    latest_chapter: str = ""
+    update_time: str = ""
+
+
+def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[HomepageMangaCard]:
+    cards: List[HomepageMangaCard] = []
+    header = soup.find("h2", string=lambda x: x and x.strip() == heading)
+    if not header:
+        return cards
+
+    title_link = header.find_parent("a", class_=lambda x: x and "hometitle" in x)
+    section_wrapper = None
+    if title_link:
+        title_row = title_link.find_parent("div")
+        if title_row:
+            section_wrapper = title_row.find_parent("div")
+
+    if not section_wrapper:
+        section_wrapper = header.find_parent("div")
+
+    if not section_wrapper:
+        return cards
+
+    cardlist = section_wrapper.find("div", class_=lambda x: x and "cardlist" in x)
+    if not cardlist:
+        return cards
+
+    for wrapper in cardlist.find_all("div", recursive=False):
+        item = wrapper.find("a", href=True)
+        if not item:
+            continue
+
+        href = item.get("href", "").strip()
+        title_node = item.find("h3")
+        img_node = item.find("img")
+        title = title_node.get_text(strip=True) if title_node else ""
+
+        if not href or not title:
+            continue
+
+        manga_url = build_absolute_url(href)
+        cards.append(
+            HomepageMangaCard(
+                section=heading,
+                title=title,
+                manga_url=manga_url,
+                chapterlist_url=normalize_chapterlist_url(manga_url),
+                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+            )
+        )
+
+    return cards
+
+
+def _extract_recent_update_section(soup: BeautifulSoup) -> List[HomepageMangaCard]:
+    cards: List[HomepageMangaCard] = []
+    header = soup.find("h2", string=lambda x: x and x.strip() == "近期更新")
+    if not header:
+        return cards
+
+    section_wrapper = header.find_parent("div")
+    if not section_wrapper:
+        return cards
+
+    for item in section_wrapper.select("a.slicarda[href]"):
+        href = item.get("href", "").strip()
+        img_node = item.find("img")
+        title_node = item.find("h3", class_=lambda x: x and "slicardtitle" in x)
+        time_node = item.find("p", class_=lambda x: x and "slicardtagp" in x)
+        latest_node = item.find("p", class_=lambda x: x and "slicardtitlep" in x)
+
+        title = title_node.get_text(strip=True) if title_node else ""
+        if not href or not title:
+            continue
+
+        manga_url = build_absolute_url(href)
+        cards.append(
+            HomepageMangaCard(
+                section="近期更新",
+                title=title,
+                manga_url=manga_url,
+                chapterlist_url=normalize_chapterlist_url(manga_url),
+                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+                latest_chapter=latest_node.get_text(strip=True) if latest_node else "",
+                update_time=time_node.get_text(strip=True) if time_node else "",
+            )
+        )
+
+    return cards
+
+
+def fetch_homepage_manga_cards() -> List[HomepageMangaCard]:
+    """抓取首页主要榜单漫画卡片。"""
+    homepage_url = build_absolute_url("/")
+    with print_lock:
+        print(f"🔍 Fetching homepage: {homepage_url}")
+
+    resp = safe_request(homepage_url, retries=1)
+    if not resp:
+        return []
+
+    resp.encoding = "utf-8"
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    cards: List[HomepageMangaCard] = []
+    cards.extend(_extract_recent_update_section(soup))
+    cards.extend(_extract_standard_card_section(soup, "熱門更新"))
+    cards.extend(_extract_standard_card_section(soup, "人氣排行"))
+    cards.extend(_extract_standard_card_section(soup, "最新上架"))
+
+    return cards
+
+
+def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageMangaCard]:
+    """抓取分区列表页漫画卡片。支持 rank/hot-update/new/recent。"""
+    if page < 1:
+        page = 1
+
+    if section == "recent":
+        homepage_resp = safe_request(build_absolute_url("/"), retries=1)
+        if not homepage_resp:
+            return []
+        homepage_resp.encoding = "utf-8"
+        return _extract_recent_update_section(BeautifulSoup(homepage_resp.text, "html.parser"))
+
+    section_paths = {
+        "rank": "/hots",
+        "hot-update": "/dayup",
+        "new": "/newss",
+    }
+    section_titles = {
+        "rank": "人氣排行",
+        "hot-update": "熱門更新",
+        "new": "最新上架",
+    }
+
+    path = section_paths.get(section)
+    if not path:
+        return []
+
+    page_url = build_absolute_url(f"{path}/page/{page}")
+    with print_lock:
+        print(f"🔍 Fetching section page: {page_url}")
+
+    resp = safe_request(page_url, retries=1)
+    if not resp:
+        return []
+
+    resp.encoding = "utf-8"
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    cards: List[HomepageMangaCard] = []
+    cardlist = soup.find("div", class_=lambda x: x and "cardlist" in x)
+    if not cardlist:
+        return cards
+
+    for wrapper in cardlist.find_all("div", recursive=False):
+        item = wrapper.find("a", href=True)
+        if not item:
+            continue
+
+        href = item.get("href", "").strip()
+        title_node = item.find("h3")
+        img_node = item.find("img")
+        title = title_node.get_text(strip=True) if title_node else ""
+
+        if not href or not title:
+            continue
+
+        manga_url = build_absolute_url(href)
+        cards.append(
+            HomepageMangaCard(
+                section=section_titles.get(section, section),
+                title=title,
+                manga_url=manga_url,
+                chapterlist_url=normalize_chapterlist_url(manga_url),
+                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+            )
+        )
+
+    return cards
+
+
+def fetch_search_manga_cards(keyword: str, page: int = 1) -> List[HomepageMangaCard]:
+    """按关键词抓取站内搜索结果，支持模糊搜索。"""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return []
+
+    if page < 1:
+        page = 1
+
+    page_url = f"{build_absolute_url('/s')}?q={quote(keyword)}&page={page}"
+    with print_lock:
+        print(f"🔍 Fetching search page: {page_url}")
+
+    resp = safe_request(page_url, retries=1)
+    if not resp:
+        return []
+
+    resp.encoding = "utf-8"
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    cards: List[HomepageMangaCard] = []
+    cardlist = soup.find("div", class_=lambda x: x and "cardlist" in x)
+    if not cardlist:
+        return cards
+
+    for wrapper in cardlist.find_all("div", recursive=False):
+        item = wrapper.find("a", href=True)
+        if not item:
+            continue
+
+        href = item.get("href", "").strip()
+        title_node = item.find("h3")
+        img_node = item.find("img")
+        title = title_node.get_text(strip=True) if title_node else ""
+
+        if not href or not title:
+            continue
+
+        manga_url = build_absolute_url(href)
+        cards.append(
+            HomepageMangaCard(
+                section="搜索结果",
+                title=title,
+                manga_url=manga_url,
+                chapterlist_url=normalize_chapterlist_url(manga_url),
+                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+            )
+        )
+
+    return cards
+
+
+def filter_homepage_cards(cards: List[HomepageMangaCard], section: Optional[str] = None,
+                          limit: Optional[int] = None) -> List[HomepageMangaCard]:
+    """按分区和数量筛选首页卡片。"""
+    section_aliases = {
+        None: None,
+        "all": None,
+        "recent": "近期更新",
+        "近期更新": "近期更新",
+        "hot-update": "熱門更新",
+        "热门更新": "熱門更新",
+        "熱門更新": "熱門更新",
+        "rank": "人氣排行",
+        "排行": "人氣排行",
+        "人气排行": "人氣排行",
+        "人氣排行": "人氣排行",
+        "new": "最新上架",
+        "最新上架": "最新上架",
+    }
+    resolved_section = section_aliases.get(section, section)
+
+    filtered = [card for card in cards if resolved_section is None or card.section == resolved_section]
+    if limit is not None and limit > 0:
+        filtered = filtered[:limit]
+    return filtered
+
+
+def print_homepage_cards(cards: List[HomepageMangaCard]):
+    """将首页卡片以可读格式输出。"""
+    if not cards:
+        print("⚠️ No homepage manga cards found.")
+        return
+
+    for idx, card in enumerate(cards, 1):
+        print(f"[{idx}] {card.title}")
+        print(f"    分区: {card.section}")
+        print(f"    详情页: {card.manga_url}")
+        print(f"    目录页: {card.chapterlist_url}")
+        if card.cover_url:
+            print(f"    封面: {card.cover_url}")
+        if card.latest_chapter:
+            print(f"    最近章节: {card.latest_chapter}")
+        if card.update_time:
+            print(f"    更新时间: {card.update_time}")
+
+
+def homepage_cards_to_dict(cards: List[HomepageMangaCard]) -> List[Dict[str, str]]:
+    """把首页卡片对象转为可序列化字典。"""
+    return [
+        {
+            "section": card.section,
+            "title": card.title,
+            "manga_url": card.manga_url,
+            "chapterlist_url": card.chapterlist_url,
+            "cover_url": card.cover_url,
+            "latest_chapter": card.latest_chapter,
+            "update_time": card.update_time,
+        }
+        for card in cards
+    ]
 
 
 def download_single_image(args):
@@ -559,7 +909,8 @@ def get_all_chapters(manga_id):
             chapters.append({
                 "slug": attr.get("slug"),
                 "order": attr.get("order"),
-                "title": attr.get("title")
+                "title": attr.get("title"),
+                "updated_at": attr.get("updatedAt")
             })
         
         # 按 order 排序 (从小到大)
@@ -578,28 +929,66 @@ def get_all_chapters(manga_id):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download manga from baozimh.org")
-    parser.add_argument("url", nargs="?", default="https://baozimh.org/chapterlist/tianguansifu-baimengshemoxiangtongchoustaremberjinjiangwenxuecheng", help="Manga directory URL or chapter URL")
+    parser.add_argument("url", nargs="?", default=None, help="Manga directory URL, detail URL, or chapter URL")
     parser.add_argument("--start", type=int, help="Start downloading from this chapter order number (overrides URL chapter)", default=None)
     parser.add_argument("--concurrent", type=int, default=5, help="Max concurrent chapters download")
     parser.add_argument("--image-concurrent", type=int, default=5, help="Max concurrent images per chapter")
     parser.add_argument("--proxy", action="store_true", help="Enable proxy pool")
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
+    parser.add_argument("--list-homepage", action="store_true", help="Fetch and print homepage manga cards")
+    parser.add_argument("--homepage-section", default="all",
+                        help="Homepage section filter: all/recent/hot-update/rank/new")
+    parser.add_argument("--homepage-limit", type=int, default=10, help="Limit homepage results")
+    parser.add_argument("--homepage-json", action="store_true", help="Print homepage cards as JSON")
+    parser.add_argument("--homepage-download", type=int,
+                        help="Download the Nth manga from the homepage list after filtering")
     
     args = parser.parse_args()
-    
-    if not args.url:
-        print("Usage: python downcomic.py [URL] [--start ORDER] [--concurrent N]")
-        print("Example: python downcomic.py https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi")
-        # 为了方便调试，如果没有参数，可以默认使用用户之前提供的测试 URL
-        # url = "https://baozimh.org/manga/wozhenmeixiangzhongshenga-pikapi/0_7"
-        exit(1)
-    else:
-        url = args.url
 
     max_concurrent_chapters = args.concurrent
     max_concurrent_images = args.image_concurrent
     proxy_pool.enabled = args.proxy
     show_progress = not args.no_progress
+
+    homepage_cards = []
+    if args.list_homepage or args.homepage_download is not None:
+        homepage_cards = filter_homepage_cards(
+            fetch_homepage_manga_cards(),
+            section=args.homepage_section,
+            limit=args.homepage_limit
+        )
+
+        if args.list_homepage:
+            if args.homepage_json:
+                print(json.dumps(homepage_cards_to_dict(homepage_cards), ensure_ascii=False, indent=2))
+            else:
+                print_homepage_cards(homepage_cards)
+
+            if args.homepage_download is None:
+                exit(0)
+
+    if args.homepage_download is not None:
+        if not homepage_cards:
+            print("❌ Homepage manga list is empty. Nothing to download.")
+            exit(1)
+
+        index = args.homepage_download - 1
+        if index < 0 or index >= len(homepage_cards):
+            print(f"❌ Invalid homepage index: {args.homepage_download}. Valid range: 1-{len(homepage_cards)}")
+            exit(1)
+
+        selected_card = homepage_cards[index]
+        url = selected_card.manga_url
+        print(f"🎯 Selected homepage manga: {selected_card.title}")
+        print(f"🔗 Using URL: {url}")
+    elif args.url:
+        url = args.url
+    else:
+        print("Usage: python downcomic.py [URL] [--start ORDER] [--concurrent N]")
+        print("List homepage: python downcomic.py --list-homepage --homepage-section rank")
+        print("Download homepage item: python downcomic.py --homepage-section rank --homepage-download 1")
+        print("Direct download: python downcomic.py https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi")
+        exit(1)
     
     # 1. 分析 URL 获取漫画信息
     manga_id, manga_slug, url_start_slug = get_manga_info_from_url(url)
@@ -664,7 +1053,14 @@ if __name__ == "__main__":
                 # 1. 提交新任务，直到达到最大并发数
                 while pending_chapters and len(futures) < max_concurrent_chapters:
                     chapter = pending_chapters.pop(0)
-                    f = executor.submit(download_chapter_images, chapter["slug"], base, root_dir)
+                    f = executor.submit(
+                        download_chapter_images,
+                        chapter["slug"],
+                        base,
+                        root_dir,
+                        max_concurrent_images=max_concurrent_images,
+                        show_progress=show_progress
+                    )
                     futures[f] = chapter
 
                 if not futures:

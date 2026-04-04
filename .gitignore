@@ -3,9 +3,12 @@ __pycache__/
 .vscode/
 .idea/
 build/
+build_pyinstaller/
 dist/
+dist_build/
 release/
 *.pyc
 *.zip
 download_resume_data.json
 大奉打更人/
+全球高武/
