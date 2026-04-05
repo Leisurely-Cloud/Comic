@@ -328,4 +328,4 @@ python downcomic.py "URL" --no-progress
 
 ## License
 
-当前仓库未附带明确开源许可证。若你准备公开分发、接受外部贡献或发布到更大范围，建议补充 `LICENSE` 文件后再正式对外发布。
+This project is licensed under the MIT License. See the `LICENSE` file for details.
