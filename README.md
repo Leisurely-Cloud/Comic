@@ -1,280 +1,331 @@
-# 🚀 智能漫画下载器 2.0
+# Comic
 
-这是一个面向 baozimh.org 的漫画下载器。2.0 版本新增了图形界面、首页发现、暂停/恢复下载和更完整的 Windows 发布包流程，既可以双击 EXE 使用，也可以继续走命令行。
+一个面向 `baozimh.org` 的漫画下载工具，支持 **命令行下载** 与 **Windows 图形界面** 两种使用方式。项目提供章节并发下载、图片并发下载、断点续传、首页榜单抓取、代理池支持，以及完整的 PyInstaller 打包与发布流程。
 
-## ⬇️ 下载地址
+适合以下场景：
 
-- GitHub Releases: https://github.com/Leisurely-Cloud/Comic/releases
-- 当前 Windows 发布包：`comic-downloader-v2.0.0-windows.zip`
+- 想通过命令行批量下载漫画
+- 想直接双击 EXE 在 Windows 上使用
+- 想从首页榜单中浏览并选择漫画下载
+- 想将项目进一步打包、分发或二次开发
 
-## ✨ 2.0 主要特性
+## 功能特性
 
-- **🖥️ 图形界面**：支持粘贴链接、查看日志、按钮式下载操作
-- **🏠 首页发现**：可直接浏览人气排行、近期更新、热门更新和最新上架
-- **⏯️ 暂停/恢复下载**：结合断点续传，长任务更稳
-- **⚡ 高速并发下载**：支持章节和图片双重并发
-- **🔄 智能代理池**：自动获取和验证免费代理
-- **📊 实时进度条**：可视化下载进度
-- **💾 断点续传**：自动跳过已下载内容，支持恢复未完成任务
-- **🛡️ 错误重试**：智能重试机制提高成功率
-- **🧭 多种入口链接**：支持 `manga/...` 详情页和 `chapterlist/...` 目录页
-- **🎯 灵活配置**：丰富的命令行参数与 GUI 控件
+- 图形界面启动与下载
+- 命令行批量下载漫画章节
+- 支持 `manga/...` 详情页、`chapterlist/...` 目录页、章节页链接
+- 支持从指定章节开始下载
+- 章节与图片双层并发下载
+- 自动跳过已下载内容，支持断点续传
+- 支持首页榜单抓取与直接下载
+- 支持可选代理池，适合网络不稳定场景
+- 支持进度条显示与日志输出
+- 支持打包为独立 Windows 可执行文件
 
-## 📦 安装依赖
+## 项目结构
+
+```text
+Comic/
+├── build_exe.ps1        # PowerShell 打包脚本
+├── comic_gui.py         # 图形界面主程序
+├── comic_gui.spec       # PyInstaller 打包配置
+├── create_release.ps1   # 生成发布目录与压缩包
+├── downcomic.py         # 命令行下载核心
+├── make_icon.py         # PNG 转 ICO 工具
+├── README.md            # 项目说明
+├── requirements.txt     # Python 依赖
+├── run_gui.py           # GUI 启动入口
+├── version_info.txt     # Windows EXE 版本信息
+├── release/             # 发布产物目录
+└── [漫画名称]/          # 下载后的漫画目录
+```
+
+## 环境要求
+
+- Python 3.10+ 推荐
+- Windows 10/11 推荐用于 GUI 与 EXE 打包
+- 需要可访问目标站点及相关资源
+- 图形界面依赖 `tkinter`（Windows 下通常随 Python 自带）
+
+## 安装
+
+### 1. 克隆项目
 
 ```bash
-# 确保虚拟环境已激活
+git clone https://github.com/Leisurely-Cloud/Comic.git
+cd Comic
+```
+
+### 2. 安装依赖
+
+```bash
 pip install -r requirements.txt
 ```
 
-## 🪟 打包为 EXE
+依赖列表：
 
-这个项目可以直接打包成一个独立的 Windows 可执行文件。
+- `requests`
+- `beautifulsoup4`
+- `tqdm`
+- `lxml`
+- `pillow`
 
-### 1. 安装打包工具
+## 快速开始
 
-```bash
-pip install pyinstaller
-```
-
-### 2. 一键打包
-
-在项目根目录运行：
-
-```bash
-.\build_exe.ps1
-```
-
-脚本会自动：
-- 使用 `comic_gui.spec` 打包
-- 自动创建新的构建输出目录，避免被旧 exe 占用
-- 在构建结束时打印 `漫画下载器.exe` 的实际生成路径
-
-### 3. 手动打包命令
-
-如果你不想用批处理脚本，也可以直接运行：
-
-```bash
-pyinstaller --clean --noconfirm comic_gui.spec
-```
-
-### 4. 打包结果
-
-生成后的文件位置会在脚本运行结束后显示，默认会放在新的构建输出目录里，例如：
-
-```text
-dist_build/20260405-021530/漫画下载器.exe
-```
-
-双击即可启动图形界面，不需要再手动运行 Python 脚本。
-
-### 5. 说明
-
-- 当前使用 `run_gui.py` 作为入口，会先检查运行所需模块，再启动 GUI
-- 打包后的 `.exe` 会跳过依赖检查，直接进入图形界面
-- 打包后默认是 `windowed` 模式，不会弹出黑色控制台窗口
-- 如果项目根目录存在 `app.ico`，打包时会自动作为应用图标写入 exe
-- 如果 `app.ico` 不是合法的 ICO 格式，打包时会自动忽略该图标，不会阻塞生成 exe
-- 程序窗口也会优先读取根目录下的 `app.ico` 作为左上角图标
-- `version_info.txt` 用于写入 exe 的产品名、版本号和文件说明，可按需自行修改
-
-### 6. PNG 转 ICO
-
-如果你手里只有 PNG，可以直接用项目内脚本转换：
-
-```bash
-pip install pillow
-python make_icon.py
-```
-
-默认会把根目录下的 `icon.png` 转成 `app.ico`。
-
-也可以手动指定输入和输出：
-
-```bash
-python make_icon.py my_icon.png app.ico
-```
-
-### 7. 整理发布目录
-
-如果你想把“给别人发送的成品”和源码目录分开，可以运行：
-
-```bash
-.\create_release.ps1
-```
-
-脚本会根据 `version_info.txt` 中的版本号，在 `release/` 下生成带版本号的发布目录和 zip 包：
-- `漫画下载器.exe`
-- `使用说明.txt`
-- `漫画下载器-v2.0.0/`
-- `comic-downloader-v2.0.0-windows.zip`
-
-## 🎯 使用方法
-
-### 图形界面
+### 图形界面启动
 
 ```bash
 python run_gui.py
 ```
 
-也可以直接双击发布包里的 `漫画下载器.exe`。
+说明：
 
-- 支持粘贴 `baozimh.org` 的详情页或目录页链接
-- 支持在“首页发现”里先浏览再下载
-- 支持暂停、恢复、停止和日志查看
+- 启动器会先检查依赖
+- 非打包环境下会尝试提示缺失依赖
+- 打包后的 EXE 会直接进入图形界面
 
-### 基本用法
+### 命令行下载
+
+下载整部漫画：
+
 ```bash
-# 下载整个漫画
 python downcomic.py "https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi"
+```
 
-# 也支持直接传首页详情页链接
+也支持直接传详情页链接：
+
+```bash
 python downcomic.py "https://baozimh.org/manga/dafengdagengren-chuyingshe"
+```
 
-# 从指定章节开始下载
+从指定章节开始下载：
+
+```bash
 python downcomic.py "https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi" --start 10
 ```
 
-### 高级用法
+## 使用示例
+
+### 常用命令
+
+启用代理池：
+
 ```bash
-# 启用代理池（适合网络环境差的情况）
 python downcomic.py "URL" --proxy
+```
 
-# 调整并发数（默认都是5）
+调整章节与图片并发数：
+
+```bash
 python downcomic.py "URL" --concurrent 3 --image-concurrent 4
+```
 
-# 禁用进度条（适合日志记录）
+关闭进度条：
+
+```bash
 python downcomic.py "URL" --no-progress
+```
 
-# 抓取首页“人气排行”前 5 条
+### 首页榜单抓取
+
+抓取首页“人气排行”前 5 条：
+
+```bash
 python downcomic.py --list-homepage --homepage-section rank --homepage-limit 5
+```
 
-# 抓取首页“近期更新”，并以 JSON 输出名称、封面、详情页、目录页、最近章节等信息
+以 JSON 输出首页结果：
+
+```bash
 python downcomic.py --list-homepage --homepage-section recent --homepage-limit 5 --homepage-json
+```
 
-# 直接下载首页“人气排行”中的第 1 部漫画
+直接下载首页筛选结果中的第 1 部漫画：
+
+```bash
 python downcomic.py --homepage-section rank --homepage-limit 5 --homepage-download 1
 ```
 
-## ⚙️ 参数说明
+## 命令行参数
 
 | 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--start` | 从第几章开始下载 | 从头开始 |
-| `--concurrent` | 章节并发下载数 | 5 |
-| `--image-concurrent` | 每章节图片并发数 | 5 |
+| --- | --- | --- |
+| `url` | 漫画目录页、详情页或章节页链接 | 无 |
+| `--start` | 从指定章节序号开始下载 | 从头开始 |
+| `--concurrent` | 最大章节并发数 | `5` |
+| `--image-concurrent` | 每章节图片最大并发数 | `5` |
 | `--proxy` | 启用代理池 | 关闭 |
-| `--no-progress` | 禁用进度条 | 显示 |
-| `--list-homepage` | 在线抓取首页榜单/近期更新列表 | 关闭 |
+| `--no-progress` | 禁用进度条 | 关闭 |
+| `--list-homepage` | 抓取并输出首页漫画列表 | 关闭 |
 | `--homepage-section` | 首页分区筛选：`all/recent/hot-update/rank/new` | `all` |
-| `--homepage-limit` | 首页结果数量限制 | 10 |
-| `--homepage-json` | 首页结果以 JSON 输出 | 关闭 |
-| `--homepage-download` | 下载筛选后首页列表中的第 N 项 | 不启用 |
+| `--homepage-limit` | 首页结果数量限制 | `10` |
+| `--homepage-json` | 以 JSON 格式输出首页结果 | 关闭 |
+| `--homepage-download` | 下载筛选结果中的第 N 项 | 不启用 |
 
-## 🕸️ 首页抓取说明
+## 首页分区说明
 
-脚本现在支持直接从 `https://baozimh.org/` 抓取这些首页分区：
+当前支持抓取以下首页内容：
 
 - `recent`：近期更新
 - `hot-update`：热门更新
 - `rank`：人气排行
 - `new`：最新上架
 
-每条结果会尽量输出这些字段：
+输出结果通常包含：
 
 - 漫画名称
-- 封面图片地址
-- 详情页链接（`/manga/...`）
-- 目录页链接（`/chapterlist/...`）
-- 最近更新章节文案（仅“近期更新”分区）
-- 更新时间（仅“近期更新”分区）
+- 封面地址
+- 详情页链接
+- 目录页链接
+- 最近章节信息
+- 更新时间
 
-抓到的 `详情页` 或 `目录页` 都可以直接继续喂给下载命令，例如：
+抓到的详情页或目录页都可以继续传给下载命令。
+
+## 下载输出说明
+
+下载后的漫画会保存在项目根目录下，以漫画名自动创建目录，例如：
+
+```text
+大奉打更人/
+├── 001_章节名/
+│   ├── 001.webp
+│   ├── 002.webp
+│   └── ...
+└── 002_章节名/
+    └── ...
+```
+
+命名特点：
+
+- 自动清理非法文件名字符
+- 章节目录带顺序编号，便于排序
+- 已下载图片会自动跳过，支持重复执行恢复下载
+
+## 打包为 Windows EXE
+
+项目已包含完整的 PyInstaller 打包配置。
+
+### 安装打包工具
 
 ```bash
-python downcomic.py "https://baozimh.org/manga/wuliandianfeng-pikapi"
-python downcomic.py "https://baozimh.org/chapterlist/wuliandianfeng-pikapi"
+pip install pyinstaller
 ```
 
-## 🚀 性能优化亮点
+### 一键打包
 
-### 1. **并发下载系统**
-- **25倍速度提升**：从串行下载改为5×5并发
-- **智能调度**：ThreadPoolExecutor管理任务队列
-- **资源控制**：防止过度并发导致封IP
+```powershell
+.\build_exe.ps1
+```
 
-### 2. **网络优化**
-- **连接复用**：HTTP连接池减少握手开销
-- **代理轮换**：自动切换代理避免IP封禁
-- **智能重试**：失败后自动重试，提高成功率
+该脚本会：
 
-### 3. **用户体验**
-- **实时进度**：tqdm进度条显示下载状态
-- **断点续传**：自动检测已下载文件
-- **友好提示**：清晰的错误信息和状态报告
+- 使用 `comic_gui.spec` 打包
+- 自动创建新的构建输出目录
+- 输出最终 `漫画下载器.exe` 的生成路径
 
-## 💡 使用建议
+### 手动打包
 
-### 网络环境好
 ```bash
-python downcomic.py "URL" --concurrent 5 --image-concurrent 5
+pyinstaller --clean --noconfirm comic_gui.spec
 ```
 
-### 网络环境差
+### 打包说明
+
+- 入口为 `run_gui.py`
+- 打包后默认使用窗口模式，不弹出控制台
+- 若项目根目录存在 `app.ico`，会优先作为程序图标
+- `version_info.txt` 用于写入 EXE 的版本信息与产品信息
+
+## 生成发布包
+
+如果需要整理一个可直接分发给他人的版本，可以执行：
+
+```powershell
+.\create_release.ps1
+```
+
+脚本会根据 `version_info.txt` 中的版本号，生成发布目录与压缩包，例如：
+
+- `漫画下载器.exe`
+- `使用说明.txt`
+- `漫画下载器-v2.0.0/`
+- `comic-downloader-v2.0.0-windows.zip`
+
+## 图标生成
+
+如果你只有 PNG 图标，可以使用内置脚本转换为 ICO：
+
 ```bash
-python downcomic.py "URL" --proxy --concurrent 3 --image-concurrent 3
+pip install pillow
+python make_icon.py
 ```
 
-### 服务器限制严格
+指定输入输出文件：
+
 ```bash
-python downcomic.py "URL" --concurrent 2 --image-concurrent 2
+python make_icon.py my_icon.png app.ico
 ```
 
-## 📁 文件结构
+## 性能与实现亮点
 
-```
-Comic/
-├── build_exe.ps1        # PowerShell 打包脚本
-├── comic_gui.py         # 图形界面主程序
-├── comic_gui.spec       # PyInstaller 打包配置
-├── create_release.ps1   # 整理发布目录
-├── run_gui.py           # GUI 启动入口
-├── make_icon.py         # PNG 转 ICO 脚本
-├── version_info.txt     # EXE 版本信息
-├── downcomic.py         # 下载核心逻辑
-├── requirements.txt     # 依赖列表
-├── README.md            # 使用说明
-├── release/             # 发布目录与 zip 包
-└── [漫画名称]/          # 下载的漫画文件夹
-    ├── 001_章节名/
-    │   ├── 001.webp
-    │   ├── 002.webp
-    │   └── ...
-    └── 002_章节名/
-        └── ...
-```
+- 基于 `ThreadPoolExecutor` 的章节并发与图片并发下载
+- 基于 `requests.Session` 的连接复用
+- 失败自动重试，提高下载成功率
+- 可选代理池抓取与验证机制
+- 自动识别首页漫画卡片与章节列表
+- 自动跳过已下载文件，适合中断后继续执行
 
-## ⚠️ 注意事项
-
-1. **尊重版权**：仅下载有授权的漫画内容
-2. **合理使用**：避免过度频繁的请求
-3. **网络环境**：根据网络状况调整并发参数
-4. **存储空间**：确保有足够的磁盘空间
-
-## 🔧 故障排除
+## 故障排查
 
 ### 下载失败
-- 检查网络连接
-- 尝试启用 `--proxy` 参数
-- 降低并发参数
 
-### 进度条不显示
-- 某些终端可能不支持，使用 `--no-progress` 参数
+可依次检查：
 
-### 代理获取失败
-- 检查网络是否能访问GitHub
-- 代理源可能暂时不可用，稍后再试
+- 网络是否正常
+- 目标站点是否可访问
+- 是否需要启用 `--proxy`
+- 是否需要降低并发参数
 
-## 📞 支持
+示例：
 
-如有问题，请检查网络连接和参数设置，或尝试调整并发数。
+```bash
+python downcomic.py "URL" --proxy --concurrent 2 --image-concurrent 2
+```
+
+### 进度条显示异常
+
+某些终端环境下进度条可能显示不完整，可以关闭：
+
+```bash
+python downcomic.py "URL" --no-progress
+```
+
+### GUI 无法启动
+
+请确认：
+
+- Python 环境可用
+- `tkinter` 已安装
+- 已正确安装 `requirements.txt` 中的依赖
+
+### 代理池不可用
+
+免费代理具有不稳定性，若代理源失效或可用率较低，可暂时关闭代理模式直接下载。
+
+## 开发说明
+
+如果你打算进行二次开发，建议优先查看：
+
+- `downcomic.py`：下载逻辑、参数处理、首页抓取
+- `comic_gui.py`：图形界面逻辑
+- `run_gui.py`：启动入口与依赖检查
+- `comic_gui.spec`：PyInstaller 打包配置
+
+## 免责声明
+
+本项目仅用于技术学习、研究与个人测试用途。请在遵守目标站点服务条款、版权规定及所在地法律法规的前提下使用本项目。因不当使用造成的任何后果，由使用者自行承担。
+
+## License
+
+当前仓库未附带明确开源许可证。若你准备公开分发、接受外部贡献或发布到更大范围，建议补充 `LICENSE` 文件后再正式对外发布。
