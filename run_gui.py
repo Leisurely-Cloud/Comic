@@ -36,7 +36,7 @@ def check_requirements():
         ('beautifulsoup4', 'bs4'),
         ('tqdm', 'tqdm'),
         ('lxml', 'lxml'),
-        ('pillow', 'PIL')
+        ('pillow', 'PIL'),
     ]
     
     missing_packages = []
