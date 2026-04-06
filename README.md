@@ -45,7 +45,7 @@
 - 已下载漫画可导出为章节级 CBZ，并写入 `ComicInfo.xml`
 - 本地漫画库浏览、搜索、封面回显、更新检查
 - 可选手动代理与站点连通性测试
-- 自带 EXE 打包脚本与发布压缩包生成脚本
+- 自带 EXE 打包脚本与发布目录生成脚本
 
 ## 项目结构
 
@@ -54,15 +54,16 @@ Comic/
 ├── build_exe.ps1          # PyInstaller 一键打包脚本
 ├── comic_gui.py           # GUI 主程序
 ├── comic_gui.spec         # PyInstaller 配置
-├── create_release.ps1     # 发布目录与压缩包生成脚本
+├── create_release.ps1     # 发布目录生成脚本
 ├── downcomic.py           # 命令行下载器（当前以包子漫画为主）
 ├── LICENSE                # MIT License
 ├── README.md              # 项目说明
 ├── requirements.txt       # Python 依赖
 ├── run_gui.py             # GUI 启动入口
 ├── site_adapters.py       # 多站点适配层
+├── storage_paths.py       # 默认下载目录与运行时状态路径
 ├── version_info.txt       # Windows EXE 版本信息
-└── release/               # 本地生成的发布目录，用于上传 GitHub Releases
+└── release/               # 本地生成的 EXE 发布目录，用于上传 GitHub Releases
 ```
 
 ## 环境要求
@@ -92,6 +93,7 @@ pip install -r requirements.txt
 - `beautifulsoup4`
 - `tqdm`
 - `lxml`
+- `urllib3`
 - `pillow`
 
 ## 快速开始
@@ -114,7 +116,7 @@ python run_gui.py
 
 - 包子漫画、拷贝漫画支持首页分区浏览
 - 漫画柜当前建议直接搜索或粘贴 URL
-- “本地已下载”分区会扫描工作目录下已下载的漫画，并支持搜索和检查更新
+- “本地已下载”分区会优先扫描默认下载目录，并兼容读取旧项目目录中的历史下载内容
 
 ### 手动代理与连通性测试
 
@@ -256,8 +258,8 @@ pyinstaller --clean --noconfirm comic_gui.spec
 
 脚本会根据 `version_info.txt` 中的版本号生成本地发布目录，典型产物如下：
 
-- `release/漫画下载器-v2.0.2/漫画下载器.exe`
-- `release/漫画下载器-v2.0.2/使用说明.txt`
+- `release/漫画下载器-v<版本号>/漫画下载器.exe`
+- `release/漫画下载器-v<版本号>/使用说明.txt`
 
 这些发布文件更适合保存在本地，并按需上传 EXE 到 GitHub Releases，而不是直接放在仓库目录里版本化。
 
