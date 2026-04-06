@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 0, 0),
-    prodvers=(2, 0, 0, 0),
+    filevers=(2, 0, 1, 0),
+    prodvers=(2, 0, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,11 +17,11 @@ VSVersionInfo(
         [
         StringStruct('CompanyName', 'Comic Tools'),
         StringStruct('FileDescription', '漫画下载器图形界面'),
-        StringStruct('FileVersion', '2.0.0'),
+        StringStruct('FileVersion', '2.0.1'),
         StringStruct('InternalName', '漫画下载器'),
         StringStruct('OriginalFilename', '漫画下载器.exe'),
         StringStruct('ProductName', '漫画下载器'),
-        StringStruct('ProductVersion', '2.0.0')
+        StringStruct('ProductVersion', '2.0.1')
         ])
       ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
