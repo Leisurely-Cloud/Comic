@@ -254,13 +254,12 @@ pyinstaller --clean --noconfirm comic_gui.spec
 .\create_release.ps1
 ```
 
-脚本会根据 `version_info.txt` 中的版本号生成本地发布目录和压缩包，典型产物如下：
+脚本会根据 `version_info.txt` 中的版本号生成本地发布目录，典型产物如下：
 
 - `release/漫画下载器-v2.0.2/漫画下载器.exe`
 - `release/漫画下载器-v2.0.2/使用说明.txt`
-- `release/comic-downloader-v2.0.2-windows.zip`
 
-这些发布文件更适合保存在本地，并上传到 GitHub Releases，而不是直接放在仓库目录里版本化。
+这些发布文件更适合保存在本地，并按需上传 EXE 到 GitHub Releases，而不是直接放在仓库目录里版本化。
 
 ## 故障排查
 

@@ -17,8 +17,6 @@ $releaseDirName = "漫画下载器-v$version"
 $releaseDir = Join-Path $releaseRoot $releaseDirName
 $targetExe = Join-Path $releaseDir "漫画下载器.exe"
 $readmeFile = Join-Path $releaseDir "使用说明.txt"
-$zipName = "comic-downloader-v$version-windows.zip"
-$zipPath = Join-Path $releaseRoot $zipName
 $runId = Get-Date -Format "yyyyMMdd-HHmmss"
 
 $exeNames = @("漫画下载器.exe", "comic-downloader.exe", "漫画下载器_v2.exe")
@@ -48,11 +46,6 @@ if (Test-Path $releaseDir) {
     $releaseDir = Join-Path $releaseRoot "$releaseDirName-$runId"
     $targetExe = Join-Path $releaseDir "漫画下载器.exe"
     $readmeFile = Join-Path $releaseDir "使用说明.txt"
-}
-
-if (Test-Path $zipPath) {
-    $zipName = "comic-downloader-v$version-windows-$runId.zip"
-    $zipPath = Join-Path $releaseRoot $zipName
 }
 
 New-Item -ItemType Directory -Path $releaseDir | Out-Null
@@ -90,9 +83,8 @@ $content = @"
 "@
 
 Set-Content -LiteralPath $readmeFile -Value $content -Encoding UTF8
-Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipPath -Force
 
 Write-Host "[OK] Release folder created." -ForegroundColor Green
 Write-Host "Path: $releaseDir"
 Write-Host "EXE : $targetExe"
-Write-Host "ZIP : $zipPath"
+Write-Host "README: $readmeFile"
