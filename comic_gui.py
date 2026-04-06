@@ -17,6 +17,12 @@ from urllib.parse import urljoin
 from downcomic import (
     HomepageMangaCard, sanitize_filename, proxy_pool, print_lock, unwrap_cover_url
 )
+from storage_paths import (
+    ensure_storage_root_dir,
+    get_legacy_project_root_dir,
+    get_manga_detail_cache_file_path,
+    get_resume_state_file_path,
+)
 from site_adapters import (
     DEFAULT_SITE_KEY,
     MangaDetail,
@@ -55,8 +61,12 @@ class ComicDownloaderGUI:
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
         self.download_state = {}  # 下载状态跟踪
-        self.resume_data_file = "download_resume_data.json"  # 断点续传数据文件
-        self.manga_detail_cache_file = "manga_detail_cache.json"
+        self.storage_root_dir = ensure_storage_root_dir()
+        self.legacy_project_root_dir = get_legacy_project_root_dir(__file__)
+        self.resume_data_file = get_resume_state_file_path()  # 断点续传数据文件
+        self.manga_detail_cache_file = get_manga_detail_cache_file_path()
+        self.legacy_resume_data_file = os.path.join(self.legacy_project_root_dir, "download_resume_data.json")
+        self.legacy_manga_detail_cache_file = os.path.join(self.legacy_project_root_dir, "manga_detail_cache.json")
         self.stop_event = threading.Event()  # 停止事件
         self.pause_event = threading.Event()  # 暂停事件
         self.pause_event.set()  # 默认不暂停
@@ -2971,8 +2981,14 @@ class ComicDownloaderGUI:
 
     def load_manga_detail_cache(self):
         try:
-            if os.path.exists(self.manga_detail_cache_file):
-                with open(self.manga_detail_cache_file, 'r', encoding='utf-8') as f:
+            candidate_files = [self.manga_detail_cache_file]
+            if self.legacy_manga_detail_cache_file not in candidate_files:
+                candidate_files.append(self.legacy_manga_detail_cache_file)
+
+            for candidate_file in candidate_files:
+                if not os.path.exists(candidate_file):
+                    continue
+                with open(candidate_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, dict):
                         return data
@@ -3020,7 +3036,26 @@ class ComicDownloaderGUI:
             return None
 
     def get_download_workspace_dir(self):
-        return os.path.dirname(os.path.abspath(__file__))
+        return self.storage_root_dir
+
+    def get_legacy_download_workspace_dir(self):
+        return self.legacy_project_root_dir
+
+    def get_library_search_roots(self):
+        roots = []
+        seen = set()
+
+        for candidate in (self.get_download_workspace_dir(), self.get_legacy_download_workspace_dir()):
+            if not candidate:
+                continue
+            resolved = os.path.abspath(candidate)
+            normalized = os.path.normcase(resolved)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            roots.append(resolved)
+
+        return roots
 
     def get_manga_metadata_path(self, root_dir):
         return os.path.join(root_dir, self.library_metadata_file_name)
@@ -3443,64 +3478,70 @@ class ComicDownloaderGUI:
         return self.enrich_local_library_entry_identity(entry, preferred_site_key=site_key)
 
     def iter_local_library_entries(self, site_key=""):
-        base_dir = self.get_download_workspace_dir()
         entries = []
         excluded_dirs = self.get_library_scan_excluded_dirs()
+        seen_root_dirs = set()
 
-        try:
-            dir_entries = list(os.scandir(base_dir))
-        except Exception:
-            return entries
-
-        for entry in dir_entries:
-            if not entry.is_dir():
-                continue
-            if entry.name in excluded_dirs:
-                continue
-            if entry.name.startswith(".") and not self.looks_like_manga_download_dir(entry.path):
+        for base_dir in self.get_library_search_roots():
+            try:
+                dir_entries = list(os.scandir(base_dir))
+            except Exception:
                 continue
 
-            disk_has_chapter_dirs = self.looks_like_manga_download_dir(entry.path)
-            metadata = self.load_manga_library_metadata(entry.path)
-            if metadata:
+            for entry in dir_entries:
+                if not entry.is_dir():
+                    continue
+                if entry.name in excluded_dirs:
+                    continue
+                if entry.name.startswith(".") and not self.looks_like_manga_download_dir(entry.path):
+                    continue
+
+                normalized_root_dir = os.path.normcase(os.path.abspath(entry.path))
+                if normalized_root_dir in seen_root_dirs:
+                    continue
+                seen_root_dirs.add(normalized_root_dir)
+
+                disk_has_chapter_dirs = self.looks_like_manga_download_dir(entry.path)
+                metadata = self.load_manga_library_metadata(entry.path)
+                if metadata:
+                    if not disk_has_chapter_dirs:
+                        continue
+                    metadata_site_key = (metadata.get("site_key") or "").strip()
+                    if site_key and metadata_site_key and metadata_site_key != site_key:
+                        continue
+                    fallback_site_key = metadata_site_key or site_key
+                    fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=fallback_site_key)
+                    if fallback is not None:
+                        metadata["site_key"] = metadata_site_key or fallback.get("site_key") or ""
+                        metadata["site_name"] = metadata.get("site_name") or fallback.get("site_name") or self.current_adapter.display_name
+                        metadata["downloaded_chapters"] = list(fallback.get("downloaded_chapters") or [])
+                        metadata["downloaded_chapter_count"] = int(fallback.get("downloaded_chapter_count") or 0)
+                        metadata["last_downloaded_chapter_title"] = fallback.get("last_downloaded_chapter_title") or metadata.get("last_downloaded_chapter_title") or ""
+                        metadata["last_downloaded_chapter_order"] = fallback.get("last_downloaded_chapter_order")
+                        metadata["saved_at"] = metadata.get("saved_at") or fallback.get("saved_at") or metadata.get("created_at") or ""
+                        metadata["total_chapters"] = max(
+                            int(metadata.get("total_chapters") or 0),
+                            int(metadata.get("downloaded_chapter_count") or 0),
+                        )
+
+                    if site_key and not metadata_site_key:
+                        fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=site_key)
+                        if fallback is not None:
+                            metadata["site_key"] = fallback.get("site_key") or metadata.get("site_key") or ""
+                            metadata["site_name"] = fallback.get("site_name") or metadata.get("site_name") or ""
+                        else:
+                            continue
+
+                    finalized_metadata = self.enrich_local_library_entry_identity(metadata, preferred_site_key=site_key)
+                    if finalized_metadata is not None:
+                        entries.append(finalized_metadata)
+                    continue
+
                 if not disk_has_chapter_dirs:
                     continue
-                metadata_site_key = (metadata.get("site_key") or "").strip()
-                if site_key and metadata_site_key and metadata_site_key != site_key:
-                    continue
-                fallback_site_key = metadata_site_key or site_key
-                fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=fallback_site_key)
+                fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=site_key)
                 if fallback is not None:
-                    metadata["site_key"] = metadata_site_key or fallback.get("site_key") or ""
-                    metadata["site_name"] = metadata.get("site_name") or fallback.get("site_name") or self.current_adapter.display_name
-                    metadata["downloaded_chapters"] = list(fallback.get("downloaded_chapters") or [])
-                    metadata["downloaded_chapter_count"] = int(fallback.get("downloaded_chapter_count") or 0)
-                    metadata["last_downloaded_chapter_title"] = fallback.get("last_downloaded_chapter_title") or metadata.get("last_downloaded_chapter_title") or ""
-                    metadata["last_downloaded_chapter_order"] = fallback.get("last_downloaded_chapter_order")
-                    metadata["saved_at"] = metadata.get("saved_at") or fallback.get("saved_at") or metadata.get("created_at") or ""
-                    metadata["total_chapters"] = max(
-                        int(metadata.get("total_chapters") or 0),
-                        int(metadata.get("downloaded_chapter_count") or 0),
-                    )
-
-                if site_key and not metadata_site_key:
-                    fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=site_key)
-                    if fallback is not None:
-                        metadata["site_key"] = fallback.get("site_key") or metadata.get("site_key") or ""
-                        metadata["site_name"] = fallback.get("site_name") or metadata.get("site_name") or ""
-                    else:
-                        continue
-
-                finalized_metadata = self.enrich_local_library_entry_identity(metadata, preferred_site_key=site_key)
-                if finalized_metadata is not None:
-                    entries.append(finalized_metadata)
-                continue
-
-            if not disk_has_chapter_dirs:
-                continue
-            fallback = self.build_local_library_entry_from_fallback(entry.path, site_key=site_key)
-            if fallback is not None:
-                entries.append(fallback)
+                    entries.append(fallback)
 
         def sort_key(item):
             saved_at = str(item.get("saved_at") or item.get("created_at") or "")
@@ -3613,38 +3654,37 @@ class ComicDownloaderGUI:
         if resume_matches and root_dir and os.path.isdir(root_dir):
             return root_dir
 
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidate_roots = self.get_library_search_roots()
         if resume_matches:
             resume_title = (resume_state.get("manga_title") or "").strip()
             if resume_title:
-                resume_dir = os.path.join(script_dir, sanitize_filename(resume_title))
-                if os.path.isdir(resume_dir) and self.looks_like_manga_download_dir(resume_dir):
-                    return resume_dir
+                for candidate_root in candidate_roots:
+                    resume_dir = os.path.join(candidate_root, sanitize_filename(resume_title))
+                    if os.path.isdir(resume_dir) and self.looks_like_manga_download_dir(resume_dir):
+                        return resume_dir
 
             resume_dt = self.parse_resume_timestamp(resume_state.get("timestamp"))
             if resume_dt is not None:
                 candidates = []
-                excluded_dirs = {
-                    "__pycache__", ".git", ".venv", "build", "build_pyinstaller",
-                    "dist", "dist_build", "release",
-                }
-                try:
-                    for entry in os.scandir(script_dir):
-                        if not entry.is_dir():
-                            continue
-                        if entry.name in excluded_dirs or entry.name.startswith("."):
-                            continue
-                        if not self.looks_like_manga_download_dir(entry.path):
-                            continue
-                        try:
-                            modified_at = datetime.fromtimestamp(entry.stat().st_mtime)
-                        except Exception:
-                            continue
-                        delta_seconds = abs((modified_at - resume_dt).total_seconds())
-                        if delta_seconds <= 20 * 60:
-                            candidates.append((delta_seconds, entry.path))
-                except Exception:
-                    candidates = []
+                excluded_dirs = self.get_library_scan_excluded_dirs()
+                for candidate_root in candidate_roots:
+                    try:
+                        for entry in os.scandir(candidate_root):
+                            if not entry.is_dir():
+                                continue
+                            if entry.name in excluded_dirs or entry.name.startswith("."):
+                                continue
+                            if not self.looks_like_manga_download_dir(entry.path):
+                                continue
+                            try:
+                                modified_at = datetime.fromtimestamp(entry.stat().st_mtime)
+                            except Exception:
+                                continue
+                            delta_seconds = abs((modified_at - resume_dt).total_seconds())
+                            if delta_seconds <= 20 * 60:
+                                candidates.append((delta_seconds, entry.path))
+                    except Exception:
+                        continue
 
                 if candidates:
                     candidates.sort(key=lambda item: item[0])
@@ -3652,9 +3692,10 @@ class ComicDownloaderGUI:
 
         cached_detail = self.get_cached_manga_detail(adapter, source_url)
         if cached_detail and cached_detail.title:
-            cached_dir = os.path.join(script_dir, sanitize_filename(cached_detail.title))
-            if os.path.isdir(cached_dir) and self.looks_like_manga_download_dir(cached_dir):
-                return cached_dir
+            for candidate_root in candidate_roots:
+                cached_dir = os.path.join(candidate_root, sanitize_filename(cached_detail.title))
+                if os.path.isdir(cached_dir) and self.looks_like_manga_download_dir(cached_dir):
+                    return cached_dir
 
         return None
 
@@ -3797,9 +3838,8 @@ class ComicDownloaderGUI:
             )
                 
             # 4. 设置保存目录
-            script_dir = os.path.dirname(os.path.abspath(__file__))
             safe_manga_title = sanitize_filename(str(manga_title))
-            root_dir = os.path.join(script_dir, f"{safe_manga_title}")
+            root_dir = os.path.join(self.get_download_workspace_dir(), safe_manga_title)
             os.makedirs(root_dir, exist_ok=True)
             self.active_manga_title = str(manga_title)
             self.active_download_root_dir = root_dir
@@ -4026,8 +4066,14 @@ class ComicDownloaderGUI:
     def load_download_state(self):
         """加载下载状态"""
         try:
-            if os.path.exists(self.resume_data_file):
-                with open(self.resume_data_file, 'r', encoding='utf-8') as f:
+            candidate_files = [self.resume_data_file]
+            if self.legacy_resume_data_file not in candidate_files:
+                candidate_files.append(self.legacy_resume_data_file)
+
+            for candidate_file in candidate_files:
+                if not os.path.exists(candidate_file):
+                    continue
+                with open(candidate_file, 'r', encoding='utf-8') as f:
                     state = json.load(f)
                     if isinstance(state, dict):
                         normalized = False
@@ -4051,8 +4097,9 @@ class ComicDownloaderGUI:
     def clear_download_state(self):
         """清除下载状态"""
         try:
-            if os.path.exists(self.resume_data_file):
-                os.remove(self.resume_data_file)
+            for candidate_file in {self.resume_data_file, self.legacy_resume_data_file}:
+                if os.path.exists(candidate_file):
+                    os.remove(candidate_file)
         except Exception as e:
             self.log_message(f"清除下载状态时出错: {str(e)}", "warning")
 

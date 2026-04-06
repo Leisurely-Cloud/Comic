@@ -3,7 +3,7 @@ Set-Location -LiteralPath $PSScriptRoot
 
 $versionFile = Join-Path $PSScriptRoot "version_info.txt"
 $releaseRoot = Join-Path $PSScriptRoot "release"
-$version = "2.0.1"
+$version = "2.0.2"
 
 if (Test-Path $versionFile) {
     $versionContent = Get-Content -LiteralPath $versionFile -Raw
@@ -75,7 +75,9 @@ $content = @"
 - 漫画柜：搜索、手动链接下载
 
 补充说明
-- 下载内容默认保存在程序所在目录
+- 下载内容默认保存在用户目录下的 Downloads\ComicDownloads
+- 如果系统没有 Downloads 目录，则会回退到用户主目录下的 ComicDownloads
+- 如需自定义目录，可设置环境变量 COMIC_DOWNLOAD_DIR
 - 下载完成后可直接打包 ZIP，也可在本地漫画库导出 CBZ
 - 支持详情页链接、目录页链接和首页发现列表下载
 - 如网络不稳定，可填写 HTTP/HTTPS/SOCKS5 代理并测试连接

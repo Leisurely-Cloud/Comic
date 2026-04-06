@@ -204,10 +204,17 @@ python downcomic.py --homepage-section rank --homepage-limit 5 --homepage-downlo
 
 ## 本地文件说明
 
-运行 GUI 后，项目目录下可能出现以下运行时文件：
+默认情况下，下载内容和运行时缓存不会写到项目目录，而是写到：
 
-- `download_resume_data.json`：断点续传信息
-- `manga_detail_cache.json`：漫画详情缓存
+- `C:\Users\<用户名>\Downloads\ComicDownloads\`
+- 如果系统没有 `Downloads` 目录，则回退到 `C:\Users\<用户名>\ComicDownloads\`
+- 也可以通过环境变量 `COMIC_DOWNLOAD_DIR` 自定义保存目录
+- 程序会在首次下载或写入缓存时自动创建该目录，以及其中的 `.comic_state/` 子目录
+
+其中常见的本地文件包括：
+
+- `.comic_state/download_resume_data.json`：断点续传信息
+- `.comic_state/manga_detail_cache.json`：漫画详情缓存
 - `[漫画目录]/元数据.json`：单部漫画的本地库元数据
 - `[漫画名].zip`：下载完成后导出的整部漫画 ZIP
 - `[漫画名]_CBZ/`：章节级 CBZ 导出目录
@@ -249,9 +256,9 @@ pyinstaller --clean --noconfirm comic_gui.spec
 
 脚本会根据 `version_info.txt` 中的版本号生成本地发布目录和压缩包，典型产物如下：
 
-- `release/漫画下载器-v2.0.1/漫画下载器.exe`
-- `release/漫画下载器-v2.0.1/使用说明.txt`
-- `release/comic-downloader-v2.0.1-windows.zip`
+- `release/漫画下载器-v2.0.2/漫画下载器.exe`
+- `release/漫画下载器-v2.0.2/使用说明.txt`
+- `release/comic-downloader-v2.0.2-windows.zip`
 
 这些发布文件更适合保存在本地，并上传到 GitHub Releases，而不是直接放在仓库目录里版本化。
 

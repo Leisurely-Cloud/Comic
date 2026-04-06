@@ -11,5 +11,13 @@ release/
 *.zip
 app.ico
 download_resume_data.json
+manga_detail_cache.json
+元数据.json
+core_mhgui.js
+*_CBZ/
+*.cbz
+八女帝全背叛，重生悔到肠断/
+霸道总裁爱上我/
+卑鄙的婚姻/
 大奉打更人/
 全球高武/

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import logging
 from requests.adapters import HTTPAdapter
+from storage_paths import ensure_storage_root_dir
 
 # 🔒 打印锁，防止多线程打印错乱
 print_lock = threading.Lock()
@@ -1033,10 +1034,9 @@ if __name__ == "__main__":
         exit(0)
     
     # 5. 设置保存目录
-    # 获取脚本所在目录的绝对路径，确保下载到脚本同级目录
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    storage_root_dir = ensure_storage_root_dir()
     safe_manga_title = sanitize_filename(str(manga_title))
-    root_dir = os.path.join(script_dir, f"{safe_manga_title}")
+    root_dir = os.path.join(storage_root_dir, f"{safe_manga_title}")
     os.makedirs(root_dir, exist_ok=True)
     
     print(f"📂 Saving to: {root_dir}")
