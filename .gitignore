@@ -9,6 +9,7 @@ dist_build/
 release/
 *.pyc
 *.zip
+app.ico
 download_resume_data.json
 大奉打更人/
 全球高武/

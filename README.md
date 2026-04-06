@@ -44,20 +44,18 @@
 
 ```text
 Comic/
-├── app.ico                # 程序图标
 ├── build_exe.ps1          # PyInstaller 一键打包脚本
 ├── comic_gui.py           # GUI 主程序
 ├── comic_gui.spec         # PyInstaller 配置
 ├── create_release.ps1     # 发布目录与压缩包生成脚本
 ├── downcomic.py           # 命令行下载器（当前以包子漫画为主）
 ├── LICENSE                # MIT License
-├── make_icon.py           # PNG 转 ICO 工具
 ├── README.md              # 项目说明
 ├── requirements.txt       # Python 依赖
 ├── run_gui.py             # GUI 启动入口
 ├── site_adapters.py       # 多站点适配层
 ├── version_info.txt       # Windows EXE 版本信息
-└── release/               # 生成后的发布目录与压缩包
+└── release/               # 本地生成的发布目录，用于上传 GitHub Releases
 ```
 
 ## 环境要求
@@ -228,6 +226,7 @@ pip install pyinstaller
 - 调用 `comic_gui.spec`
 - 在 `dist_build/<时间戳>/` 生成构建结果
 - 自动把主程序重命名为 `漫画下载器.exe`
+- 当前没有内置图标文件，默认按无图标方式打包
 
 手动打包：
 
@@ -241,25 +240,13 @@ pyinstaller --clean --noconfirm comic_gui.spec
 .\create_release.ps1
 ```
 
-脚本会根据 `version_info.txt` 中的版本号生成发布目录和压缩包，典型产物如下：
+脚本会根据 `version_info.txt` 中的版本号生成本地发布目录和压缩包，典型产物如下：
 
 - `release/漫画下载器-v2.0.0/漫画下载器.exe`
 - `release/漫画下载器-v2.0.0/使用说明.txt`
 - `release/comic-downloader-v2.0.0-windows.zip`
 
-## 图标生成
-
-如果只有 PNG 图标，可以使用：
-
-```bash
-python make_icon.py
-```
-
-或指定输入输出：
-
-```bash
-python make_icon.py my_icon.png app.ico
-```
+这些发布文件更适合保存在本地，并上传到 GitHub Releases，而不是直接放在仓库目录里版本化。
 
 ## 故障排查
 
