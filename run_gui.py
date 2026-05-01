@@ -11,6 +11,18 @@ def is_frozen_app():
     """判断当前是否运行在 PyInstaller 打包环境中。"""
     return getattr(sys, "frozen", False)
 
+def ensure_utf8_console():
+    """把 stdout/stderr 切到 UTF-8，避免 Windows GBK 控制台遇到 emoji 崩溃。"""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 def check_requirements():
     """检查并安装所需的依赖包"""
     if is_frozen_app():
@@ -61,6 +73,7 @@ def check_requirements():
 
 def main():
     """主函数"""
+    ensure_utf8_console()
     print("🚀 启动漫画下载器图形界面...")
     print("=" * 50)
     

@@ -31,6 +31,19 @@ from site_adapters import (
     get_site_display_names,
     resolve_adapter_from_url,
 )
+from ui_styles import setup_ui_styles
+from pane_layout import PaneLayout
+from connection_utils import (
+    get_connection_route_label as _get_connection_route_label,
+    get_connection_troubleshooting_text as _get_connection_troubleshooting_text,
+    is_site_access_blocked_error as _is_site_access_blocked_error,
+    is_site_unreachable_error as _is_site_unreachable_error,
+)
+from resume_state import (
+    build_failed_chapter_record,
+    get_failed_chapter_numbers_text,
+    normalize_failed_retry_records,
+)
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_completed
 import time
 
@@ -58,6 +71,7 @@ class ComicDownloaderGUI:
         self.executor = None
         self._closing = False
         self._force_exit_scheduled = False
+        self._resize_after_id = None
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
         self.download_state = {}  # 下载状态跟踪
@@ -112,30 +126,33 @@ class ComicDownloaderGUI:
         self.log_flush_job = None
         self.ranking_request_id = 0
         self.max_log_lines = 800
-        self._pane_restore_job = None
-        self._pane_restore_followup_job = None
-        self._window_was_iconic = False
-        self.saved_content_sash = None
-        self.saved_ranking_sash = None
         
         # 创建界面
         self.create_widgets()
+
+        # Pane 布局管理
+        self.pane_layout = PaneLayout(
+            self.root,
+            self.content_pane,
+            self.ranking_pane,
+            is_closing=lambda: self._closing,
+        )
         self.root.after_idle(self.center_window)
         
         # 重定向打印输出到文本框
         self.redirect_output()
         self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
-        self.root.bind("<Unmap>", self.on_window_unmap, add="+")
-        self.root.bind("<Map>", self.on_window_map, add="+")
-        self.root.bind("<Configure>", self.on_window_configure, add="+")
+        self.root.bind("<Unmap>", self.pane_layout.on_window_unmap, add="+")
+        self.root.bind("<Map>", self.pane_layout.on_window_map, add="+")
+        self.root.bind("<Configure>", self._on_resize_configure, add="+")
         self.schedule_ui_task_pump()
         self.schedule_log_flush()
         
         # 检查是否有可恢复的下载
         self.root.after(1000, self.check_resume_download_on_startup)
         self.root.after(300, self.refresh_rankings)
-        self.root.after(250, self.configure_initial_pane_layout)
-        self.root.after(900, self.configure_initial_pane_layout)
+        self.root.after(250, self.pane_layout.configure_initial)
+        self.root.after(900, self.pane_layout.configure_initial)
 
     def center_window(self):
         self.root.update_idletasks()
@@ -150,6 +167,56 @@ class ComicDownloaderGUI:
         x = max((screen_width - width) // 2, 0)
         y = max((screen_height - height) // 2, 0)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _on_resize_configure(self, event=None):
+        if event is not None and event.widget is not self.root:
+            return
+        if self._resize_after_id is not None:
+            try:
+                self.root.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+        else:
+            self._suspend_pane_layout()
+        self._resize_after_id = self.root.after(150, self._on_resize_finished)
+
+    def _on_resize_finished(self):
+        self._resize_after_id = None
+        self._restore_pane_layout()
+        self.pane_layout.on_window_configure()
+
+    def _suspend_pane_layout(self):
+        self._saved_content_panes = []
+        self._saved_ranking_panes = []
+        content_weights = [5, 4]
+        ranking_weights = [5, 2]
+        try:
+            for i, child in enumerate(self.content_pane.winfo_children()):
+                w = content_weights[i] if i < len(content_weights) else 1
+                self._saved_content_panes.append((child, w))
+                self.content_pane.forget(child)
+        except Exception:
+            pass
+        try:
+            for i, child in enumerate(self.ranking_pane.winfo_children()):
+                w = ranking_weights[i] if i < len(ranking_weights) else 1
+                self._saved_ranking_panes.append((child, w))
+                self.ranking_pane.forget(child)
+        except Exception:
+            pass
+
+    def _restore_pane_layout(self):
+        try:
+            for child, weight in self._saved_content_panes:
+                self.content_pane.add(child, weight=weight)
+        except Exception:
+            pass
+        try:
+            for child, weight in self._saved_ranking_panes:
+                self.ranking_pane.add(child, weight=weight)
+        except Exception:
+            pass
+        self.root.after(30, self.pane_layout.schedule_restore)
 
     def center_child_window(self, child, width=None, height=None):
         self.root.update_idletasks()
@@ -311,28 +378,45 @@ class ComicDownloaderGUI:
             suffix += 1
         return archive_path
 
-    def create_zip_archive_for_manga(self, root_dir):
+    def iter_archive_entries(self, root_dir, parent_dir):
+        for current_dir, dir_names, file_names in os.walk(root_dir):
+            dir_names[:] = [
+                dir_name for dir_name in sorted(dir_names)
+                if not self.is_temp_chapter_dir_name(dir_name)
+            ]
+            sorted_file_names = sorted(file_names)
+            relative_dir = os.path.relpath(current_dir, parent_dir).replace("\\", "/")
+            if not dir_names and not sorted_file_names:
+                yield ("dir", current_dir, f"{relative_dir}/")
+            for file_name in sorted_file_names:
+                file_path = os.path.join(current_dir, file_name)
+                archive_name = os.path.relpath(file_path, parent_dir).replace("\\", "/")
+                yield ("file", file_path, archive_name)
+
+    def create_zip_archive_for_manga(self, root_dir, progress_callback=None):
         if not root_dir or not os.path.isdir(root_dir):
             raise FileNotFoundError("下载目录不存在，暂时无法创建压缩包。")
 
         archive_path = self.build_unique_archive_path(root_dir)
         parent_dir = os.path.dirname(root_dir.rstrip("\\/"))
+        archive_entries = list(self.iter_archive_entries(root_dir, parent_dir))
+        total_entries = len(archive_entries)
         file_count = 0
+        processed_entries = 0
+
+        if progress_callback:
+            progress_callback(processed_entries, total_entries, file_count)
 
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for current_dir, dir_names, file_names in os.walk(root_dir):
-                dir_names[:] = [
-                    dir_name for dir_name in sorted(dir_names)
-                    if not self.is_temp_chapter_dir_name(dir_name)
-                ]
-                relative_dir = os.path.relpath(current_dir, parent_dir).replace("\\", "/")
-                if not dir_names and not file_names:
-                    archive.writestr(f"{relative_dir}/", "")
-                for file_name in sorted(file_names):
-                    file_path = os.path.join(current_dir, file_name)
-                    archive_name = os.path.relpath(file_path, parent_dir).replace("\\", "/")
-                    archive.write(file_path, archive_name)
+            for entry_type, source_path, archive_name in archive_entries:
+                if entry_type == "dir":
+                    archive.writestr(archive_name, "")
+                else:
+                    archive.write(source_path, archive_name)
                     file_count += 1
+                processed_entries += 1
+                if progress_callback:
+                    progress_callback(processed_entries, total_entries, file_count)
 
         return archive_path, file_count
 
@@ -463,14 +547,56 @@ class ComicDownloaderGUI:
             return
 
         self.log_message(f"📦 正在打包漫画压缩包: {root_dir}")
+        self.set_progress_style('Download.Horizontal.TProgressbar')
+        self.set_progress(0)
         self.set_status("正在创建压缩包...")
 
         def worker():
+            last_reported_percent = {"value": -1}
+
+            def report_progress(processed_entries, total_entries, file_count):
+                if total_entries <= 0:
+                    percent = 100
+                    progress_text = "打包中: 0/0"
+                else:
+                    percent = processed_entries / total_entries * 100
+                    progress_text = f"打包中: {processed_entries}/{total_entries}"
+
+                rounded_percent = int(percent)
+                if (
+                    rounded_percent == last_reported_percent["value"]
+                    and processed_entries < total_entries
+                ):
+                    return
+
+                last_reported_percent["value"] = rounded_percent
+
+                def apply_progress():
+                    if self._closing:
+                        return
+                    self.progress_var.set(percent)
+                    self.progress_text_var.set(f"{progress_text} ({percent:.0f}%)")
+                    self.status_text_var.set(f"正在创建压缩包，已写入 {file_count} 个文件")
+
+                self.run_on_ui_thread(apply_progress)
+
             try:
-                archive_path, file_count = self.create_zip_archive_for_manga(root_dir)
+                archive_path, file_count = self.create_zip_archive_for_manga(
+                    root_dir,
+                    progress_callback=report_progress,
+                )
                 self.log_message(f"✅ 压缩包已创建: {archive_path}")
                 self.log_message(f"📦 共写入 {file_count} 个文件")
-                self.set_status("压缩包已创建")
+
+                def apply_success():
+                    if self._closing:
+                        return
+                    self.progress_var.set(100)
+                    self.progress_text_var.set("打包完成 (100%)")
+                    self.progress_bar.configure(style='Success.Horizontal.TProgressbar')
+                    self.status_text_var.set("压缩包已创建")
+
+                self.run_on_ui_thread(apply_success)
                 self.run_on_ui_thread(
                     messagebox.showinfo,
                     "打包完成",
@@ -478,7 +604,14 @@ class ComicDownloaderGUI:
                 )
             except Exception as exc:
                 self.log_message(f"❌ 创建压缩包失败: {str(exc)}", "error")
-                self.set_status("创建压缩包失败")
+
+                def apply_failure():
+                    if self._closing:
+                        return
+                    self.progress_bar.configure(style='Danger.Horizontal.TProgressbar')
+                    self.status_text_var.set("创建压缩包失败")
+
+                self.run_on_ui_thread(apply_failure)
                 self.run_on_ui_thread(
                     messagebox.showwarning,
                     "打包失败",
@@ -489,159 +622,7 @@ class ComicDownloaderGUI:
 
     def setup_style(self):
         self.style = ttk.Style()
-        self.style.theme_use('clam')
-        
-        # 配置现代化颜色主题
-        self.colors = {
-            'bg': '#eef3f8',
-            'surface': '#ffffff',
-            'surface_alt': '#f8fbff',
-            'fg': '#223042',
-            'muted': '#6b7a90',
-            'accent': '#1f7ae0',
-            'accent_soft': '#dcecff',
-            'success': '#1f9d63',
-            'warning': '#e6a100',
-            'danger': '#dd5a4f',
-            'secondary': '#95a5a6',
-            'dark': '#34495e',
-            'light': '#ffffff',
-            'border': '#d7e0ea'
-        }
-        
-        self.root.configure(bg=self.colors['bg'])
-        
-        # 配置ttk样式
-        self.style.configure('TFrame', background=self.colors['bg'])
-        self.style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['fg'])
-        self.style.configure('TLabelFrame', background=self.colors['surface'], foreground=self.colors['dark'])
-        self.style.configure('Panel.TFrame', background=self.colors['surface'])
-        self.style.configure('Surface.TFrame', background=self.colors['surface_alt'])
-        self.style.configure('Content.TPanedwindow', background=self.colors['surface'])
-        self.style.configure('Inner.TPanedwindow', background=self.colors['surface'])
-        self.style.configure('Title.TLabel', background=self.colors['bg'], foreground=self.colors['fg'],
-                             font=('Microsoft YaHei UI', 18, 'bold'))
-        self.style.configure('Subtitle.TLabel', background=self.colors['bg'], foreground=self.colors['muted'],
-                             font=('Microsoft YaHei UI', 10))
-        self.style.configure('Hint.TLabel', background=self.colors['surface'], foreground=self.colors['muted'],
-                             font=('Microsoft YaHei UI', 9))
-        self.style.configure('Section.TLabelframe', background=self.colors['surface'],
-                             borderwidth=1, relief='solid')
-        self.style.configure('Section.TLabelframe.Label', background=self.colors['surface'],
-                             foreground=self.colors['fg'], font=('Microsoft YaHei UI', 10, 'bold'))
-        self.style.configure('Info.TLabel', background=self.colors['surface'], foreground=self.colors['muted'],
-                             font=('Microsoft YaHei UI', 9))
-        self.style.configure('Footer.TLabel', background=self.colors['surface'], foreground=self.colors['fg'],
-                             font=('Microsoft YaHei UI', 9))
-        button_font = ('Microsoft YaHei UI', 10, 'bold')
-
-        self.style.configure(
-            'TButton',
-            background=self.colors['bg'],
-            foreground=self.colors['fg'],
-            font=button_font,
-            padding=(14, 8)
-        )
-        self.style.map(
-            'TButton',
-            background=[('active', '#e5edf7'), ('disabled', '#eef3f8')],
-            foreground=[('active', self.colors['fg']), ('disabled', '#7f8c8d')]
-        )
-        self.style.configure('Accent.TButton', 
-                       background=self.colors['accent'], 
-                       foreground=self.colors['light'],
-                       font=button_font,
-                       padding=(14, 8),
-                       borderwidth=1,
-                       focusthickness=1,
-                       focuscolor=self.colors['accent'])
-        self.style.map('Accent.TButton',
-                 background=[('active', '#1767bf'), ('disabled', '#bdc3c7')],
-                 foreground=[('active', self.colors['light']), ('disabled', '#6c757d')])
-        self.style.configure('TEntry', fieldbackground='white', foreground=self.colors['fg'],
-                             bordercolor=self.colors['border'], lightcolor=self.colors['accent_soft'])
-        self.style.configure('TCheckbutton', background=self.colors['bg'], foreground=self.colors['fg'])
-        self.style.configure('TSpinbox', fieldbackground='white', foreground=self.colors['fg'])
-        self.style.configure(
-            'Ranking.Treeview',
-            background=self.colors['surface'],
-            fieldbackground=self.colors['surface'],
-            foreground=self.colors['fg'],
-            bordercolor=self.colors['border'],
-            lightcolor=self.colors['surface'],
-            darkcolor=self.colors['surface'],
-            rowheight=28,
-        )
-        self.style.map(
-            'Ranking.Treeview',
-            background=[('selected', self.colors['accent_soft'])],
-            foreground=[('selected', self.colors['fg'])]
-        )
-        self.style.configure(
-            'Ranking.Treeview.Heading',
-            background='#eef4fb',
-            foreground=self.colors['fg'],
-            relief='flat',
-            padding=(8, 6),
-            font=('Microsoft YaHei UI', 9, 'bold')
-        )
-        self.style.map(
-            'Ranking.Treeview.Heading',
-            background=[('active', '#e3edf8')]
-        )
-        self.style.configure('Download.Horizontal.TProgressbar',
-                       background=self.colors['accent'],
-                       troughcolor='#ecf0f1',
-                       borderwidth=0,
-                       lightcolor=self.colors['accent'],
-                       darkcolor=self.colors['accent'])
-        self.style.configure('Success.Horizontal.TProgressbar',
-                       background=self.colors['success'],
-                       troughcolor='#ecf0f1',
-                       borderwidth=0,
-                       lightcolor=self.colors['success'],
-                       darkcolor=self.colors['success'])
-        self.style.configure('Warning.Horizontal.TProgressbar',
-                       background=self.colors['warning'],
-                       troughcolor='#ecf0f1',
-                       borderwidth=0,
-                       lightcolor=self.colors['warning'],
-                       darkcolor=self.colors['warning'])
-        self.style.configure('Danger.Horizontal.TProgressbar',
-                       background=self.colors['danger'],
-                       troughcolor='#ecf0f1',
-                       borderwidth=0,
-                       lightcolor=self.colors['danger'],
-                       darkcolor=self.colors['danger'])
-        
-        # 添加更多按钮样式
-        self.style.configure('Success.TButton', 
-                       background=self.colors['success'], 
-                       foreground=self.colors['light'],
-                       font=button_font,
-                       padding=(14, 8))
-        self.style.map('Success.TButton',
-                 background=[('active', '#18854a'), ('disabled', '#bdc3c7')],
-                 foreground=[('active', self.colors['light']), ('disabled', '#6c757d')])
-        
-        self.style.configure('Warning.TButton', 
-                       background=self.colors['warning'], 
-                       foreground=self.colors['light'],
-                       font=button_font,
-                       padding=(14, 8))
-        self.style.map('Warning.TButton',
-                 background=[('active', '#b9770e'), ('disabled', '#bdc3c7')],
-                 foreground=[('active', self.colors['light']), ('disabled', '#6c757d')])
-        
-        self.style.configure('Danger.TButton', 
-                       background=self.colors['danger'], 
-                       foreground=self.colors['light'],
-                       font=button_font,
-                       padding=(14, 8))
-        self.style.map('Danger.TButton',
-                 background=[('active', '#a93226'), ('disabled', '#bdc3c7')],
-                 foreground=[('active', self.colors['light']), ('disabled', '#6c757d')])
-        
+        self.colors = setup_ui_styles(self.root, self.style)
     def create_widgets(self):
         # 主框架
         main_frame = ttk.Frame(self.root, padding="10")
@@ -1097,138 +1078,6 @@ class ComicDownloaderGUI:
         self.log_text.tag_configure('status', foreground='#67e8f9')
         self.log_text.tag_configure('muted', foreground='#94a3b8')
 
-    def configure_initial_pane_layout(self):
-        """设置首页发现/日志区与列表/详情区的初始分隔比例。"""
-        if self._closing or not hasattr(self, "content_pane"):
-            return
-        try:
-            total_width = self.content_pane.winfo_width()
-            if total_width > 0:
-                discovery_width = int(total_width * 0.54)
-                discovery_width = max(720, discovery_width)
-                discovery_width = min(discovery_width, max(total_width - 430, 720))
-                self.content_pane.sashpos(0, discovery_width)
-                self.saved_content_sash = discovery_width
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "ranking_pane"):
-                total_width = self.ranking_pane.winfo_width()
-                if total_width > 0:
-                    list_width = int(total_width * 0.47)
-                    list_width = max(330, list_width)
-                    list_width = min(list_width, max(total_width - 290, 330))
-                    self.ranking_pane.sashpos(0, list_width)
-                    self.saved_ranking_sash = list_width
-        except Exception:
-            pass
-
-    def clamp_pane_sash(self, value, total_width, min_width, trailing_min_width):
-        if total_width <= 0:
-            return int(value)
-        max_width = max(total_width - trailing_min_width, min_width)
-        return min(max(int(value), min_width), max_width)
-
-    def capture_current_pane_layout(self):
-        if self._closing:
-            return
-        try:
-            if hasattr(self, "content_pane") and self.content_pane.winfo_exists():
-                self.saved_content_sash = self.content_pane.sashpos(0)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "ranking_pane") and self.ranking_pane.winfo_exists():
-                self.saved_ranking_sash = self.ranking_pane.sashpos(0)
-        except Exception:
-            pass
-
-    def restore_saved_pane_layout(self):
-        if self._closing or not hasattr(self, "content_pane"):
-            return
-        try:
-            if self.root.state() == "iconic":
-                return
-        except Exception:
-            return
-
-        restored = False
-        try:
-            total_width = self.content_pane.winfo_width()
-            if total_width > 0 and self.saved_content_sash is not None:
-                discovery_width = self.clamp_pane_sash(self.saved_content_sash, total_width, 720, 430)
-                self.content_pane.sashpos(0, discovery_width)
-                self.saved_content_sash = discovery_width
-                restored = True
-        except Exception:
-            pass
-
-        try:
-            total_width = self.ranking_pane.winfo_width()
-            if total_width > 0 and self.saved_ranking_sash is not None:
-                list_width = self.clamp_pane_sash(self.saved_ranking_sash, total_width, 330, 290)
-                self.ranking_pane.sashpos(0, list_width)
-                self.saved_ranking_sash = list_width
-                restored = True
-        except Exception:
-            pass
-
-        if not restored:
-            self.configure_initial_pane_layout()
-
-    def run_restore_pane_layout(self):
-        self._pane_restore_job = None
-        self.restore_saved_pane_layout()
-
-    def run_restore_pane_layout_followup(self):
-        self._pane_restore_followup_job = None
-        self.restore_saved_pane_layout()
-
-    def schedule_restore_pane_layout(self, delay=40):
-        if self._closing or not hasattr(self, "root"):
-            return
-        self._window_was_iconic = False
-        if self._pane_restore_job is not None:
-            try:
-                self.root.after_cancel(self._pane_restore_job)
-            except Exception:
-                pass
-        if self._pane_restore_followup_job is not None:
-            try:
-                self.root.after_cancel(self._pane_restore_followup_job)
-            except Exception:
-                pass
-        self._pane_restore_job = self.root.after(delay, self.run_restore_pane_layout)
-        self._pane_restore_followup_job = self.root.after(delay + 140, self.run_restore_pane_layout_followup)
-
-    def on_window_unmap(self, event=None):
-        if event is not None and event.widget is not self.root:
-            return
-        try:
-            state = self.root.state()
-        except Exception:
-            return
-        if state == "iconic":
-            self.capture_current_pane_layout()
-            self._window_was_iconic = True
-
-    def on_window_map(self, event=None):
-        if event is not None and event.widget is not self.root:
-            return
-        if self._window_was_iconic:
-            self.schedule_restore_pane_layout(delay=30)
-
-    def on_window_configure(self, event=None):
-        if event is not None and event.widget is not self.root:
-            return
-        if not self._window_was_iconic:
-            return
-        try:
-            if self.root.state() != "iconic":
-                self.schedule_restore_pane_layout(delay=20)
-        except Exception:
-            pass
-        
     def redirect_output(self):
         """重定向标准输出到文本框"""
         class TextRedirector:
@@ -1349,8 +1198,20 @@ class ComicDownloaderGUI:
             self.schedule_log_flush()
             return
 
+        merged_text = ""
+        tag_ranges = []
         for message, tag in pending_logs:
-            self.log_text.insert(tk.END, message, tag)
+            start_offset = len(merged_text)
+            merged_text += message
+            tag_ranges.append((tag, start_offset, len(merged_text)))
+
+        start_index = self.log_text.index(tk.END + "-1c") if merged_text else None
+        self.log_text.insert(tk.END, merged_text)
+        if start_index:
+            for tag, start_off, end_off in tag_ranges:
+                s = f"{start_index}+{start_off}c"
+                e = f"{start_index}+{end_off}c"
+                self.log_text.tag_add(tag, s, e)
 
         self.trim_log_lines()
         self.log_text.see(tk.END)
@@ -1401,32 +1262,11 @@ class ComicDownloaderGUI:
         self.run_on_ui_thread(apply)
 
     def is_site_access_blocked_error(self, error):
-        message = str(error or "")
-        return "暂时拒绝当前网络环境访问" in message
-
+        return _is_site_access_blocked_error(error)
     def is_site_unreachable_error(self, error):
-        message = str(error or "")
-        unreachable_markers = (
-            "页面请求失败",
-            "Connection to",
-            "Max retries exceeded",
-            "Read timed out",
-            "ConnectTimeout",
-            "ReadTimeout",
-            "ProxyError",
-            "timed out",
-            "NameResolutionError",
-        )
-        return any(marker in message for marker in unreachable_markers)
-
+        return _is_site_unreachable_error(error)
     def get_connection_route_label(self, adapter):
-        supports_manual_proxy = bool(getattr(adapter, "supports_manual_proxy", lambda: False)())
-        if supports_manual_proxy and adapter.has_manual_proxy():
-            return f"手动代理 {adapter.get_manual_proxy_url()}"
-        if bool(getattr(adapter, "should_use_env_for_http", lambda: False)()):
-            return "系统代理/环境代理"
-        return "直连"
-
+        return _get_connection_route_label(adapter)
     def get_connection_test_target(self, adapter):
         candidate_url = (self.download_url_var.get() or self.current_download_url or "").strip()
         if candidate_url and adapter.matches_url(candidate_url):
@@ -1434,25 +1274,7 @@ class ComicDownloaderGUI:
         return f"https://{adapter.supported_domains[0]}/"
 
     def get_connection_troubleshooting_text(self, adapter):
-        supports_manual_proxy = bool(getattr(adapter, "supports_manual_proxy", lambda: False)())
-        if supports_manual_proxy and adapter.has_manual_proxy():
-            return "\n".join([
-                "1. 先点“测试连接”，确认当前代理节点是否真的可用。",
-                "2. 如果仍失败，优先更换代理节点，或先关闭代理后改用其它网络。",
-                "3. 用浏览器直接打开站点首页，确认不是站点本身临时异常。",
-            ])
-        if supports_manual_proxy:
-            return "\n".join([
-                "1. 先换手机热点或其它网络做对比测试。",
-                "2. 如果换网后恢复，说明当前宽带/IP 很可能被限制了。",
-                "3. 也可以填写 HTTP/HTTPS/SOCKS5 代理后，点“测试连接”再试。",
-            ])
-        return "\n".join([
-            "1. 先换手机热点或其它网络做对比测试。",
-            "2. 用浏览器直接打开站点首页，确认是否为站点临时异常。",
-            "3. 如果浏览器也不通，就先不要继续排查程序代码。",
-        ])
-
+        return _get_connection_troubleshooting_text(adapter)
     def handle_site_access_blocked_error(self, adapter_name, error):
         raw_message = self.normalize_log_message(str(error))
         friendly_message = (
@@ -1476,8 +1298,8 @@ class ComicDownloaderGUI:
     def handle_site_unreachable_error(self, adapter, error):
         adapter_name = adapter.display_name if hasattr(adapter, "display_name") else str(adapter)
         raw_message = self.normalize_log_message(str(error))
-        route_label = self.get_connection_route_label(adapter if hasattr(adapter, "display_name") else self.current_adapter)
-        troubleshooting = self.get_connection_troubleshooting_text(adapter if hasattr(adapter, "display_name") else self.current_adapter)
+        route_label = _get_connection_route_label(adapter if hasattr(adapter, "display_name") else self.current_adapter)
+        troubleshooting = _get_connection_troubleshooting_text(adapter if hasattr(adapter, "display_name") else self.current_adapter)
         self.log_message(f"⚠️ {adapter_name} 当前从这台机器访问不稳定，暂时没能拿到网页内容。", "warning")
         self.log_message(f"当前请求方式: {route_label}", "warning")
         if raw_message:
@@ -1698,6 +1520,7 @@ class ComicDownloaderGUI:
             if self._closing or not self.rank_tree.winfo_exists():
                 return
             self.rank_tree.delete(*self.rank_tree.get_children())
+            self.rank_tree.grid_forget()
             for index, card in enumerate(cards, 1):
                 self.rank_tree.insert(
                     "",
@@ -1705,6 +1528,7 @@ class ComicDownloaderGUI:
                     iid=str(index - 1),
                     values=(index, card.title)
                 )
+            self.rank_tree.grid(row=0, column=0, sticky="nsew")
         self.run_on_ui_thread(apply)
 
     def refresh_selected_tree_row(self, card):
@@ -3344,6 +3168,10 @@ class ComicDownloaderGUI:
             "last_downloaded_chapter_order": last_downloaded.get("order"),
             "downloaded_chapters": downloaded_chapters,
             "completed": False,
+            "last_failed_chapter_count": 0,
+            "last_failed_chapter_numbers_text": "",
+            "last_failed_chapter_records": [],
+            "last_download_final_state": "",
             "update_check_status": "",
             "update_available_count": 0,
             "update_last_checked_at": "",
@@ -3353,7 +3181,7 @@ class ComicDownloaderGUI:
             "_known_chapters": known_chapters,
         }
 
-    def save_active_download_metadata(self, mark_completed=False):
+    def save_active_download_metadata(self, mark_completed=False, failed_chapter_records=None, final_state=""):
         metadata = self.active_download_metadata
         if not metadata:
             return
@@ -3376,7 +3204,18 @@ class ComicDownloaderGUI:
         metadata["last_downloaded_chapter_title"] = last_downloaded.get("title") or ""
         metadata["last_downloaded_chapter_order"] = last_downloaded.get("order")
         metadata["saved_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        metadata["completed"] = bool(mark_completed or metadata.get("completed"))
+        if failed_chapter_records is not None:
+            normalized_failed_records = normalize_failed_retry_records(failed_chapter_records)
+            metadata["last_failed_chapter_records"] = normalized_failed_records
+            metadata["last_failed_chapter_count"] = len(normalized_failed_records)
+            metadata["last_failed_chapter_numbers_text"] = get_failed_chapter_numbers_text(
+                normalized_failed_records
+            )
+        if final_state:
+            metadata["last_download_final_state"] = str(final_state)
+            metadata["completed"] = final_state == "completed"
+        else:
+            metadata["completed"] = bool(mark_completed or metadata.get("completed"))
 
         payload = {key: value for key, value in metadata.items() if not key.startswith("_")}
         try:
@@ -3436,6 +3275,16 @@ class ComicDownloaderGUI:
         payload["update_available_count"] = int(payload.get("update_available_count") or 0)
         payload["update_last_checked_at"] = str(payload.get("update_last_checked_at") or "")
         payload["update_last_error"] = str(payload.get("update_last_error") or "")
+        payload["last_failed_chapter_records"] = normalize_failed_retry_records(
+            payload.get("last_failed_chapter_records") or []
+        )
+        payload["last_failed_chapter_count"] = int(
+            payload.get("last_failed_chapter_count")
+            or len(payload["last_failed_chapter_records"])
+            or 0
+        )
+        payload["last_failed_chapter_numbers_text"] = str(payload.get("last_failed_chapter_numbers_text") or "")
+        payload["last_download_final_state"] = str(payload.get("last_download_final_state") or "")
         return payload
 
     def build_local_library_entry_from_fallback(self, directory_path, site_key=""):
@@ -3886,10 +3735,22 @@ class ComicDownloaderGUI:
                 self.handle_site_unreachable_error(adapter, e)
             else:
                 self.log_message(f"❌ 下载过程中出现错误: {str(e)}", "error")
+            if self.active_download_metadata:
+                self.save_active_download_metadata(
+                    mark_completed=False,
+                    failed_chapter_records=[],
+                    final_state="failed",
+                )
             if download_summary is None:
                 download_summary = {"final_state": "failed"}
         except Exception as e:
             self.log_message(f"❌ 下载过程中出现错误: {str(e)}", "error")
+            if self.active_download_metadata:
+                self.save_active_download_metadata(
+                    mark_completed=False,
+                    failed_chapter_records=[],
+                    final_state="failed",
+                )
             if download_summary is None:
                 download_summary = {"final_state": "failed"}
         finally:
@@ -3902,8 +3763,11 @@ class ComicDownloaderGUI:
         total_chapters = len(chapter_queue)
         completed_chapters = 0
         failed_chapters = 0
+        failed_chapter_records = []
         retry_limit = adapter.get_chapter_retry_limit()
         cooldown_until = 0.0
+        stopped_early = False
+        scheduler_error = None
         summary = {
             "final_state": "failed",
             "root_dir": root_dir,
@@ -3911,6 +3775,7 @@ class ComicDownloaderGUI:
             "total_chapters": total_chapters,
             "completed_chapters": 0,
             "failed_chapters": 0,
+            "failed_chapter_records": [],
             "should_offer_archive": False,
         }
         
@@ -3929,6 +3794,7 @@ class ComicDownloaderGUI:
 
                 # 检查是否停止
                 if not self.is_downloading:
+                    stopped_early = True
                     self.log_message("🛑 下载已停止")
                     # 取消所有未完成的任务
                     for future in futures:
@@ -3958,6 +3824,8 @@ class ComicDownloaderGUI:
                     futures[future] = chapter
                 
                 if not futures:
+                    if chapter_queue:
+                        stopped_early = True
                     break
                 
                 # 等待任务完成
@@ -3978,6 +3846,15 @@ class ComicDownloaderGUI:
                         else:
                             failed_chapters += 1
                             self.log_message(f"⚠️ 第 {chapter['order'] + 1} 章下载失败", "warning")
+                            failed_chapter_records.append(
+                                build_failed_chapter_record(
+                                    chapter,
+                                    "章节返回空数据或图片列表为空",
+                                )
+                            )
+                            self.save_active_download_metadata(
+                                failed_chapter_records=failed_chapter_records
+                            )
                             
                     except Exception as e:
                         retry_count = chapter.get("_retry_count", 0)
@@ -4001,45 +3878,74 @@ class ComicDownloaderGUI:
                             continue
 
                         failed_chapters += 1
+                        failed_chapter_records.append(
+                            build_failed_chapter_record(chapter, str(e))
+                        )
+                        self.save_active_download_metadata(
+                            failed_chapter_records=failed_chapter_records
+                        )
                         self.log_message(f"❌ 第 {chapter['order'] + 1} 章下载出错: {str(e)}", "error")
                     
                     # 更新进度
                     progress = (completed_chapters + failed_chapters) / total_chapters * 100
                     self.set_progress(progress)
                     self.set_status(f"进度: {completed_chapters + failed_chapters}/{total_chapters}")
-                    
-            # 清理executor
-            if self.executor:
-                self.executor.shutdown(wait=False, cancel_futures=True)
-                self.executor = None
-                
-            # 下载完成总结
-            if self.is_downloading:
-                self.log_message(f"\n📊 下载完成统计:")
-                self.log_message(f"✅ 成功: {completed_chapters} 章")
-                self.log_message(f"❌ 失败: {failed_chapters} 章")
-                self.log_message(f"📁 文件保存在: {root_dir}")
-                # 清除断点续传数据
-                self.clear_download_state()
-                self.save_active_download_metadata(
-                    mark_completed=(
-                        completed_chapters > 0
-                        and failed_chapters <= 0
-                        and completed_chapters >= total_chapters
-                    )
-                )
-                summary.update({
-                    "final_state": "completed",
-                    "completed_chapters": completed_chapters,
-                    "failed_chapters": failed_chapters,
-                    "should_offer_archive": completed_chapters > 0 and os.path.isdir(root_dir),
-                })
-                
+
         except Exception as e:
+            scheduler_error = e
             self.log_message(f"❌ 并发下载出错: {str(e)}", "error")
+        finally:
             if self.executor:
                 self.executor.shutdown(wait=False, cancel_futures=True)
                 self.executor = None
+
+        processed_chapters = completed_chapters + failed_chapters
+        all_processed = processed_chapters >= total_chapters
+        fully_completed = all_processed and completed_chapters == total_chapters
+        partially_completed = completed_chapters > 0 and not fully_completed
+        stopped_early = stopped_early or self.stop_event.is_set() or (
+            not all_processed and not self.is_downloading
+        )
+
+        self.log_message(f"\n📊 下载完成统计:")
+        self.log_message(f"✅ 成功: {completed_chapters} 章")
+        self.log_message(f"❌ 失败: {failed_chapters} 章")
+        if failed_chapter_records:
+            self.log_message(
+                f"❌ 失败章节号: {get_failed_chapter_numbers_text(failed_chapter_records)}",
+                "error",
+            )
+        if stopped_early and not all_processed:
+            self.log_message(f"⏹️ 未处理: {total_chapters - processed_chapters} 章", "warning")
+        self.log_message(f"📁 文件保存在: {root_dir}")
+
+        final_state = "failed"
+        if fully_completed:
+            final_state = "completed"
+        elif stopped_early:
+            final_state = "stopped"
+        elif partially_completed:
+            final_state = "partial"
+
+        if scheduler_error and final_state == "completed":
+            final_state = "partial" if completed_chapters > 0 else "failed"
+
+        if final_state == "completed":
+            self.clear_download_state()
+
+        self.save_active_download_metadata(
+            mark_completed=(final_state == "completed"),
+            failed_chapter_records=failed_chapter_records,
+            final_state=final_state,
+        )
+
+        summary.update({
+            "final_state": final_state,
+            "completed_chapters": completed_chapters,
+            "failed_chapters": failed_chapters,
+            "failed_chapter_records": failed_chapter_records,
+            "should_offer_archive": completed_chapters > 0 and os.path.isdir(root_dir),
+        })
         return summary
             
     def save_download_state(self, current_chapter_order, total_chapters):
@@ -4132,6 +4038,11 @@ class ComicDownloaderGUI:
             normalized_summary["root_dir"] = active_root_dir
         if active_manga_title and not normalized_summary.get("manga_title"):
             normalized_summary["manga_title"] = active_manga_title
+        normalized_summary["failed_chapter_records"] = normalize_failed_retry_records(
+            normalized_summary.get("failed_chapter_records") or []
+        )
+        if normalized_summary["failed_chapter_records"] and not normalized_summary.get("failed_chapters"):
+            normalized_summary["failed_chapters"] = len(normalized_summary["failed_chapter_records"])
 
         self.is_downloading = False
         self.is_paused = False

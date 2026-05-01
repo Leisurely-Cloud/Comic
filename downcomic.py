@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import logging
 from requests.adapters import HTTPAdapter
-from storage_paths import ensure_storage_root_dir
+from storage_paths import ensure_storage_root_dir, get_storage_root_dir, APP_STATE_DIR_NAME
 
 # 🔒 打印锁，防止多线程打印错乱
 print_lock = threading.Lock()
@@ -29,6 +29,11 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
+
+class OperationCancelledError(Exception):
+    """用于在 GUI 中区分“用户主动停止”与“请求失败”两种情况。"""
+
+
 class ProxyPool:
     def __init__(self):
         self.proxies = []
@@ -42,90 +47,264 @@ class ProxyPool:
         ]
         self.enabled = False # 默认开启
         self._last_fetch_time = 0
+        self._last_fetch_attempt_time = 0
         self._fetch_interval = 600 # 10分钟更新一次
+        self.validation_mode = "relaxed"
+        self._strict_validation_targets = (
+            "https://httpbin.org/ip",
+            "https://www.cloudflare.com/cdn-cgi/trace",
+        )
+        self._relaxed_validation_targets = (
+            "https://httpbin.org/ip",
+            "https://www.cloudflare.com/cdn-cgi/trace",
+            "http://httpbin.org/ip",
+        )
+        # 已验证代理的磁盘持久化，避免每次重启都要再跑一遍 50 并发 * 300 候选的验证循环
+        self._persistence_ttl = 3600  # 1 小时内复用磁盘缓存
+        self._persistence_cache_path = None
+        self._persistence_loaded = False
 
     def _new_session(self):
         session = requests.Session()
         session.trust_env = False
         return session
 
-    def verify_proxy(self, proxy_ip):
+    def _get_persistence_cache_path(self):
+        if self._persistence_cache_path is None:
+            try:
+                self._persistence_cache_path = os.path.join(
+                    get_storage_root_dir(), APP_STATE_DIR_NAME, "verified_proxies.json"
+                )
+            except Exception:
+                self._persistence_cache_path = ""
+        return self._persistence_cache_path
+
+    def _load_persisted_proxies_if_fresh(self):
+        """首次访问时从磁盘恢复上一次运行验证过的代理节点。需在 self.lock 下调用。"""
+        if self._persistence_loaded:
+            return
+        self._persistence_loaded = True
+
+        path = self._get_persistence_cache_path()
+        if not path or not os.path.isfile(path):
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return
+
+        try:
+            timestamp = float(data.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            timestamp = 0
+        mode = data.get("validation_mode")
+        proxies = data.get("proxies") or []
+
+        if not isinstance(proxies, list):
+            return
+        if time.time() - timestamp > self._persistence_ttl:
+            return
+        if mode and mode != self.validation_mode:
+            return
+
+        normalized = [str(p).strip() for p in proxies if isinstance(p, str) and str(p).strip()]
+        if not normalized:
+            return
+
+        self.proxies = normalized
+        self._last_fetch_time = timestamp
+        age_seconds = max(int(time.time() - timestamp), 0)
+        with print_lock:
+            print(f"📦 已从本地缓存恢复 {len(self.proxies)} 个代理节点（缓存年龄 {age_seconds} 秒）")
+
+    def _save_persisted_proxies(self):
+        """把当前已验证的代理列表原子写入磁盘。调用方需先确认 self.proxies 非空。"""
+        path = self._get_persistence_cache_path()
+        if not path:
+            return
+        proxies_snapshot = list(self.proxies)
+        if not proxies_snapshot:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            payload = {
+                "timestamp": time.time(),
+                "validation_mode": self.validation_mode,
+                "proxies": proxies_snapshot,
+            }
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, path)
+        except Exception:
+            pass
+
+    def _drop_persisted_proxies(self):
+        """验证模式切换或手动清空时，顺带把磁盘缓存失效掉。"""
+        path = self._get_persistence_cache_path()
+        if not path:
+            return
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+    def get_validation_mode(self):
+        return self.validation_mode
+
+    def get_validation_mode_label(self):
+        return "宽松" if self.validation_mode == "relaxed" else "严格"
+
+    def set_validation_mode(self, mode: str):
+        normalized = str(mode or "").strip().lower() or "relaxed"
+        if normalized not in {"strict", "relaxed"}:
+            raise ValueError("代理池验证模式仅支持 strict 或 relaxed")
+        with self.lock:
+            self.validation_mode = normalized
+            self.proxies = []
+            self._last_fetch_time = 0
+            self._persistence_loaded = True  # 模式切换后不再信任老缓存
+            self._drop_persisted_proxies()
+
+    def _get_validation_targets(self):
+        if self.validation_mode == "strict":
+            return self._strict_validation_targets
+        return self._relaxed_validation_targets
+
+    def verify_proxy(self, proxy_ip, stop_event=None):
         """验证单个代理是否可用"""
+        if should_stop(stop_event):
+            raise OperationCancelledError("已停止内置代理池测试")
         proxy = {
             "http": f"http://{proxy_ip}",
             "https": f"http://{proxy_ip}"
         }
-        try:
-            # 尝试访问一个稳定且响应快的地址进行验证
-            # 使用 httpbin.org 验证
-            resp = self._new_session().get("http://httpbin.org/ip", proxies=proxy, timeout=5)
-            if resp.status_code == 200:
-                return proxy_ip
-        except:
-            pass
-        return None
+        session = self._new_session()
+        targets = self._get_validation_targets()
+        required_successes = len(targets) if self.validation_mode == "strict" else 1
+        success_count = 0
+        for target_url in targets:
+            if should_stop(stop_event):
+                raise OperationCancelledError("已停止内置代理池测试")
+            try:
+                resp = session.get(target_url, proxies=proxy, timeout=(4, 6), allow_redirects=True)
+                if resp.status_code == 200:
+                    success_count += 1
+                    if success_count >= required_successes:
+                        return proxy_ip
+                elif self.validation_mode == "strict":
+                    return None
+            except Exception:
+                if self.validation_mode == "strict":
+                    return None
+        return proxy_ip if success_count >= required_successes else None
 
-    def fetch_proxies(self):
+    def fetch_proxies(self, stop_event=None):
         """从网络获取并验证免费代理"""
         if not self.enabled:
             return
 
         with self.lock:
+            if should_stop(stop_event):
+                raise OperationCancelledError("已停止内置代理池测试")
+            self._load_persisted_proxies_if_fresh()
             if time.time() - self._last_fetch_time < self._fetch_interval and self.proxies:
                 return
 
-            print("🔄 Fetching new proxies from multiple sources...")
+            self._last_fetch_attempt_time = time.time()
+            print("🔄 正在从多个公开源抓取代理列表...")
             raw_proxies = set()
-            
+            source_pattern = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$')
+
             # 1. 并发获取原始代理列表
             def fetch_source(url):
+                if should_stop(stop_event):
+                    raise OperationCancelledError("已停止内置代理池测试")
                 try:
                     resp = self._new_session().get(url, timeout=10)
+                    found = set()
                     if resp.status_code == 200:
-                        lines = resp.text.strip().splitlines()
-                        found = 0
-                        for line in lines:
+                        for line in resp.text.strip().splitlines():
                             line = line.strip()
-                            # 简单的 IP:Port 验证
-                            if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$', line):
-                                raw_proxies.add(line)
-                                found += 1
-                        print(f"    Fetched {found} proxies from {url}")
+                            if source_pattern.match(line):
+                                found.add(line)
+                        print(f"    已从代理源抓取 {len(found)} 条候选节点")
+                    return found
+                except OperationCancelledError:
+                    raise
                 except Exception as e:
-                    print(f"⚠️ Failed to fetch from {url}: {e}")
+                    print(f"⚠️ 抓取代理源失败: {e}")
+                    return set()
 
-            with ThreadPoolExecutor(max_workers=len(self.proxy_sources)) as executor:
-                executor.map(fetch_source, self.proxy_sources)
+            source_executor = ThreadPoolExecutor(max_workers=max(len(self.proxy_sources), 1))
+            source_futures = [source_executor.submit(fetch_source, url) for url in self.proxy_sources]
+            try:
+                pending = set(source_futures)
+                while pending:
+                    if should_stop(stop_event):
+                        raise OperationCancelledError("已停止内置代理池测试")
+                    done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        if should_stop(stop_event):
+                            raise OperationCancelledError("已停止内置代理池测试")
+                        raw_proxies.update(future.result() or set())
+            finally:
+                source_executor.shutdown(wait=False, cancel_futures=True)
 
             if not raw_proxies:
-                print("⚠️ No proxies found from any source.")
+                if should_stop(stop_event):
+                    raise OperationCancelledError("已停止内置代理池测试")
+                print("⚠️ 当前没有从公开源抓到任何代理节点")
                 return
 
-            print(f"🔄 Verifying {len(raw_proxies)} candidates (this may take a moment)...")
+            mode_label = self.get_validation_mode_label()
+            if self.validation_mode == "strict":
+                mode_desc = "所有 HTTPS 测试目标都必须通过"
+            else:
+                mode_desc = "任一测试目标通过即可，成功率更高但误判也会更多"
+            print(f"🔄 正在验证 {len(raw_proxies)} 个候选节点的可用性（{mode_label}模式：{mode_desc}）...")
             
             # 2. 并发验证代理可用性
             verified_proxies = []
-            with ThreadPoolExecutor(max_workers=50) as executor:
-                # 限制验证数量，避免太久，只取前 200 个进行验证
-                candidates = list(raw_proxies)[:200] 
-                future_to_proxy = {executor.submit(self.verify_proxy, p): p for p in candidates}
-                
+            verify_executor = ThreadPoolExecutor(max_workers=50)
+            try:
+                candidates = list(raw_proxies)[:300]
+                pending = {
+                    verify_executor.submit(self.verify_proxy, proxy_ip, stop_event): proxy_ip
+                    for proxy_ip in candidates
+                }
+
                 completed_count = 0
-                for future in as_completed(future_to_proxy):
-                    result = future.result()
-                    if result:
-                        verified_proxies.append(result)
-                    
-                    completed_count += 1
-                    if completed_count % 50 == 0:
-                        print(f"    Verified {completed_count}/{len(candidates)}...")
+                while pending:
+                    if should_stop(stop_event):
+                        raise OperationCancelledError("已停止内置代理池测试")
+                    done, unfinished = wait(set(pending.keys()), timeout=0.25, return_when=FIRST_COMPLETED)
+                    if not done:
+                        continue
+                    for future in done:
+                        proxy_ip = pending.pop(future, None)
+                        if should_stop(stop_event):
+                            raise OperationCancelledError("已停止内置代理池测试")
+                        result = future.result()
+                        if result:
+                            verified_proxies.append(result)
+
+                        completed_count += 1
+                        if completed_count % 50 == 0:
+                            print(f"    已验证 {completed_count}/{len(candidates)} 个候选节点...")
+            finally:
+                verify_executor.shutdown(wait=False, cancel_futures=True)
 
             if verified_proxies:
                 self.proxies = verified_proxies
                 self._last_fetch_time = time.time()
-                print(f"✅ Successfully loaded {len(self.proxies)} VALID proxies.")
+                self._save_persisted_proxies()
+                print(f"✅ 已加载 {len(self.proxies)} 个通过{mode_label}模式验证的代理节点")
             else:
-                print("⚠️ No valid proxies passed verification. Using direct connection as fallback might fail if IP banned.")
+                print(f"⚠️ 没有代理节点通过{mode_label}模式验证，请稍后重试或改用手动代理")
 
     def get_proxy(self):
         """随机获取一个代理"""
@@ -150,6 +329,14 @@ class ProxyPool:
             if proxy_ip in self.proxies:
                 self.proxies.remove(proxy_ip)
                 # print(f"🗑️ Removed bad proxy: {proxy_ip}")
+
+    def clear_cached_proxies(self):
+        """清空当前缓存的代理节点，强制下次重新拉取。"""
+        with self.lock:
+            self.proxies = []
+            self._last_fetch_time = 0
+            self._persistence_loaded = True
+            self._drop_persisted_proxies()
 
 # 全局代理池实例
 proxy_pool = ProxyPool()
@@ -181,38 +368,39 @@ def get_session():
         SESSION_POOL.session = requests.Session()
         SESSION_POOL.session.trust_env = False
         SESSION_POOL.session.headers.update(HEADERS)
-        # 配置连接池
+        # max_retries=0：交给外层 safe_request 的重试循环统一处理，避免 5*4=20 次叠加
+        # 池大小对齐章节×图片并发上限，减少 "Connection pool is full" 丢弃
         adapter = HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=50,
-            max_retries=3
+            pool_connections=32,
+            pool_maxsize=64,
+            max_retries=0,
         )
         SESSION_POOL.session.mount('http://', adapter)
         SESSION_POOL.session.mount('https://', adapter)
     return SESSION_POOL.session
 
 
-def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=None):
+def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=None, stream=False):
     """带延时重试的安全请求 (支持代理和UA轮询)"""
     import random
 
     if should_stop(stop_event):
         return None
-    
+
     # 首次尝试先获取代理
     if proxy_pool.enabled and not proxy_pool.proxies:
         proxy_pool.fetch_proxies()
 
     if headers is None:
         headers = HEADERS.copy()
-    
+
     # 每次请求随机 UA
     headers["User-Agent"] = random.choice(USER_AGENTS)
 
     # 第一次尝试直连 (为了速度，如果直连能通最好)
     # 但如果为了防封，应该直接用代理
     # 这里策略：如果有代理，优先用代理。如果代理全挂了，才尝试直连（或者报错）
-    
+
     for attempt in range(retries + 1):
         if should_stop(stop_event):
             return None
@@ -220,12 +408,12 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
         proxy = proxy_pool.get_proxy()
         # if not proxy:
         #    print("⚠️ No proxy available, trying direct connection...")
-        
+
         try:
             # 增加 timeout，因为代理通常较慢
             # print(f"DEBUG: Requesting {url} with proxy {proxy}")
             session = get_session()
-            resp = session.get(url, headers=headers, timeout=timeout + 5, proxies=proxy)
+            resp = session.get(url, headers=headers, timeout=timeout + 5, proxies=proxy, stream=stream)
             resp.raise_for_status()
             return resp
         except Exception as e:
@@ -289,6 +477,18 @@ def unwrap_cover_url(cover_url: str) -> str:
     return real_url
 
 
+def coerce_html_attr_to_str(value) -> str:
+    """把 BeautifulSoup 属性值安全转成字符串。"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                return item
+        return ""
+    return "" if value is None else str(value)
+
+
 @dataclass
 class HomepageMangaCard:
     section: str
@@ -302,11 +502,11 @@ class HomepageMangaCard:
 
 def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[HomepageMangaCard]:
     cards: List[HomepageMangaCard] = []
-    header = soup.find("h2", string=lambda x: x and x.strip() == heading)
+    header = next((node for node in soup.find_all("h2") if node.get_text(strip=True) == heading), None)
     if not header:
         return cards
 
-    title_link = header.find_parent("a", class_=lambda x: x and "hometitle" in x)
+    title_link = header.find_parent("a", class_=re.compile(r"\bhometitle\b"))
     section_wrapper = None
     if title_link:
         title_row = title_link.find_parent("div")
@@ -319,7 +519,7 @@ def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[Ho
     if not section_wrapper:
         return cards
 
-    cardlist = section_wrapper.find("div", class_=lambda x: x and "cardlist" in x)
+    cardlist = section_wrapper.find("div", class_=re.compile(r"\bcardlist\b"))
     if not cardlist:
         return cards
 
@@ -328,7 +528,7 @@ def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[Ho
         if not item:
             continue
 
-        href = item.get("href", "").strip()
+        href = coerce_html_attr_to_str(item.get("href", "")).strip()
         title_node = item.find("h3")
         img_node = item.find("img")
         title = title_node.get_text(strip=True) if title_node else ""
@@ -343,7 +543,7 @@ def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[Ho
                 title=title,
                 manga_url=manga_url,
                 chapterlist_url=normalize_chapterlist_url(manga_url),
-                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+                cover_url=unwrap_cover_url(coerce_html_attr_to_str(img_node.get("src", "")).strip()) if img_node else "",
             )
         )
 
@@ -352,7 +552,7 @@ def _extract_standard_card_section(soup: BeautifulSoup, heading: str) -> List[Ho
 
 def _extract_recent_update_section(soup: BeautifulSoup) -> List[HomepageMangaCard]:
     cards: List[HomepageMangaCard] = []
-    header = soup.find("h2", string=lambda x: x and x.strip() == "近期更新")
+    header = next((node for node in soup.find_all("h2") if node.get_text(strip=True) == "近期更新"), None)
     if not header:
         return cards
 
@@ -361,11 +561,11 @@ def _extract_recent_update_section(soup: BeautifulSoup) -> List[HomepageMangaCar
         return cards
 
     for item in section_wrapper.select("a.slicarda[href]"):
-        href = item.get("href", "").strip()
+        href = coerce_html_attr_to_str(item.get("href", "")).strip()
         img_node = item.find("img")
-        title_node = item.find("h3", class_=lambda x: x and "slicardtitle" in x)
-        time_node = item.find("p", class_=lambda x: x and "slicardtagp" in x)
-        latest_node = item.find("p", class_=lambda x: x and "slicardtitlep" in x)
+        title_node = item.find("h3", class_=re.compile(r"\bslicardtitle\b"))
+        time_node = item.find("p", class_=re.compile(r"\bslicardtagp\b"))
+        latest_node = item.find("p", class_=re.compile(r"\bslicardtitlep\b"))
 
         title = title_node.get_text(strip=True) if title_node else ""
         if not href or not title:
@@ -378,7 +578,7 @@ def _extract_recent_update_section(soup: BeautifulSoup) -> List[HomepageMangaCar
                 title=title,
                 manga_url=manga_url,
                 chapterlist_url=normalize_chapterlist_url(manga_url),
-                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+                cover_url=unwrap_cover_url(coerce_html_attr_to_str(img_node.get("src", "")).strip()) if img_node else "",
                 latest_chapter=latest_node.get_text(strip=True) if latest_node else "",
                 update_time=time_node.get_text(strip=True) if time_node else "",
             )
@@ -448,7 +648,7 @@ def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageManga
     soup = BeautifulSoup(resp.text, "html.parser")
 
     cards: List[HomepageMangaCard] = []
-    cardlist = soup.find("div", class_=lambda x: x and "cardlist" in x)
+    cardlist = soup.find("div", class_=re.compile(r"\bcardlist\b"))
     if not cardlist:
         return cards
 
@@ -457,7 +657,7 @@ def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageManga
         if not item:
             continue
 
-        href = item.get("href", "").strip()
+        href = coerce_html_attr_to_str(item.get("href", "")).strip()
         title_node = item.find("h3")
         img_node = item.find("img")
         title = title_node.get_text(strip=True) if title_node else ""
@@ -472,7 +672,7 @@ def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageManga
                 title=title,
                 manga_url=manga_url,
                 chapterlist_url=normalize_chapterlist_url(manga_url),
-                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+                cover_url=unwrap_cover_url(coerce_html_attr_to_str(img_node.get("src", "")).strip()) if img_node else "",
             )
         )
 
@@ -500,7 +700,7 @@ def fetch_search_manga_cards(keyword: str, page: int = 1) -> List[HomepageMangaC
     soup = BeautifulSoup(resp.text, "html.parser")
 
     cards: List[HomepageMangaCard] = []
-    cardlist = soup.find("div", class_=lambda x: x and "cardlist" in x)
+    cardlist = soup.find("div", class_=re.compile(r"\bcardlist\b"))
     if not cardlist:
         return cards
 
@@ -509,7 +709,7 @@ def fetch_search_manga_cards(keyword: str, page: int = 1) -> List[HomepageMangaC
         if not item:
             continue
 
-        href = item.get("href", "").strip()
+        href = coerce_html_attr_to_str(item.get("href", "")).strip()
         title_node = item.find("h3")
         img_node = item.find("img")
         title = title_node.get_text(strip=True) if title_node else ""
@@ -524,7 +724,7 @@ def fetch_search_manga_cards(keyword: str, page: int = 1) -> List[HomepageMangaC
                 title=title,
                 manga_url=manga_url,
                 chapterlist_url=normalize_chapterlist_url(manga_url),
-                cover_url=unwrap_cover_url(img_node.get("src", "").strip()) if img_node else "",
+                cover_url=unwrap_cover_url(coerce_html_attr_to_str(img_node.get("src", "")).strip()) if img_node else "",
             )
         )
 
@@ -602,16 +802,16 @@ def download_single_image(args):
     
     if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
         return True, f"⏩ Skipped {filename}"
-    
-    r = safe_request(img_url, timeout=15, retries=2, stop_event=stop_event)
+
+    r = safe_request(img_url, timeout=15, retries=2, stop_event=stop_event, stream=True)
     if not r:
         if should_stop(stop_event):
             return False, f"🛑 Cancelled {filename}"
         return False, f"❌ Failed to download {filename}"
-    
+
     try:
         with open(dest_path, 'wb') as f:
-            for chunk in r.iter_content(8192):
+            for chunk in r.iter_content(65536):
                 if should_stop(stop_event):
                     try:
                         f.close()
@@ -620,10 +820,16 @@ def download_single_image(args):
                     except OSError:
                         pass
                     return False, f"🛑 Cancelled {filename}"
-                f.write(chunk)
+                if chunk:
+                    f.write(chunk)
         return True, f"✅ Saved {filename} ({idx}/{total})"
     except Exception as e:
         return False, f"❌ Failed to save {filename}: {e}"
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
 
 def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHeizhanji",
                             max_concurrent_images=5, stop_event=None, show_progress=True):
@@ -735,7 +941,7 @@ def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHe
     if len(local_files) >= len(img_urls) and len(local_files) > 0:
         with print_lock:
             print(f"⏭️  Skipping Chapter {chapter_slug} ({chapter_dir_name}): already complete ({len(local_files)} images). Next: {next_slug}")
-        return 0, next_slug, {'slug': next_slug}
+        return len(img_urls), next_slug, {'slug': next_slug}
 
     # 准备下载任务
     download_tasks = []
@@ -795,6 +1001,9 @@ def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHe
 
     with print_lock:
         print(f"✅ Chapter {chapter_slug} ({chapter_dir_name}): {success_count}/{len(img_urls)} images downloaded. Next: {next_slug}")
+
+    if success_count < len(img_urls):
+        raise RuntimeError(f"包子漫画图片下载不完整: {success_count}/{len(img_urls)}")
 
     return success_count, next_slug, {'slug': next_slug}
 
@@ -985,11 +1194,10 @@ if __name__ == "__main__":
     elif args.url:
         url = args.url
     else:
-        print("Usage: python downcomic.py [URL] [--start ORDER] [--concurrent N]")
-        print("List homepage: python downcomic.py --list-homepage --homepage-section rank")
-        print("Download homepage item: python downcomic.py --homepage-section rank --homepage-download 1")
-        print("Direct download: python downcomic.py https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi")
-        exit(1)
+        print("ℹ️ 未提供命令行参数，自动启动图形界面...")
+        from run_gui import main as run_gui_main
+        run_gui_main()
+        exit(0)
     
     # 1. 分析 URL 获取漫画信息
     manga_id, manga_slug, url_start_slug = get_manga_info_from_url(url)

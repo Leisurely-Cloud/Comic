@@ -3,7 +3,7 @@ Set-Location -LiteralPath $PSScriptRoot
 
 $versionFile = Join-Path $PSScriptRoot "version_info.txt"
 $releaseRoot = Join-Path $PSScriptRoot "release"
-$version = "2.0.2"
+$version = "2.1.0"
 
 if (Test-Path $versionFile) {
     $versionContent = Get-Content -LiteralPath $versionFile -Raw
