@@ -265,6 +265,11 @@ pyinstaller --clean --noconfirm comic_gui.spec
 
 这些发布文件更适合保存在本地，并按需上传 EXE 到 GitHub Releases，而不是直接放在仓库目录里版本化。
 
+注意：
+
+- `create_release.ps1` 只会生成本地发布目录和附件文件，不会自动创建 GitHub Release
+- 如需让 GitHub 仓库页面显示新的版本发布，仍需要手动在 GitHub 上创建 Release，或使用 `gh release create` 基于对应 tag 发布
+
 ## 故障排查
 
 ### 下载失败或站点无法访问
