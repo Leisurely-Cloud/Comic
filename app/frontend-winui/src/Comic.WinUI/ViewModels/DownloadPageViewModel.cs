@@ -69,6 +69,9 @@ public partial class DownloadPageViewModel : ObservableObject
     public partial bool IsSearching { get; set; }
 
     [ObservableProperty]
+    public partial bool IsResolving { get; set; }
+
+    [ObservableProperty]
     public partial string PageError { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -84,7 +87,11 @@ public partial class DownloadPageViewModel : ObservableObject
 
     public bool HasCurrentTask => CurrentTask is not null;
 
+    public bool HasManga => CurrentManga is not null;
+
     public bool HasChapters => AvailableChapters.Count > 0;
+
+    public bool ShowChapterSelection => HasChapters && !IsResolving;
 
     public int SelectedChapterCount => AvailableChapters.Count(c => c.IsSelected);
 
@@ -142,7 +149,6 @@ public partial class DownloadPageViewModel : ObservableObject
         SearchResults.Clear();
         HasSearchResults = false;
         SearchStatusText = "搜索中...";
-        CurrentManga = null;
         SelectedSearchResult = null;
 
         try
@@ -190,18 +196,19 @@ public partial class DownloadPageViewModel : ObservableObject
         if (item is null) return;
 
         SelectedSearchResult = item;
-        IsBusy = true;
+        IsResolving = true;
         PageError = string.Empty;
 
         try
         {
-            CurrentManga = await _backendClient.ResolveMangaAsync(
+            var detail = await _backendClient.ResolveMangaAsync(
                 new MangaResolveRequest
                 {
                     Url = item.MangaUrl,
                     SiteKey = SelectedSite?.Key ?? "baozimh",
                 },
                 cancellationToken);
+            CurrentManga = detail;
         }
         catch (OperationCanceledException)
         {
@@ -220,8 +227,13 @@ public partial class DownloadPageViewModel : ObservableObject
         }
         finally
         {
-            IsBusy = false;
+            IsResolving = false;
         }
+    }
+
+    partial void OnIsResolvingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowChapterSelection));
     }
 
     partial void OnSelectedSearchResultChanged(SearchResultItemViewModel? value)
@@ -234,6 +246,7 @@ public partial class DownloadPageViewModel : ObservableObject
 
     partial void OnCurrentMangaChanged(MangaResolveResponse? value)
     {
+        OnPropertyChanged(nameof(HasManga));
         AvailableChapters.Clear();
         if (value?.Chapters is { Count: > 0 })
         {
@@ -249,6 +262,7 @@ public partial class DownloadPageViewModel : ObservableObject
             }
         }
         OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(ShowChapterSelection));
         OnPropertyChanged(nameof(SelectedChapterCount));
         OnPropertyChanged(nameof(ChapterSelectionSummary));
     }
