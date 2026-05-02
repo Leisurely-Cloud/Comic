@@ -248,7 +248,7 @@ class ProxyPool:
                     resp = self._new_session().get(url, timeout=10)
                     found = set()
                     if resp.status_code == 200:
-                        for line in resp.text.strip().splitlines():
+                        for line in resp.content.decode("utf-8", errors="replace").strip().splitlines():
                             line = line.strip()
                             if source_pattern.match(line):
                                 found.add(line)
@@ -618,8 +618,7 @@ def fetch_homepage_manga_cards() -> List[HomepageMangaCard]:
     if not resp:
         return []
 
-    resp.encoding = "utf-8"
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.content, "html.parser")
 
     cards: List[HomepageMangaCard] = []
     cards.extend(_extract_recent_update_section(soup))
@@ -639,8 +638,7 @@ def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageManga
         homepage_resp = safe_request(build_absolute_url("/"), retries=1)
         if not homepage_resp:
             return []
-        homepage_resp.encoding = "utf-8"
-        return _extract_recent_update_section(BeautifulSoup(homepage_resp.text, "html.parser"))
+        return _extract_recent_update_section(BeautifulSoup(homepage_resp.content, "html.parser"))
 
     section_paths = {
         "rank": "/hots",
@@ -665,8 +663,7 @@ def fetch_section_manga_cards(section: str, page: int = 1) -> List[HomepageManga
     if not resp:
         return []
 
-    resp.encoding = "utf-8"
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.content, "html.parser")
 
     cards: List[HomepageMangaCard] = []
     cardlist = soup.find("div", class_=re.compile(r"\bcardlist\b"))
@@ -717,8 +714,7 @@ def fetch_search_manga_cards(keyword: str, page: int = 1) -> List[HomepageMangaC
     if not resp:
         return []
 
-    resp.encoding = "utf-8"
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.content, "html.parser")
 
     cards: List[HomepageMangaCard] = []
     cardlist = soup.find("div", class_=re.compile(r"\bcardlist\b"))
@@ -874,10 +870,7 @@ def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHe
     if not resp:
         return 0, None, None
 
-    # 强制使用 UTF-8 编码，防止中文乱码
-    resp.encoding = 'utf-8'
-
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.content, "html.parser")
     
     # 2. 提取 API 所需参数 (data-ms, data-cs)
     content_div = soup.find("div", id="chapterContent")
@@ -1077,9 +1070,7 @@ def get_manga_info_from_url(url):
     if not resp:
         return None, None, None
         
-    # 强制 UTF-8
-    resp.encoding = 'utf-8'
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.content, "html.parser")
     
     # 尝试从目录页提取 data-mid
     # <div class="pb-6" id="allchapters" data-mid="878" ...>

@@ -68,8 +68,7 @@ class BaozimhAdapter(BaseSiteAdapter):
         try:
             response = baozimh_safe_request(detail_url, retries=1)
             if response is not None:
-                response.encoding = "utf-8"
-                cover_url = extract_cover_url_from_html(response.text, detail_url)
+                cover_url = extract_cover_url_from_html(response.content, detail_url)
         except Exception:
             cover_url = ""
 

@@ -241,7 +241,7 @@ def resolve_media_url(base_url: str, raw_url: Any) -> str:
     return urljoin(base_url, candidate)
 
 
-def extract_cover_url_from_html(html: str, base_url: str) -> str:
+def extract_cover_url_from_html(html: str | bytes, base_url: str) -> str:
     soup = BeautifulSoup(html or "", "html.parser")
     candidates = [
         ('meta[property="og:image"]', "content"),
