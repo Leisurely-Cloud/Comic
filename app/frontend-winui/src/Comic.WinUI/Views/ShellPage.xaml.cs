@@ -55,8 +55,6 @@ public sealed partial class ShellPage : Page
 
     private void OnContentFrameNavigated(object sender, NavigationEventArgs e)
     {
-        AppNavigationView.IsBackButtonVisible = ContentFrame.CanGoBack
-            ? NavigationViewBackButtonVisible.Visible
-            : NavigationViewBackButtonVisible.Collapsed;
+        AppNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
     }
 }

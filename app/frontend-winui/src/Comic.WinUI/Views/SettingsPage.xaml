@@ -7,7 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,24" MaxWidth="700" HorizontalAlignment="Left">
+    <Grid Padding="24,16,24,24">
         <StackPanel Spacing="16">
             <TextBlock Text="应用设置" Style="{StaticResource TitleTextBlockStyle}" />
 

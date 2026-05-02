@@ -8,6 +8,8 @@ public sealed class SiteOption
     public required string Key { get; init; }
 
     public required string DisplayName { get; init; }
+
+    public override string ToString() => DisplayName;
 }
 
 public static class SiteCatalog

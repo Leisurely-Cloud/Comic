@@ -27,6 +27,7 @@ public partial class DownloadPageViewModel : ObservableObject
 
     private CancellationTokenSource? _subscriptionCts;
     private CancellationTokenSource? _searchCts;
+    private CancellationTokenSource? _resolveCts;
     private int _lastEventId;
 
     public DownloadPageViewModel(BackendClient backendClient, DownloadEventStream eventStream, ShellViewModel shellViewModel)
@@ -195,6 +196,10 @@ public partial class DownloadPageViewModel : ObservableObject
     {
         if (item is null) return;
 
+        _resolveCts?.Cancel();
+        _resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = _resolveCts.Token;
+
         SelectedSearchResult = item;
         IsResolving = true;
         PageError = string.Empty;
@@ -207,7 +212,7 @@ public partial class DownloadPageViewModel : ObservableObject
                     Url = item.MangaUrl,
                     SiteKey = SelectedSite?.Key ?? "baozimh",
                 },
-                cancellationToken);
+                token);
             CurrentManga = detail;
         }
         catch (OperationCanceledException)
@@ -227,7 +232,10 @@ public partial class DownloadPageViewModel : ObservableObject
         }
         finally
         {
-            IsResolving = false;
+            if (!token.IsCancellationRequested)
+            {
+                IsResolving = false;
+            }
         }
     }
 
