@@ -12,7 +12,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Search Bar -->
@@ -311,6 +310,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="160" />
                         </Grid.RowDefinitions>
                         <Grid Grid.Row="0" ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
@@ -367,46 +367,43 @@
                                 </DataTemplate>
                             </ListView.ItemTemplate>
                         </ListView>
+                        <!-- Log Panel -->
+                        <Border Grid.Row="3" Margin="0,8,0,0" Padding="10" CornerRadius="8"
+                                Background="{ThemeResource ControlFillColorDefaultBrush}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" ColumnSpacing="8" Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="实时日志"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}" FontSize="13" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.CurrentTask.Status, Mode=OneWay}"
+                                               Opacity="0.6" FontSize="12" />
+                                </Grid>
+                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentTask.Logs, Mode=OneWay}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:DownloadLogEntry"
+                                                          xmlns:models="using:Comic.WinUI.Models">
+                                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,1">
+                                                    <TextBlock Text="{x:Bind Time}" Opacity="0.5" FontSize="11" MinWidth="70" />
+                                                    <TextBlock Text="{x:Bind Tag}" Opacity="0.6" FontSize="11" MinWidth="36" />
+                                                    <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" FontSize="11" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
                     </Grid>
                 </Border>
             </Grid>
         </Grid>
-
-        <!-- Bottom: Log -->
-        <Border Grid.Row="2" Margin="0,12,0,0" Padding="12" CornerRadius="10" MaxHeight="140"
-                BorderThickness="1"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Grid Grid.Row="0" ColumnSpacing="8" Margin="0,0,0,6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="实时日志"
-                               Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.CurrentTask.Status, Mode=OneWay}"
-                               Opacity="0.6" />
-                </Grid>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentTask.Logs, Mode=OneWay}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:DownloadLogEntry"
-                                          xmlns:models="using:Comic.WinUI.Models">
-                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
-                                    <TextBlock Text="{x:Bind Time}" Opacity="0.5" FontSize="11" MinWidth="80" />
-                                    <TextBlock Text="{x:Bind Tag}" Opacity="0.6" FontSize="11" MinWidth="40" />
-                                    <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" FontSize="12" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Grid>
-        </Border>
     </Grid>
 </Page>
