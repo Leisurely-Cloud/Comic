@@ -456,6 +456,57 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
                 return None
 
 
+# Cloudflare 会根据 TLS 指纹拦截 Python requests/urllib 对 api-get-v3.mgsearcher.com 的请求。
+# curl 使用系统 OpenSSL，TLS 指纹不被拦截，通过 subprocess 调用作为后备方案。
+
+
+def _api_fetch_json(url: str, referer: str = "", timeout: int = 15) -> dict | None:
+    """请求 Cloudflare 保护的 API，返回解析后的 JSON 或 None。
+
+    优先使用 requests（速度快），若失败则回退到 subprocess + curl（绕过 TLS 指纹检测）。
+    """
+    import random
+    import subprocess
+
+    referer = referer or "https://baozimh.org/"
+    ua = random.choice(USER_AGENTS)
+
+    # 尝试 requests 直连
+    try:
+        session = get_session()
+        resp = session.get(
+            url,
+            headers={"Accept": "application/json, text/plain, */*", "Referer": referer, "User-Agent": ua},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        pass
+
+    # 回退到 curl（绕过 Cloudflare TLS 指纹检测）
+    try:
+        result = subprocess.run(
+            [
+                "curl", "-sL",
+                "--connect-timeout", str(min(timeout, 10)),
+                "--max-time", str(timeout),
+                "-H", f"User-Agent: {ua}",
+                "-H", f"Referer: {referer}",
+                url,
+            ],
+            capture_output=True,
+            timeout=timeout + 5,
+        )
+        if result.returncode == 0 and result.stdout:
+            return json.loads(result.stdout)
+    except Exception as e:
+        with print_lock:
+            print(f"⚠️ curl API request failed: {e}")
+
+    return None
+
+
 def sanitize_filename(name: str) -> str:
     """去除文件名中非法字符"""
     return re.sub(r'[\\/:*?"<>|]', '_', name.strip())
@@ -888,21 +939,17 @@ def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHe
             print(f"⚠️ Missing data-ms or data-cs for {chapter_url}")
         return 0, None, None
 
-    # 3. 调用 API 获取图片列表
+    # 3. 调用 API 获取图片列表 (requests 失败时回退到 curl 绕过 Cloudflare)
     api_url = f"https://api-get-v3.mgsearcher.com/api/chapter/getinfo?m={manga_id}&c={chapter_id}"
-    # API 请求需要 Referer 为章节页面
-    api_headers = HEADERS.copy()
-    api_headers["Referer"] = chapter_url
-    
-    api_resp = safe_request(api_url, headers=api_headers, stop_event=stop_event)
+
+    data = _api_fetch_json(api_url, referer=chapter_url)
     next_slug = None
     order = 0
 
-    if not api_resp:
+    if not data:
         return 0, None, None
-        
+
     try:
-        data = api_resp.json()
         if not data.get("data") or not data["data"].get("info") or not data["data"]["info"].get("images"):
             with print_lock:
                 print(f"⚠️ Invalid API response structure for {chapter_url}")
@@ -1109,22 +1156,21 @@ def get_all_chapters(manga_id):
     api_url = f"https://api-get-v3.mgsearcher.com/api/manga/get?mid={manga_id}&mode=all"
     with print_lock:
         print(f"🔍 Fetching chapter list from API: {api_url}")
-    
-    resp = safe_request(api_url)
-    if not resp:
+
+    data = _api_fetch_json(api_url)
+    if not data:
         return None, []
-        
+
     try:
-        data = resp.json()
         if not data.get("status") or not data.get("data") or not data["data"].get("chapters"):
             with print_lock:
                 print("⚠️ Invalid chapter list API response")
             return None, []
-            
+
         manga_data = data["data"]
         manga_title = manga_data.get("title", f"Manga_{manga_id}")
         chapters_data = manga_data["chapters"]
-        
+
         chapters = []
         for item in chapters_data:
             attr = item.get("attributes", {})
@@ -1134,15 +1180,15 @@ def get_all_chapters(manga_id):
                 "title": attr.get("title"),
                 "updated_at": attr.get("updatedAt")
             })
-        
+
         # 按 order 排序 (从小到大)
         chapters.sort(key=lambda x: x["order"])
-        
+
         with print_lock:
             print(f"✅ Found manga: {manga_title}, {len(chapters)} chapters.")
-            
+
         return manga_title, chapters
-        
+
     except Exception as e:
         with print_lock:
             print(f"⚠️ Failed to parse chapter list: {e}")
