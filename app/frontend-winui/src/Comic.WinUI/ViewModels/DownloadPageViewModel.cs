@@ -45,6 +45,8 @@ public partial class DownloadPageViewModel : ObservableObject
 
     public ObservableCollection<SearchResultItemViewModel> SearchResults { get; } = [];
 
+    public ObservableCollection<ChapterItemViewModel> AvailableChapters { get; } = [];
+
     [ObservableProperty]
     public partial MangaResolveResponse? CurrentManga { get; set; }
 
@@ -81,6 +83,14 @@ public partial class DownloadPageViewModel : ObservableObject
     public string TaskCountSummary => Tasks.Count == 0 ? "暂无任务" : $"共 {Tasks.Count} 个任务";
 
     public bool HasCurrentTask => CurrentTask is not null;
+
+    public bool HasChapters => AvailableChapters.Count > 0;
+
+    public int SelectedChapterCount => AvailableChapters.Count(c => c.IsSelected);
+
+    public string ChapterSelectionSummary => HasChapters
+        ? $"已选 {SelectedChapterCount} / {AvailableChapters.Count} 章"
+        : "暂无章节";
 
     [RelayCommand]
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -222,6 +232,39 @@ public partial class DownloadPageViewModel : ObservableObject
         }
     }
 
+    partial void OnCurrentMangaChanged(MangaResolveResponse? value)
+    {
+        AvailableChapters.Clear();
+        if (value?.Chapters is { Count: > 0 })
+        {
+            foreach (var ch in value.Chapters)
+            {
+                var item = new ChapterItemViewModel { Title = ch.Title, IsSelected = true };
+                item.PropertyChanged += (_, _) =>
+                {
+                    OnPropertyChanged(nameof(SelectedChapterCount));
+                    OnPropertyChanged(nameof(ChapterSelectionSummary));
+                };
+                AvailableChapters.Add(item);
+            }
+        }
+        OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(SelectedChapterCount));
+        OnPropertyChanged(nameof(ChapterSelectionSummary));
+    }
+
+    [RelayCommand]
+    private void SelectAllChapters()
+    {
+        foreach (var ch in AvailableChapters) ch.IsSelected = true;
+    }
+
+    [RelayCommand]
+    private void DeselectAllChapters()
+    {
+        foreach (var ch in AvailableChapters) ch.IsSelected = false;
+    }
+
     [RelayCommand]
     public async Task StartDownloadAsync(CancellationToken cancellationToken = default)
     {
@@ -236,12 +279,17 @@ public partial class DownloadPageViewModel : ObservableObject
         PageError = string.Empty;
         try
         {
+            var selectedChapters = HasChapters
+                ? AvailableChapters.Where(c => c.IsSelected).Select(c => c.Title).ToList()
+                : null;
+
             var task = await _backendClient.CreateDownloadAsync(
                 new DownloadCreateRequest
                 {
                     Url = downloadUrl,
                     SiteKey = SelectedSite?.Key ?? "baozimh",
                     Source = "winui",
+                    Chapters = selectedChapters,
                 },
                 cancellationToken);
 
@@ -545,4 +593,13 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         OnPropertyChanged(nameof(SiteLabel));
         OnPropertyChanged(nameof(LatestLogMessage));
     }
+}
+
+public partial class ChapterItemViewModel : ObservableObject
+{
+    [ObservableProperty]
+    public partial string Title { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
 }

@@ -129,9 +129,10 @@
                 </Grid>
             </Border>
 
-            <!-- Right: Detail + Tasks -->
+            <!-- Right: Detail + Chapters + Tasks -->
             <Grid Grid.Column="1" RowSpacing="12">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
@@ -212,8 +213,53 @@
                     </ScrollViewer>
                 </Border>
 
-                <!-- Task List -->
+                <!-- Chapter Selection -->
                 <Border Grid.Row="1" Padding="16" CornerRadius="12" BorderThickness="1" Margin="0,12,0,0"
+                        Visibility="{x:Bind ViewModel.HasChapters, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="章节选择"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{x:Bind ViewModel.ChapterSelectionSummary, Mode=OneWay}"
+                                       Opacity="0.6" VerticalAlignment="Center" />
+                        </Grid>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                            <Button Command="{x:Bind ViewModel.SelectAllChaptersCommand}" Padding="8,4">
+                                <TextBlock Text="全选" FontSize="12" />
+                            </Button>
+                            <Button Command="{x:Bind ViewModel.DeselectAllChaptersCommand}" Padding="8,4">
+                                <TextBlock Text="取消全选" FontSize="12" />
+                            </Button>
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="2" MaxHeight="240" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableChapters, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="viewModels:ChapterItemViewModel"
+                                                  xmlns:viewModels="using:Comic_WinUI.ViewModels">
+                                        <CheckBox Content="{x:Bind Title}"
+                                                  IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                                  Margin="0,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <!-- Task List -->
+                <Border Grid.Row="2" Padding="16" CornerRadius="12" BorderThickness="1" Margin="0,12,0,0"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                     <Grid>
