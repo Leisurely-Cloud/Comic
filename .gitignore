@@ -1,18 +1,60 @@
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
+venv/
+ENV/
+.pytest_cache/
+
+# IDE
 .vscode/
 .idea/
+.vs/
+*.suo
+*.user
+*.sln.docstates
+
+# Build outputs
 build/
 build_pyinstaller/
 dist/
 dist_build/
 release/
-*.pyc
-*.zip
-app.ico
-download_resume_data.json
+
+# Temp files
+.tmp/
+*.tmp
+*.bak
+*.cache
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project specific
 manga_detail_cache.json
+download_resume_data.json
 元数据.json
-core_mhgui.js
 *_CBZ/
 *.cbz
+
+# AI tooling
+.trellis/
+.claude/
+
+# WinUI3 build outputs
+**/bin/
+**/obj/
+**/Debug/
+**/Release/
+
+# Backend runtime artifacts
+app/backend/backend-*.out.log
+app/backend/backend-*.err.log
+
+# Large files that shouldn't be in repo
+core_mhgui.js
