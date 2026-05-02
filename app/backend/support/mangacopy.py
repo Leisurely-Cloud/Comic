@@ -713,7 +713,7 @@ class MangaCopyAdapter(BaseSiteAdapter):
         page = max(int(page or 1), 1)
         offset = (page - 1) * 12
         search_url = self._build_site_url(
-            f"/api/kb/web/searchch/comics?offset={offset}&platform=2&limit=12&q={quote(keyword)}&q_type="
+            f"/api/kb/web/searchci/comics?offset={offset}&platform=2&limit=12&q={quote(keyword)}&q_type="
         )
         response = self._request(
             "GET",
