@@ -1,3 +1,5 @@
 requests>=2.28
 beautifulsoup4>=4.12
-tqdm>=4.65
+
+# Optional: tqdm for CLI progress bars (not needed for API server)
+# tqdm>=4.65

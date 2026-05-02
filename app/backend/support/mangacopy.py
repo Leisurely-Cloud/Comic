@@ -11,7 +11,13 @@ from urllib.parse import quote, urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(*args, **kwargs):  # type: ignore[misc]
+        if args:
+            return args[0]
+        return kwargs.get("iterable", [])
 
 from .downcomic import (
     HomepageMangaCard,
