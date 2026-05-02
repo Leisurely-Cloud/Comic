@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Comic.WinUI.Models"
     mc:Ignorable="d">
 
     <Grid Padding="24,16,24,24" RowSpacing="12">
@@ -15,10 +16,11 @@
         </Grid.RowDefinitions>
 
         <!-- Search Bar -->
-        <Border Grid.Row="0" Padding="16" CornerRadius="12" BorderThickness="1"
+        <Border Grid.Row="0" Padding="20,16" CornerRadius="12" BorderThickness="1"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-            <StackPanel Spacing="10">
+            <StackPanel Spacing="14">
+                <!-- Title + Backend buttons -->
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -44,21 +46,27 @@
                         </Button>
                     </StackPanel>
                 </Grid>
-                <Grid ColumnSpacing="12">
+                <!-- Search inputs -->
+                <Grid ColumnSpacing="12" Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ComboBox Grid.Column="0" Header="站点"
                               VerticalAlignment="Bottom"
                               ItemsSource="{x:Bind ViewModel.SiteOptions, Mode=OneWay}"
-                              SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}"
-                              DisplayMemberPath="DisplayName" />
+                              SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:SiteOption">
+                                <TextBlock Text="{x:Bind DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBox Grid.Column="1" Header="漫画名称"
                              PlaceholderText="输入关键词搜索..."
                              Text="{x:Bind ViewModel.SearchKeyword, Mode=TwoWay}" />
-                    <Button Grid.Column="2" VerticalAlignment="Bottom"
+                    <Button Grid.Column="2" VerticalAlignment="Bottom" MinWidth="90"
                             Style="{StaticResource AccentButtonStyle}"
                             Command="{x:Bind ViewModel.SearchCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -67,6 +75,7 @@
                         </StackPanel>
                     </Button>
                 </Grid>
+                <!-- Error message -->
                 <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
                            Foreground="Tomato" TextWrapping="WrapWholeWords" />
             </StackPanel>

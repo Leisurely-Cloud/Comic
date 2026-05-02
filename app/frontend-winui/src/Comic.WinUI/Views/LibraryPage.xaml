@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Comic.WinUI.Models"
     mc:Ignorable="d">
 
     <Grid Padding="24,16,24,24" RowSpacing="12">
@@ -53,8 +54,13 @@
                     <ComboBox Grid.Column="0" Header="站点"
                               VerticalAlignment="Bottom"
                               ItemsSource="{x:Bind ViewModel.SiteOptions, Mode=OneWay}"
-                              SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}"
-                              DisplayMemberPath="DisplayName" />
+                              SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:SiteOption">
+                                <TextBlock Text="{x:Bind DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBox Grid.Column="1" Header="关键词"
                              PlaceholderText="搜索本地漫画..."
                              Text="{x:Bind ViewModel.Keyword, Mode=TwoWay}" />
