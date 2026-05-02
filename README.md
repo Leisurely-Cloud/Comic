@@ -1,310 +1,151 @@
-# Comic
+# Comic Downloader / 漫画下载器
 
-一个面向 Windows 的多站点漫画下载器，支持图形界面下载，也保留命令行能力。
+[English](#english) | [中文](#中文)
 
-适合用来：
+---
 
-- 直接通过 GUI 下载和管理漫画
-- 浏览首页发现、站内搜索或粘贴链接发起下载
-- 管理本地漫画库，并导出 ZIP / CBZ
-- 使用内置打包脚本生成 Windows EXE 进行分发
+![screenshot](./docs/screenshot.png)
 
-目前项目以 GUI 为主：
+---
 
-- GUI 负责日常使用，支持站点切换、搜索、首页发现、手动 URL 下载、本地漫画库、ZIP 打包和 CBZ 导出
-- CLI 保留轻量下载能力，当前主要用于 `baozimh.org`
-- 项目内置 PyInstaller 打包脚本，可直接生成 Windows EXE
+## English
 
-## 当前支持范围
+A desktop manga/comic downloader with a modern WinUI 3 interface and a local Python backend API. Supports multiple manga sites, batch chapter downloads, CBZ export, and a built-in local library browser.
 
-### GUI 站点支持
+### Features
 
-| 站点 | 首页发现 | 站内搜索 | 手动 URL 下载 | 说明 |
-| --- | --- | --- | --- | --- |
-| 包子漫画 | 支持 | 支持 | 支持 | 保留原有下载流程 |
-| 拷贝漫画 | 支持 | 支持 | 支持 | 支持手动代理和连接测试 |
-| 漫画柜 | 支持（排行榜） | 支持 | 支持 | 当前已接入日/周/月/总排行，章节解析可能稍慢 |
+- **Multi-site support** — Baozimh, MangaCopy, Manhuagui, and more
+- **Batch download** — Select and download multiple chapters at once
+- **CBZ export** — Export downloaded manga to CBZ format for comic readers
+- **Local library** — Browse and manage your downloaded manga collection
+- **Download control** — Pause, resume, and stop downloads with real-time progress
+- **Proxy support** — Configure HTTP proxy for region-restricted sites
+- **Modern UI** — Native WinUI 3 desktop app with light/dark theme support
 
-### CLI 支持
+### Architecture
 
-| 入口 | 当前状态 |
-| --- | --- |
-| `downcomic.py` | 主要面向 `baozimh.org` |
-| `run_gui.py` | Windows GUI 启动入口 |
-
-## 功能特性
-
-- 支持包子漫画、拷贝漫画、漫画柜三站 GUI 下载
-- 支持自动识别链接，也可以手动切换站点
-- 支持首页发现、站内搜索和手动链接下载
-- 支持章节并发、图片并发、暂停、继续和停止
-- 自动跳过已下载图片，支持断点续传
-- 下载完成后可一键打包整部漫画为 ZIP
-- 已下载漫画可导出为章节级 CBZ，并写入 `ComicInfo.xml`
-- 支持本地漫画库浏览、搜索、封面显示和更新检查
-- 支持手动代理与连通性测试
-- 自带 EXE 打包脚本和发布目录生成脚本
-
-## 项目结构
-
-```text
-Comic/
-├── build_exe.ps1          # PyInstaller 一键打包脚本
-├── comic_gui.py           # GUI 主程序
-├── comic_gui.spec         # PyInstaller 配置
-├── create_release.ps1     # 发布目录生成脚本
-├── downcomic.py           # 命令行下载器（当前以包子漫画为主）
-├── LICENSE                # MIT License
-├── README.md              # 项目说明
-├── requirements.txt       # Python 依赖
-├── run_gui.py             # GUI 启动入口
-├── site_adapters.py       # 多站点适配层
-├── storage_paths.py       # 默认下载目录与运行时状态路径
-├── version_info.txt       # Windows EXE 版本信息
-└── release/               # 本地生成的 EXE 发布目录，用于上传 GitHub Releases
+```
+app/
+├── frontend-winui/    # WinUI 3 desktop client (C#, .NET 9, MVVM)
+└── backend/           # Local HTTP API (Python)
 ```
 
-## 环境要求
+- The WinUI client communicates with the backend via REST API on `http://127.0.0.1:18765/`
+- The client can start/stop the backend process automatically
+- Download progress is streamed via Server-Sent Events (SSE)
 
-- Python 3.10+
+### Quick Start
+
+**Prerequisites:**
 - Windows 10/11
-- 可访问目标漫画站点
-- GUI 依赖 `tkinter`
-- 打包 EXE 时需要 `pyinstaller`
+- .NET 9 SDK
+- Python 3.10+
 
-说明：
+**One-click launch:**
 
-- 漫画柜适配带有 `cscript.exe` 兜底解析逻辑，因此更推荐在 Windows 下使用完整 GUI 功能
-- 打包后的 EXE 面向 Windows 使用
-
-## 安装
-
-```bash
-git clone https://github.com/Leisurely-Cloud/Comic.git
-cd Comic
-pip install -r requirements.txt
+```bat
+start-winui.cmd
 ```
 
-依赖包括：
-
-- `requests`
-- `beautifulsoup4`
-- `tqdm`
-- `lxml`
-- `urllib3`
-- `pillow`
-
-## 快速开始
-
-### 启动 GUI
-
-```bash
-python run_gui.py
-```
-
-进入 GUI 后，一般按下面的流程使用：
-
-1. 选择站点，或直接粘贴目标漫画链接
-2. 点击“获取信息”确认漫画详情
-3. 按需设置章节并发数、图片并发数、代理
-4. 点击“开始下载”
-5. 下载完成后可直接打包 ZIP，或在本地漫画库里导出 CBZ
-
-### 使用首页发现和搜索
-
-- 包子漫画、拷贝漫画支持首页分区浏览
-- 漫画柜当前支持排行榜、站内搜索和手动 URL 下载
-- “本地已下载”分区会优先扫描默认下载目录，并兼容读取旧项目目录中的历史下载内容
-
-### 手动代理与连通性测试
-
-GUI 中提供：
-
-- 手动填写 `HTTP/HTTPS/SOCKS5` 代理地址
-- “应用代理”
-- “测试连接”
-
-适合填写自己的代理节点，并用“测试连接”快速判断当前网络是否可用。
-
-CLI 仍保留 `--proxy` 代理池参数，但目前 GUI 主界面还没有单独提供代理池开关。
-
-## 命令行用法
-
-当前命令行入口 `downcomic.py` 主要面向 `baozimh.org`。
-
-下载整部漫画：
-
-```bash
-python downcomic.py "https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi"
-```
-
-详情页链接也可以直接传入：
-
-```bash
-python downcomic.py "https://baozimh.org/manga/dafengdagengren-chuyingshe"
-```
-
-从指定章节开始下载：
-
-```bash
-python downcomic.py "https://baozimh.org/chapterlist/wozhenmeixiangzhongshenga-pikapi" --start 10
-```
-
-启用代理池：
-
-```bash
-python downcomic.py "URL" --proxy
-```
-
-调整并发：
-
-```bash
-python downcomic.py "URL" --concurrent 3 --image-concurrent 4
-```
-
-关闭进度条：
-
-```bash
-python downcomic.py "URL" --no-progress
-```
-
-### 首页榜单抓取
-
-抓取首页“人气排行”前 5 条：
-
-```bash
-python downcomic.py --list-homepage --homepage-section rank --homepage-limit 5
-```
-
-以 JSON 输出：
-
-```bash
-python downcomic.py --list-homepage --homepage-section recent --homepage-limit 5 --homepage-json
-```
-
-直接下载首页筛选结果中的第 1 部漫画：
-
-```bash
-python downcomic.py --homepage-section rank --homepage-limit 5 --homepage-download 1
-```
-
-### CLI 参数
-
-| 参数 | 说明 | 默认值 |
-| --- | --- | --- |
-| `url` | 漫画目录页、详情页或章节页链接 | 无 |
-| `--start` | 从指定章节序号开始下载 | 从头开始 |
-| `--concurrent` | 最大章节并发数 | `5` |
-| `--image-concurrent` | 每章节图片最大并发数 | `5` |
-| `--proxy` | 启用代理池 | 关闭 |
-| `--no-progress` | 禁用进度条 | 关闭 |
-| `--list-homepage` | 抓取并输出首页漫画列表 | 关闭 |
-| `--homepage-section` | 首页分区筛选：`all/recent/hot-update/rank/new` | `all` |
-| `--homepage-limit` | 首页结果数量限制 | `10` |
-| `--homepage-json` | 以 JSON 格式输出首页结果 | 关闭 |
-| `--homepage-download` | 下载筛选结果中的第 N 项 | 不启用 |
-
-## 本地文件说明
-
-默认情况下，下载内容和运行时缓存不会写到项目目录，而是保存到：
-
-- `C:\Users\<用户名>\Downloads\ComicDownloads\`
-- 如果系统没有 `Downloads` 目录，则回退到 `C:\Users\<用户名>\ComicDownloads\`
-- 也可以通过环境变量 `COMIC_DOWNLOAD_DIR` 自定义保存目录
-- 程序会在首次下载或写入缓存时自动创建该目录，以及其中的 `.comic_state/` 子目录
-
-其中常见的本地文件包括：
-
-- `.comic_state/download_resume_data.json`：断点续传信息
-- `.comic_state/manga_detail_cache.json`：漫画详情缓存
-- `[漫画目录]/元数据.json`：单部漫画的本地库元数据
-- `[漫画名].zip`：下载完成后导出的整部漫画 ZIP
-- `[漫画名]_CBZ/`：章节级 CBZ 导出目录
-
-这些文件主要用于本地使用和恢复下载状态，不属于核心源码。
-
-## 打包为 Windows EXE
-
-安装打包工具：
-
-```bash
-pip install pyinstaller
-```
-
-一键打包：
+**Manual run:**
 
 ```powershell
-.\build_exe.ps1
+# Backend
+.\.venv\Scripts\python.exe .\app\backend\run_backend.py
+
+# Frontend
+dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
 ```
 
-脚本会：
+**Download storage:** `%USERPROFILE%\Downloads\ComicDownloads` (configurable via `COMIC_DOWNLOAD_DIR` environment variable)
 
-- 调用 `comic_gui.spec`
-- 在 `dist_build/<时间戳>/` 生成构建结果
-- 自动把主程序重命名为 `漫画下载器.exe`
-- 当前没有内置图标文件，默认按无图标方式打包
-
-手动打包：
-
-```bash
-pyinstaller --clean --noconfirm comic_gui.spec
-```
-
-## 生成发布包
+### Tests
 
 ```powershell
-.\create_release.ps1
+.\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
 ```
 
-脚本会根据 `version_info.txt` 中的版本号生成本地发布目录，典型产物如下：
+### Tech Stack
 
-- `release/漫画下载器-v<版本号>/漫画下载器.exe`
-- `release/漫画下载器-v<版本号>/使用说明.txt`
+| Component | Technology |
+|-----------|------------|
+| Frontend | WinUI 3, C# 12, .NET 9, CommunityToolkit.Mvvm |
+| Backend | Python 3.10+, stdlib http.server |
+| Communication | REST API + SSE |
+| Packaging | Self-contained, unpackaged (no MSIX) |
 
-这些发布文件更适合保存在本地，再按需上传到 GitHub Releases，而不是直接提交到仓库里。
+### License
 
-注意：
+[MIT](./LICENSE)
 
-- `create_release.ps1` 只会生成本地发布目录和附件文件，不会自动创建 GitHub Release
-- 如需让 GitHub 仓库页面显示新的版本发布，仍需要手动在 GitHub 上创建 Release，或使用 `gh release create` 基于对应 tag 发布
+---
 
-## 故障排查
+## 中文
 
-### 下载失败或站点无法访问
+一款桌面端漫画下载器，采用现代化的 WinUI 3 界面配合本地 Python 后端 API。支持多站点搜索、批量章节下载、CBZ 导出和本地书库浏览。
 
-建议按这个顺序检查：
+### 功能特性
 
-1. 浏览器能否直接打开目标站点
-2. GUI 中点击“测试连接”查看是否为网络问题
-3. 必要时填写代理并重新测试
-4. 适当降低章节并发和图片并发
+- **多站点支持** — 包子漫画、MangaCopy、漫画柜等
+- **批量下载** — 选择多个章节一键下载
+- **CBZ 导出** — 将下载的漫画导出为 CBZ 格式，方便在各类阅读器中使用
+- **本地书库** — 浏览和管理已下载的漫画
+- **下载控制** — 支持暂停、继续、停止，实时显示下载进度
+- **代理支持** — 可配置 HTTP 代理访问受限站点
+- **现代化界面** — 原生 WinUI 3 桌面应用，支持明暗主题
 
-### 漫画柜停止较慢
+### 项目结构
 
-漫画柜部分请求依赖网页抓取。如果刚好卡在网络请求阶段，点击“停止下载”后，可能要等当前请求超时才会完全结束。
+```
+app/
+├── frontend-winui/    # WinUI 3 桌面客户端 (C#, .NET 9, MVVM)
+└── backend/           # 本地 HTTP API (Python)
+```
 
-### GUI 无法启动
+- WinUI 客户端通过 REST API 与后端通信，地址 `http://127.0.0.1:18765/`
+- 客户端可自动启动/停止后端进程
+- 下载进度通过 SSE (Server-Sent Events) 实时推送
 
-请确认：
+### 快速开始
 
-- Python 环境可用
-- `tkinter` 已安装
-- 已正确安装 `requirements.txt` 中的依赖
+**环境要求：**
+- Windows 10/11
+- .NET 9 SDK
+- Python 3.10+
 
-## 开发说明
+**一键启动：**
 
-如果要继续开发，建议优先查看：
+```bat
+start-winui.cmd
+```
 
-- `site_adapters.py`：站点适配、搜索、章节获取、下载实现
-- `comic_gui.py`：GUI、下载控制、本地库、ZIP/CBZ 导出
-- `downcomic.py`：CLI 下载逻辑
-- `run_gui.py`：GUI 启动与依赖检查
-- `build_exe.ps1` / `create_release.ps1`：打包与发布流程
+**手动运行：**
 
-## 免责声明
+```powershell
+# 后端
+.\.venv\Scripts\python.exe .\app\backend\run_backend.py
 
-本项目仅用于技术学习、研究与个人测试。请在遵守目标站点服务条款、版权规定及所在地法律法规的前提下使用本项目。因不当使用造成的任何后果，由使用者自行承担。
+# 前端
+dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
+```
 
-## License
+**下载存储位置：** `%USERPROFILE%\Downloads\ComicDownloads`（可通过环境变量 `COMIC_DOWNLOAD_DIR` 自定义）
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+### 测试
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
+```
+
+### 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| 前端 | WinUI 3, C# 12, .NET 9, CommunityToolkit.Mvvm |
+| 后端 | Python 3.10+, 标准库 http.server |
+| 通信 | REST API + SSE |
+| 打包 | 自包含，非打包部署（无 MSIX） |
+
+### 许可证
+
+[MIT](./LICENSE)
