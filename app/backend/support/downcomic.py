@@ -62,8 +62,6 @@ class ProxyPool:
         # 扩展的免费代理源，包含几个高可用列表
         self.proxy_sources = [
             "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-            # "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-            # "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all",
             "https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt"
         ]
         self.enabled = False # 默认开启
@@ -349,7 +347,6 @@ class ProxyPool:
         with self.lock:
             if proxy_ip in self.proxies:
                 self.proxies.remove(proxy_ip)
-                # print(f"🗑️ Removed bad proxy: {proxy_ip}")
 
     def clear_cached_proxies(self):
         """清空当前缓存的代理节点，强制下次重新拉取。"""
@@ -427,12 +424,8 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
             return None
 
         proxy = proxy_pool.get_proxy()
-        # if not proxy:
-        #    print("⚠️ No proxy available, trying direct connection...")
 
         try:
-            # 增加 timeout，因为代理通常较慢
-            # print(f"DEBUG: Requesting {url} with proxy {proxy}")
             session = get_session()
             resp = session.get(url, headers=headers, timeout=timeout + 5, proxies=proxy, stream=stream)
             resp.raise_for_status()
@@ -445,10 +438,6 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
             if attempt < retries:
                 if should_stop(stop_event):
                     return None
-                # with print_lock:
-                    # 只有连续失败多次才打印，避免刷屏
-                    # if attempt > 0: 
-                    #    print(f"⚠️ Request failed ({e}), retrying in {delay}s... ({attempt + 1}/{retries})")
                 time.sleep(delay)
             else:
                 with print_lock:
@@ -1350,5 +1339,4 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("\n🛑 检测到用户中断，正在安全退出...")
-        # executor.shutdown(wait=False, cancel_futures=True) 
         print("✅ 已中断所有下载任务。")

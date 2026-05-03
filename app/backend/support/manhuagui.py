@@ -1,8 +1,6 @@
 """漫画柜适配器 + LZ 解密工具。"""
 from __future__ import annotations
 
-import ast
-import html as html_lib
 import json
 import os
 import re

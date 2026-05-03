@@ -523,18 +523,6 @@ public partial class SearchResultItemViewModel : ObservableObject
     [ObservableProperty]
     public partial string UpdateTime { get; set; } = string.Empty;
 
-    public static SearchResultItemViewModel FromDiscover(DiscoverItem item)
-    {
-        return new SearchResultItemViewModel
-        {
-            Title = item.Title,
-            MangaUrl = item.MangaUrl,
-            CoverUrl = item.CoverUrl,
-            LatestChapter = item.LatestChapter,
-            UpdateTime = item.UpdateTime,
-        };
-    }
-
     public static SearchResultItemViewModel FromSearch(SearchResultItem item)
     {
         return new SearchResultItemViewModel

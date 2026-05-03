@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 
 namespace Comic.WinUI.Models;
 
@@ -40,15 +39,6 @@ public sealed class ApiError
 
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
-}
-
-public sealed class ApiResponse<T>
-{
-    [JsonPropertyName("data")]
-    public T? Data { get; set; }
-
-    [JsonPropertyName("error")]
-    public ApiError? Error { get; set; }
 }
 
 public sealed class HealthResponse
@@ -220,42 +210,6 @@ public sealed class SettingsResponse
 
     [JsonPropertyName("supported_sites")]
     public List<string> SupportedSites { get; set; } = [];
-}
-
-public sealed class DiscoverResponse
-{
-    [JsonPropertyName("site_key")]
-    public string SiteKey { get; set; } = string.Empty;
-
-    [JsonPropertyName("site_name")]
-    public string SiteName { get; set; } = string.Empty;
-
-    [JsonPropertyName("section")]
-    public string Section { get; set; } = string.Empty;
-
-    [JsonPropertyName("page")]
-    public int Page { get; set; }
-
-    [JsonPropertyName("items")]
-    public List<DiscoverItem> Items { get; set; } = [];
-}
-
-public sealed class DiscoverItem
-{
-    [JsonPropertyName("title")]
-    public string Title { get; set; } = string.Empty;
-
-    [JsonPropertyName("manga_url")]
-    public string MangaUrl { get; set; } = string.Empty;
-
-    [JsonPropertyName("cover_url")]
-    public string CoverUrl { get; set; } = string.Empty;
-
-    [JsonPropertyName("latest_chapter")]
-    public string LatestChapter { get; set; } = string.Empty;
-
-    [JsonPropertyName("update_time")]
-    public string UpdateTime { get; set; } = string.Empty;
 }
 
 public sealed class LibraryCheckUpdatesResponse
