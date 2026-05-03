@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 
-namespace Comic_WinUI.ViewModels;
+namespace Comic.WinUI.ViewModels;
 
 public sealed class ShellNavigationItem
 {

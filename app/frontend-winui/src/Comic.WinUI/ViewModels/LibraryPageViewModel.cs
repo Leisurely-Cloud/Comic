@@ -8,7 +8,7 @@ using Comic.WinUI.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-namespace Comic_WinUI.ViewModels;
+namespace Comic.WinUI.ViewModels;
 
 public partial class LibraryPageViewModel : ObservableObject
 {

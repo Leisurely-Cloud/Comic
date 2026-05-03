@@ -1,7 +1,7 @@
 using System;
 using Microsoft.UI.Xaml.Controls;
 
-namespace Comic_WinUI.Services;
+namespace Comic.WinUI.Services;
 
 public sealed class NavigationService
 {

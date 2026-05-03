@@ -1,9 +1,9 @@
-using Comic_WinUI.ViewModels;
+using Comic.WinUI.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 
-namespace Comic_WinUI.Views;
+namespace Comic.WinUI.Views;
 
 public sealed partial class ShellPage : Page
 {

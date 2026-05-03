@@ -2,7 +2,7 @@ using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 
-namespace Comic_WinUI.Helpers;
+namespace Comic.WinUI.Helpers;
 
 public sealed class InvertBoolToVisibilityConverter : IValueConverter
 {

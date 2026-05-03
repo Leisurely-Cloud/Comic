@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
-    x:Class="Comic_WinUI.Views.DownloadPage"
+    x:Class="Comic.WinUI.Views.DownloadPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -112,7 +112,7 @@
                                   SelectionMode="Single">
                             <ListView.ItemTemplate>
                             <DataTemplate x:DataType="viewModels:SearchResultItemViewModel"
-                                          xmlns:viewModels="using:Comic_WinUI.ViewModels">
+                                          xmlns:viewModels="using:Comic.WinUI.ViewModels">
                                 <Grid Padding="8,10" ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -290,7 +290,7 @@
                             <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableChapters, Mode=OneWay}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="viewModels:ChapterItemViewModel"
-                                                  xmlns:viewModels="using:Comic_WinUI.ViewModels">
+                                                  xmlns:viewModels="using:Comic.WinUI.ViewModels">
                                         <CheckBox Content="{x:Bind Title}"
                                                   IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
                                                   Margin="0,2" />
@@ -347,7 +347,7 @@
                                   SelectionMode="Single">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="viewModels:DownloadTaskItemViewModel"
-                                              xmlns:viewModels="using:Comic_WinUI.ViewModels">
+                                              xmlns:viewModels="using:Comic.WinUI.ViewModels">
                                     <Grid Padding="4,6" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />

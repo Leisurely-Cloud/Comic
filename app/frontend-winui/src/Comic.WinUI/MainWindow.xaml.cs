@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml;
 
-namespace Comic_WinUI;
+namespace Comic.WinUI;
 
 public sealed partial class MainWindow : Window
 {

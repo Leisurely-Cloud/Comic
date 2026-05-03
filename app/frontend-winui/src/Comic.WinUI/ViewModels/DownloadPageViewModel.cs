@@ -11,7 +11,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
 
-namespace Comic_WinUI.ViewModels;
+namespace Comic.WinUI.ViewModels;
 
 public partial class DownloadPageViewModel : ObservableObject
 {

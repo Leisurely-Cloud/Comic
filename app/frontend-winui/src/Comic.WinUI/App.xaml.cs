@@ -1,13 +1,12 @@
 using System;
 using System.Net.Http;
 using Comic.WinUI.Services;
-using Comic_WinUI.Services;
-using Comic_WinUI.ViewModels;
-using Comic_WinUI.Views;
+using Comic.WinUI.ViewModels;
+using Comic.WinUI.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 
-namespace Comic_WinUI;
+namespace Comic.WinUI;
 
 public partial class App : Application
 {
