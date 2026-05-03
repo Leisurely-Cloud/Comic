@@ -27,7 +27,13 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         services.AddSingleton<BackendSettingsService>();
-        services.AddSingleton<HttpClient>(new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
+        services.AddSingleton<HttpClient>(new HttpClient(new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        });
         services.AddSingleton<BackendClient>(provider =>
         {
             var settings = provider.GetRequiredService<BackendSettingsService>().GetSettings();

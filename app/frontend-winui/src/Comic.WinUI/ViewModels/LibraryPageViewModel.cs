@@ -20,16 +20,16 @@ public partial class LibraryPageViewModel : ObservableObject
     public LibraryPageViewModel(BackendClient backendClient)
     {
         _backendClient = backendClient;
-        SiteOptions = new ObservableCollection<SiteOption>(SiteCatalog.LibrarySites);
-        SelectedSite = SiteOptions.FirstOrDefault(option => option.Key == string.Empty) ?? SiteOptions.FirstOrDefault();
+        SiteOptions = new ObservableCollection<string>(SiteCatalog.LibrarySites.Select(s => s.DisplayName));
+        SelectedSite = SiteCatalog.LibrarySites.FirstOrDefault(s => s.Key == string.Empty)?.DisplayName ?? SiteOptions.FirstOrDefault();
     }
 
     public ObservableCollection<LibraryItemViewModel> Items { get; } = [];
 
-    public ObservableCollection<SiteOption> SiteOptions { get; }
+    public ObservableCollection<string> SiteOptions { get; }
 
     [ObservableProperty]
-    public partial SiteOption? SelectedSite { get; set; }
+    public partial string? SelectedSite { get; set; }
 
     [ObservableProperty]
     public partial string Keyword { get; set; } = string.Empty;
@@ -59,7 +59,7 @@ public partial class LibraryPageViewModel : ObservableObject
         PageError = string.Empty;
         try
         {
-            var result = await _backendClient.GetLibraryAsync(SelectedSite?.Key ?? string.Empty, Keyword.Trim(), _currentPage, _pageSize, cancellationToken);
+            var result = await _backendClient.GetLibraryAsync(SiteCatalog.GetKey(SelectedSite ?? string.Empty), Keyword.Trim(), _currentPage, _pageSize, cancellationToken);
             Items.Clear();
             foreach (var item in result.Items)
             {

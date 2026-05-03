@@ -8,8 +8,6 @@ public sealed class SiteOption
     public required string Key { get; init; }
 
     public required string DisplayName { get; init; }
-
-    public override string ToString() => DisplayName;
 }
 
 public static class SiteCatalog
@@ -42,5 +40,14 @@ public static class SiteCatalog
         return Names.TryGetValue(siteKey ?? string.Empty, out var displayName)
             ? displayName
             : (siteKey ?? string.Empty);
+    }
+
+    public static string GetKey(string displayName)
+    {
+        foreach (var kvp in Names)
+        {
+            if (kvp.Value == displayName) return kvp.Key;
+        }
+        return "baozimh";
     }
 }

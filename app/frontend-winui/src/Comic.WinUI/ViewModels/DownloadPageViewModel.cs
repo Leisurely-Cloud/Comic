@@ -36,13 +36,13 @@ public partial class DownloadPageViewModel : ObservableObject
         _eventStream = eventStream;
         _shellViewModel = shellViewModel;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
-        SiteOptions = new ObservableCollection<SiteOption>(SiteCatalog.DownloadSites);
-        SelectedSite = SiteOptions.FirstOrDefault(option => option.Key == "baozimh") ?? SiteOptions.FirstOrDefault();
+        SiteOptions = new ObservableCollection<string>(SiteCatalog.DownloadSites.Select(s => s.DisplayName));
+        SelectedSite = SiteCatalog.DownloadSites.FirstOrDefault(s => s.Key == "baozimh")?.DisplayName ?? SiteOptions.FirstOrDefault();
     }
 
     public ObservableCollection<DownloadTaskItemViewModel> Tasks { get; } = [];
 
-    public ObservableCollection<SiteOption> SiteOptions { get; }
+    public ObservableCollection<string> SiteOptions { get; }
 
     public ObservableCollection<SearchResultItemViewModel> SearchResults { get; } = [];
 
@@ -61,7 +61,7 @@ public partial class DownloadPageViewModel : ObservableObject
     public partial string SearchKeyword { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial SiteOption? SelectedSite { get; set; }
+    public partial string? SelectedSite { get; set; }
 
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
@@ -155,7 +155,7 @@ public partial class DownloadPageViewModel : ObservableObject
         try
         {
             var result = await _backendClient.SearchAsync(
-                SearchKeyword.Trim(), SelectedSite?.Key ?? "baozimh", 1, token);
+                SearchKeyword.Trim(), SiteCatalog.GetKey(SelectedSite ?? string.Empty), 1, token);
 
             foreach (var item in result.Items)
             {
@@ -210,7 +210,7 @@ public partial class DownloadPageViewModel : ObservableObject
                 new MangaResolveRequest
                 {
                     Url = item.MangaUrl,
-                    SiteKey = SelectedSite?.Key ?? "baozimh",
+                    SiteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty),
                 },
                 token);
             CurrentManga = detail;
@@ -309,7 +309,7 @@ public partial class DownloadPageViewModel : ObservableObject
                 new DownloadCreateRequest
                 {
                     Url = downloadUrl,
-                    SiteKey = SelectedSite?.Key ?? "baozimh",
+                    SiteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty),
                     Source = "winui",
                     Chapters = selectedChapters,
                 },

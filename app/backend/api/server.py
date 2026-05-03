@@ -80,6 +80,8 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
 class ApiHandler(BaseHTTPRequestHandler):
     """Routes requests to the Application layer."""
 
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
