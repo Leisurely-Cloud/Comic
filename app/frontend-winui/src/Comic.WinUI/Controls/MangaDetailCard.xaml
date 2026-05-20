@@ -67,7 +67,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Button x:Name="StartDownloadBtn" Grid.Row="0" Grid.Column="0"
+                            <Button Grid.Row="0" Grid.Column="0"
                                     Style="{StaticResource AccentButtonStyle}"
                                     HorizontalAlignment="Stretch"
                                     Command="{x:Bind ViewModel.StartDownloadCommand, Mode=OneWay}">
@@ -76,7 +76,7 @@
                                     <TextBlock Text="开始下载" />
                                 </StackPanel>
                             </Button>
-                            <Button x:Name="PauseBtn" Grid.Row="0" Grid.Column="1"
+                            <Button Grid.Row="0" Grid.Column="1"
                                     HorizontalAlignment="Stretch"
                                     Command="{x:Bind ViewModel.PauseCommand, Mode=OneWay}">
                                 <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
@@ -84,7 +84,7 @@
                                     <TextBlock Text="暂停" />
                                 </StackPanel>
                             </Button>
-                            <Button x:Name="ResumeBtn" Grid.Row="1" Grid.Column="0"
+                            <Button Grid.Row="1" Grid.Column="0"
                                     HorizontalAlignment="Stretch"
                                     Command="{x:Bind ViewModel.ResumeCommand, Mode=OneWay}">
                                 <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
@@ -92,7 +92,7 @@
                                     <TextBlock Text="继续" />
                                 </StackPanel>
                             </Button>
-                            <Button x:Name="StopBtn" Grid.Row="1" Grid.Column="1"
+                            <Button Grid.Row="1" Grid.Column="1"
                                     HorizontalAlignment="Stretch"
                                     Command="{x:Bind ViewModel.StopCommand, Mode=OneWay}">
                                 <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
@@ -136,10 +136,10 @@
                                Opacity="0.6" VerticalAlignment="Center" />
                 </Grid>
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                    <Button x:Name="SelectAllBtn" Command="{x:Bind ViewModel.SelectAllChaptersCommand, Mode=OneWay}" Padding="8,4">
+                    <Button Command="{x:Bind ViewModel.SelectAllChaptersCommand, Mode=OneWay}" Padding="8,4">
                         <TextBlock Text="全选" FontSize="12" />
                     </Button>
-                    <Button x:Name="DeselectAllBtn" Command="{x:Bind ViewModel.DeselectAllChaptersCommand, Mode=OneWay}" Padding="8,4">
+                    <Button Command="{x:Bind ViewModel.DeselectAllChaptersCommand, Mode=OneWay}" Padding="8,4">
                         <TextBlock Text="取消全选" FontSize="12" />
                     </Button>
                 </StackPanel>

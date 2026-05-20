@@ -118,6 +118,10 @@ public partial class DownloadPageViewModel : ObservableObject
             CurrentTaskId = CurrentTask?.Id ?? string.Empty;
             OnPropertyChanged(nameof(TaskCountSummary));
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
@@ -125,6 +129,10 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (HttpRequestException)
         {
             PageError = "无法连接后端服务，请点击「启动后端」。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"初始化异常: {ex.Message}";
         }
         finally
         {
@@ -267,25 +275,28 @@ public partial class DownloadPageViewModel : ObservableObject
 
     partial void OnCurrentMangaChanged(MangaResolveResponse? value)
     {
-        OnPropertyChanged(nameof(HasManga));
-        AvailableChapters.Clear();
-        if (value?.Chapters is { Count: > 0 })
+        _dispatcherQueue.TryEnqueue(() =>
         {
-            foreach (var ch in value.Chapters)
+            OnPropertyChanged(nameof(HasManga));
+            AvailableChapters.Clear();
+            if (value?.Chapters is { Count: > 0 })
             {
-                var item = new ChapterItemViewModel { Title = ch.Title, IsSelected = true };
-                item.PropertyChanged += (_, _) =>
+                foreach (var ch in value.Chapters)
                 {
-                    OnPropertyChanged(nameof(SelectedChapterCount));
-                    OnPropertyChanged(nameof(ChapterSelectionSummary));
-                };
-                AvailableChapters.Add(item);
+                    var item = new ChapterItemViewModel { Title = ch.Title, IsSelected = true };
+                    item.PropertyChanged += (_, _) =>
+                    {
+                        OnPropertyChanged(nameof(SelectedChapterCount));
+                        OnPropertyChanged(nameof(ChapterSelectionSummary));
+                    };
+                    AvailableChapters.Add(item);
+                }
             }
-        }
-        OnPropertyChanged(nameof(HasChapters));
-        OnPropertyChanged(nameof(ShowChapterSelection));
-        OnPropertyChanged(nameof(SelectedChapterCount));
-        OnPropertyChanged(nameof(ChapterSelectionSummary));
+            OnPropertyChanged(nameof(HasChapters));
+            OnPropertyChanged(nameof(ShowChapterSelection));
+            OnPropertyChanged(nameof(SelectedChapterCount));
+            OnPropertyChanged(nameof(ChapterSelectionSummary));
+        });
     }
 
     [RelayCommand]
@@ -411,9 +422,21 @@ public partial class DownloadPageViewModel : ObservableObject
             UpsertTask(refreshed);
             CurrentTask = Tasks.FirstOrDefault(item => item.Id == refreshed.Id) ?? SelectPreferredTask();
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"操作异常: {ex.Message}";
         }
     }
 
@@ -429,14 +452,19 @@ public partial class DownloadPageViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            // swallowed
         }
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
         }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
         catch (Exception ex)
         {
-            PageError = ex.Message;
+            PageError = $"SSE 异常: {ex.Message}";
             var snapshot = await _backendClient.GetDownloadAsync(taskId, CancellationToken.None);
             UpsertTask(snapshot);
         }

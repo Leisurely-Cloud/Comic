@@ -70,28 +70,40 @@ public partial class LibraryPageViewModel : ObservableObject
             SelectedItem = Items.FirstOrDefault();
             OnPropertyChanged(nameof(PageSummary));
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
         }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"操作异常: {ex.Message}";
+        }
     }
 
     [RelayCommand]
-    public Task Search(CancellationToken cancellationToken = default)
+    public Task SearchAsync(CancellationToken cancellationToken = default)
     {
         _currentPage = 1;
         return LoadAsync(cancellationToken);
     }
 
     [RelayCommand]
-    public Task RefreshLibrary(CancellationToken cancellationToken = default)
+    public Task RefreshLibraryAsync(CancellationToken cancellationToken = default)
     {
         _currentPage = 1;
         return LoadAsync(cancellationToken);
     }
 
     [RelayCommand]
-    public async Task CheckUpdates(CancellationToken cancellationToken = default)
+    public async Task CheckUpdatesAsync(CancellationToken cancellationToken = default)
     {
         UpdateCheckStatus = "检查中...";
         try
@@ -102,9 +114,21 @@ public partial class LibraryPageViewModel : ObservableObject
                 ? $"发现 {updates.Count} 部漫画有更新"
                 : "所有漫画已是最新";
         }
+        catch (OperationCanceledException)
+        {
+            UpdateCheckStatus = "检查已取消";
+        }
+        catch (BackendApiException ex)
+        {
+            UpdateCheckStatus = $"检查失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            UpdateCheckStatus = "无法连接后端服务，请确认后端已启动。";
+        }
         catch (Exception ex)
         {
-            UpdateCheckStatus = $"检查失败: {ex.Message}";
+            UpdateCheckStatus = $"检查异常: {ex.Message}";
         }
     }
 

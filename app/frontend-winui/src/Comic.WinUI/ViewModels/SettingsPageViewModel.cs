@@ -79,14 +79,26 @@ public partial class SettingsPageViewModel : ObservableObject
             SupportedSites = string.Join(", ", settings.SupportedSites.Select(SiteCatalog.GetDisplayName));
             SettingsError = string.Empty;
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            SettingsError = $"加载设置失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            SettingsError = "无法连接后端服务，请确认后端已启动。";
+        }
         catch (Exception ex)
         {
-            SettingsError = $"加载设置失败: {ex.Message}";
+            SettingsError = $"加载设置异常: {ex.Message}";
         }
     }
 
     [RelayCommand]
-    public async Task Save(CancellationToken cancellationToken = default)
+    public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -109,6 +121,20 @@ public partial class SettingsPageViewModel : ObservableObject
                 }, cancellationToken);
                 SettingsError = string.Empty;
             }
+            catch (OperationCanceledException)
+            {
+                // swallowed
+            }
+            catch (BackendApiException ex)
+            {
+                SettingsError = $"本地设置已保存，但后端未同步: {ex.Error.Message}";
+                return;
+            }
+            catch (HttpRequestException)
+            {
+                SettingsError = "本地设置已保存，但后端未同步: 无法连接后端服务。";
+                return;
+            }
             catch (Exception ex)
             {
                 SettingsError = $"本地设置已保存，但后端未同步: {ex.Message}";
@@ -117,14 +143,26 @@ public partial class SettingsPageViewModel : ObservableObject
 
             SettingsError = string.Empty;
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            SettingsError = $"保存失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            SettingsError = "保存失败: 无法连接后端服务。";
+        }
         catch (Exception ex)
         {
-            SettingsError = $"保存失败: {ex.Message}";
+            SettingsError = $"保存异常: {ex.Message}";
         }
     }
 
     [RelayCommand]
-    public async Task RefreshBackendInfo(CancellationToken cancellationToken = default)
+    public async Task RefreshBackendInfoAsync(CancellationToken cancellationToken = default)
     {
         await LoadAsync(cancellationToken);
     }

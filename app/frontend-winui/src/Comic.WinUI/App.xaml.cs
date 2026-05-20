@@ -1,5 +1,4 @@
 using System;
-using System.Net.Http;
 using Comic.WinUI.Services;
 using Comic.WinUI.ViewModels;
 using Comic.WinUI.Views;
@@ -8,7 +7,7 @@ using Microsoft.UI.Xaml;
 
 namespace Comic.WinUI;
 
-public partial class App : Application
+public sealed partial class App : Application
 {
     private Window? _window;
 
@@ -26,17 +25,17 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         services.AddSingleton<BackendSettingsService>();
-        services.AddSingleton<HttpClient>(new HttpClient(new SocketsHttpHandler
-        {
-            ConnectTimeout = TimeSpan.FromSeconds(5),
-        })
-        {
-            Timeout = TimeSpan.FromSeconds(30),
-        });
+        services.AddHttpClient("backend")
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(5),
+            })
+            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<BackendClient>(provider =>
         {
             var settings = provider.GetRequiredService<BackendSettingsService>().GetSettings();
-            var httpClient = provider.GetRequiredService<HttpClient>();
+            var factory = provider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            var httpClient = factory.CreateClient("backend");
             return new BackendClient(httpClient, settings.BackendBaseUrl);
         });
         services.AddSingleton<BackendProcessService>();
@@ -58,10 +57,8 @@ public partial class App : Application
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        if (_window?.Content is ShellPage shellPage)
-        {
-            shellPage.ViewModel.StopBackendCommand.Execute(null);
-        }
+        var shellViewModel = Services.GetRequiredService<ShellViewModel>();
+        shellViewModel.StopBackendCommand.Execute(null);
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)

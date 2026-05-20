@@ -55,11 +55,27 @@ public partial class ShellViewModel : ObservableObject
             HasShellError = false;
             ShellErrorSummary = string.Empty;
         }
+        catch (OperationCanceledException)
+        {
+            BackendStatus = "已取消";
+        }
+        catch (BackendApiException ex)
+        {
+            BackendStatus = "连接失败";
+            HasShellError = true;
+            ShellErrorSummary = $"后端连接失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            BackendStatus = "连接失败";
+            HasShellError = true;
+            ShellErrorSummary = "无法连接后端服务，请确认后端已启动。";
+        }
         catch (Exception ex)
         {
             BackendStatus = "连接失败";
             HasShellError = true;
-            ShellErrorSummary = $"后端连接失败: {ex.Message}";
+            ShellErrorSummary = $"后端连接异常: {ex.Message}";
         }
     }
 
@@ -81,10 +97,24 @@ public partial class ShellViewModel : ObservableObject
             HasShellError = false;
             ShellErrorSummary = string.Empty;
         }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            HasShellError = true;
+            ShellErrorSummary = $"停止后端失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            HasShellError = true;
+            ShellErrorSummary = "无法连接后端服务，请确认后端已启动。";
+        }
         catch (Exception ex)
         {
             HasShellError = true;
-            ShellErrorSummary = $"停止后端失败: {ex.Message}";
+            ShellErrorSummary = $"停止后端异常: {ex.Message}";
         }
     }
 

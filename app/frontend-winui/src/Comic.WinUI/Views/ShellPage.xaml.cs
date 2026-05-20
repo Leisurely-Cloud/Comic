@@ -6,14 +6,22 @@ namespace Comic.WinUI.Views;
 
 public sealed partial class ShellPage : Page
 {
-    public ShellViewModel ViewModel { get; }
+    public ShellViewModel ViewModel { get; private set; } = null!;
 
-    public ShellPage(ShellViewModel viewModel)
+    public ShellPage()
     {
-        ViewModel = viewModel;
         InitializeComponent();
         ContentFrame.Navigated += OnContentFrameNavigated;
         Loaded += OnLoaded;
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        if (e.Parameter is ShellViewModel vm)
+        {
+            ViewModel = vm;
+        }
+        base.OnNavigatedTo(e);
     }
 
     private async void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
