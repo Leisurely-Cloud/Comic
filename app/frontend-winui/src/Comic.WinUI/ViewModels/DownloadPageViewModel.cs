@@ -135,6 +135,8 @@ public partial class DownloadPageViewModel : ObservableObject
     [RelayCommand]
     public async Task SearchAsync(CancellationToken cancellationToken = default)
     {
+        System.Diagnostics.Debug.WriteLine($"[SearchAsync] called, SearchKeyword='{SearchKeyword}'");
+
         if (string.IsNullOrWhiteSpace(SearchKeyword))
         {
             PageError = "请输入搜索关键词。";
@@ -154,8 +156,13 @@ public partial class DownloadPageViewModel : ObservableObject
 
         try
         {
+            var siteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty);
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] searching '{SearchKeyword.Trim()}' on site '{siteKey}'");
+
             var result = await _backendClient.SearchAsync(
-                SearchKeyword.Trim(), SiteCatalog.GetKey(SelectedSite ?? string.Empty), 1, token);
+                SearchKeyword.Trim(), siteKey, 1, token);
+
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] got {result.Items.Count} results, total={result.Total}");
 
             foreach (var item in result.Items)
             {
@@ -166,22 +173,28 @@ public partial class DownloadPageViewModel : ObservableObject
             SearchStatusText = HasSearchResults
                 ? $"找到 {SearchResults.Count} 部漫画"
                 : "未找到相关漫画，请换一个关键词试试";
+
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] SearchResults.Count={SearchResults.Count}, HasSearchResults={HasSearchResults}");
         }
         catch (OperationCanceledException)
         {
+            System.Diagnostics.Debug.WriteLine("[SearchAsync] cancelled");
         }
         catch (BackendApiException ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] BackendApiException: {ex.Error.Message}");
             PageError = $"搜索出错: {ex.Error.Message}";
             SearchStatusText = "搜索失败";
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] HttpRequestException: {ex.Message}");
             PageError = "无法连接后端服务，请确认后端已启动。";
             SearchStatusText = "搜索失败";
         }
         catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[SearchAsync] Exception: {ex.GetType().Name}: {ex.Message}");
             PageError = $"搜索异常: {ex.Message}";
             SearchStatusText = "搜索失败";
         }
@@ -506,110 +519,3 @@ public partial class DownloadPageViewModel : ObservableObject
     }
 }
 
-public partial class SearchResultItemViewModel : ObservableObject
-{
-    [ObservableProperty]
-    public partial string Title { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string MangaUrl { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string CoverUrl { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string LatestChapter { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string UpdateTime { get; set; } = string.Empty;
-
-    public static SearchResultItemViewModel FromSearch(SearchResultItem item)
-    {
-        return new SearchResultItemViewModel
-        {
-            Title = item.Title,
-            MangaUrl = item.Url,
-            CoverUrl = item.CoverUrl,
-            LatestChapter = item.LatestChapter,
-            UpdateTime = item.UpdateTime,
-        };
-    }
-}
-
-public partial class DownloadTaskItemViewModel : ObservableObject
-{
-    [ObservableProperty]
-    public partial string Id { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string Url { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string SiteKey { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string Status { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string StatusText { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial double Progress { get; set; }
-
-    [ObservableProperty]
-    public partial ApiError? TaskError { get; set; }
-
-    public string ProgressText => $"{Progress:0}%";
-
-    public bool HasTaskError => TaskError is not null && !string.IsNullOrWhiteSpace(TaskError.Message);
-
-    public string ErrorSummary => TaskError?.Message ?? string.Empty;
-
-    public string SiteLabel => string.IsNullOrWhiteSpace(SiteKey) ? "-" : SiteCatalog.GetDisplayName(SiteKey);
-
-    public string LatestLogMessage => Logs.LastOrDefault()?.Message ?? "暂无日志";
-
-    public ObservableCollection<DownloadLogEntry> Logs { get; } = [];
-
-    public static DownloadTaskItemViewModel FromDto(DownloadTaskDto dto)
-    {
-        var vm = new DownloadTaskItemViewModel();
-        vm.UpdateFrom(dto);
-        return vm;
-    }
-
-    public void UpdateFrom(DownloadTaskDto dto)
-    {
-        Id = dto.Id;
-        Url = dto.Url;
-        SiteKey = dto.SiteKey;
-        Status = dto.Status;
-        StatusText = dto.StatusText;
-        Progress = dto.Progress;
-        TaskError = dto.TaskError;
-
-        Logs.Clear();
-        if (dto.Logs is not null)
-        {
-            foreach (var entry in dto.Logs)
-            {
-                Logs.Add(entry);
-            }
-        }
-
-        OnPropertyChanged(nameof(ProgressText));
-        OnPropertyChanged(nameof(HasTaskError));
-        OnPropertyChanged(nameof(ErrorSummary));
-        OnPropertyChanged(nameof(SiteLabel));
-        OnPropertyChanged(nameof(LatestLogMessage));
-    }
-}
-
-public partial class ChapterItemViewModel : ObservableObject
-{
-    [ObservableProperty]
-    public partial string Title { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial bool IsSelected { get; set; }
-}

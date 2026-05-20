@@ -166,12 +166,3 @@ public sealed class BackendClient
     }
 }
 
-public sealed class BackendApiException : Exception
-{
-    public ApiError Error { get; }
-
-    public BackendApiException(ApiError error) : base(error.Message)
-    {
-        Error = error;
-    }
-}

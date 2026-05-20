@@ -40,7 +40,6 @@ public partial class App : Application
             return new BackendClient(httpClient, settings.BackendBaseUrl);
         });
         services.AddSingleton<BackendProcessService>();
-        services.AddSingleton<NavigationService>();
         services.AddSingleton<DownloadEventStream>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();

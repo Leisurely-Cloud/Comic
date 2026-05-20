@@ -1,4 +1,6 @@
 using Comic.WinUI.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 
@@ -16,19 +18,20 @@ public sealed partial class LibraryPage : Page
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
-        if (e.Parameter is LibraryPageViewModel vm)
-        {
-            ViewModel = vm;
-        }
-
+        ViewModel = ((App)Application.Current).Services.GetRequiredService<LibraryPageViewModel>();
+        Bindings.Update();
         base.OnNavigatedTo(e);
     }
 
-    private async void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (ViewModel is not null)
+        try
         {
             await ViewModel.LoadCommand.ExecuteAsync(null);
+        }
+        catch
+        {
+            // Load failure is already handled by ViewModel
         }
     }
 }

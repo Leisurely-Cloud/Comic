@@ -12,9 +12,7 @@
             <TextBlock Text="应用设置" Style="{StaticResource TitleTextBlockStyle}" />
 
             <!-- Connection Settings -->
-            <Border Padding="16" CornerRadius="12" BorderThickness="1"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="12">
                     <TextBlock Text="后端连接" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <TextBox Header="后端地址"
@@ -48,9 +46,7 @@
             </Border>
 
             <!-- Backend Info -->
-            <Border Padding="16" CornerRadius="12" BorderThickness="1"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="12">
                     <TextBlock Text="后端信息" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <Grid ColumnSpacing="8" RowSpacing="8">
@@ -83,9 +79,8 @@
                 </StackPanel>
             </Border>
 
-            <Border Padding="12" CornerRadius="8"
-                    Visibility="{x:Bind ViewModel.SettingsError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
-                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+            <Border Style="{StaticResource CompactCardBorderStyle}"
+                    Visibility="{x:Bind ViewModel.SettingsError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon Glyph="&#xE783;" Foreground="Tomato" VerticalAlignment="Center" FontSize="14" />
                     <TextBlock Text="{x:Bind ViewModel.SettingsError, Mode=OneWay}"

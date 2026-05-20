@@ -1,5 +1,4 @@
 using Comic.WinUI.ViewModels;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 
@@ -9,10 +8,9 @@ public sealed partial class ShellPage : Page
 {
     public ShellViewModel ViewModel { get; }
 
-    public ShellPage()
+    public ShellPage(ShellViewModel viewModel)
     {
-        ViewModel = ((App)Application.Current).Services.GetService(typeof(ShellViewModel)) as ShellViewModel
-                    ?? throw new InvalidOperationException("ShellViewModel not registered");
+        ViewModel = viewModel;
         InitializeComponent();
         ContentFrame.Navigated += OnContentFrameNavigated;
         Loaded += OnLoaded;
@@ -20,8 +18,15 @@ public sealed partial class ShellPage : Page
 
     private async void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        await ViewModel.EnsureBackendRunningAsync();
-        NavigateToPage("download");
+        try
+        {
+            await ViewModel.EnsureBackendRunningAsync();
+            NavigateToPage("download");
+        }
+        catch
+        {
+            // Backend startup failure is already handled by ViewModel
+        }
     }
 
     private void OnNavigationItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
@@ -42,15 +47,7 @@ public sealed partial class ShellPage : Page
             _ => typeof(DownloadPage),
         };
 
-        object? parameter = tag switch
-        {
-            "download" => ((App)Application.Current).Services.GetService(typeof(DownloadPageViewModel)),
-            "library" => ((App)Application.Current).Services.GetService(typeof(LibraryPageViewModel)),
-            "settings" => ((App)Application.Current).Services.GetService(typeof(SettingsPageViewModel)),
-            _ => null,
-        };
-
-        ContentFrame.Navigate(pageType, parameter);
+        ContentFrame.Navigate(pageType);
     }
 
     private void OnContentFrameNavigated(object sender, NavigationEventArgs e)
