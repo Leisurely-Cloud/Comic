@@ -13,6 +13,15 @@ public sealed partial class App : Application
 
     public IServiceProvider Services { get; }
 
+    public static T GetService<T>() where T : class
+    {
+        if (Current is App app)
+        {
+            return app.Services.GetRequiredService<T>();
+        }
+        throw new InvalidOperationException("App is not initialized");
+    }
+
     public App()
     {
         UnhandledException += OnUnhandledException;
@@ -40,10 +49,13 @@ public sealed partial class App : Application
         });
         services.AddSingleton<BackendProcessService>();
         services.AddSingleton<DownloadEventStream>();
+        services.AddSingleton<SearchHistoryService>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();
         services.AddTransient<LibraryPageViewModel>();
         services.AddTransient<SettingsPageViewModel>();
+        services.AddTransient<ReaderPageViewModel>();
+        services.AddTransient<RankingPageViewModel>();
 
         return services.BuildServiceProvider();
     }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import sys
 import time
@@ -69,6 +70,15 @@ def _error_response(handler: BaseHTTPRequestHandler, status: int, code: str, mes
     _json_response(handler, status, {"error": {"code": code, "message": message}})
 
 
+def _binary_response(handler: BaseHTTPRequestHandler, data: bytes, content_type: str) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(data)))
+    _write_cors_headers(handler)
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 def _read_json_body(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
     length = int(handler.headers.get("Content-Length", 0))
     if length == 0:
@@ -108,6 +118,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 _json_response(self, 200, app.get_health())
             elif path == "/api/downloads":
                 _json_response(self, 200, {"items": app.get_downloads()})
+            elif path == "/api/downloads/history":
+                page = max(int(params.get("page", "1") or 1), 1)
+                page_size = max(int(params.get("page_size", "20") or 20), 1)
+                _json_response(self, 200, app.get_download_history(page=page, page_size=page_size))
             elif path.startswith("/api/downloads/") and path.endswith("/events"):
                 parts = path.split("/")
                 task_id = parts[3] if len(parts) > 3 else ""
@@ -137,6 +151,43 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/library/check-updates":
                 _json_response(self, 200, app.check_library_updates())
+            elif path == "/api/library/reader":
+                root_dir = params.get("root_dir", "")
+                if not root_dir:
+                    _error_response(self, 400, "bad_request", "root_dir 不能为空")
+                    return
+                _json_response(self, 200, app.get_reader_chapters(root_dir))
+            elif path == "/api/library/reader/images":
+                root_dir = params.get("root_dir", "")
+                chapter = params.get("chapter", "")
+                if not root_dir or not chapter:
+                    _error_response(self, 400, "bad_request", "root_dir 和 chapter 不能为空")
+                    return
+                _json_response(self, 200, app.get_chapter_images(root_dir, chapter))
+            elif path == "/api/ranking":
+                site = params.get("site", "baozimh")
+                section = params.get("section", "")
+                page = max(int(params.get("page", "1") or 1), 1)
+                _json_response(self, 200, app.get_ranking(site=site, section=section, page=page))
+            elif path == "/api/ranking/sections":
+                site = params.get("site", "baozimh")
+                _json_response(self, 200, app.get_ranking_sections(site=site))
+            elif path == "/api/library/export-cbz/events":
+                task_id = params.get("task_id", "")
+                if not task_id:
+                    _error_response(self, 400, "bad_request", "task_id 不能为空")
+                    return
+                self._serve_export_sse(task_id)
+                return
+            elif path == "/api/library/reader/image":
+                image_path = params.get("path", "")
+                if not image_path or not os.path.isfile(image_path):
+                    _error_response(self, 400, "bad_request", "图片路径无效")
+                    return
+                content_type = mimetypes.guess_type(image_path)[0] or "application/octet-stream"
+                with open(image_path, "rb") as f:
+                    data = f.read()
+                _binary_response(self, data, content_type)
             else:
                 _error_response(self, 404, "not_found", f"未知路径: {path}")
         except Exception as ex:
@@ -176,6 +227,39 @@ class ApiHandler(BaseHTTPRequestHandler):
                     break
 
                 time.sleep(0.5)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _serve_export_sse(self, task_id: str) -> None:
+        if not self._ensure_allowed_origin():
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        _write_cors_headers(self)
+        self.end_headers()
+
+        event_id = 0
+        try:
+            while True:
+                task = app.get_export_task(task_id)
+                if not task:
+                    data = json.dumps({"error": "导出任务不存在"}, ensure_ascii=False)
+                    self.wfile.write(f"event: error\ndata: {data}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    break
+
+                event_id += 1
+                payload = json.dumps(task, ensure_ascii=False)
+                self.wfile.write(f"id: {event_id}\nevent: update\ndata: {payload}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+                if task.get("status") in ("completed", "failed"):
+                    break
+
+                time.sleep(0.3)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -241,6 +325,24 @@ class ApiHandler(BaseHTTPRequestHandler):
                     _json_response(self, 200, {"status": (task or {}).get("status", "stopping")})
                 else:
                     _error_response(self, 400, "bad_state", "任务无法停止")
+
+            elif path == "/api/downloads/batch-stop":
+                task_ids = body.get("task_ids", [])
+                if not task_ids:
+                    _error_response(self, 400, "bad_request", "task_ids 不能为空")
+                    return
+                _json_response(self, 200, app.batch_stop_downloads(task_ids))
+
+            elif path == "/api/downloads/batch-delete":
+                task_ids = body.get("task_ids", [])
+                if not task_ids:
+                    _error_response(self, 400, "bad_request", "task_ids 不能为空")
+                    return
+                _json_response(self, 200, app.batch_delete_downloads(task_ids))
+
+            elif path == "/api/downloads/clear-history":
+                app.clear_download_history()
+                _json_response(self, 200, {"status": "ok"})
 
             elif path == "/api/settings":
                 _json_response(self, 200, app.update_settings(body))

@@ -45,17 +45,42 @@ public sealed partial class ShellPage : Page
         }
     }
 
-    private void NavigateToPage(string tag)
+    public void NavigateToPage(string tag)
     {
         var pageType = tag switch
         {
             "download" => typeof(DownloadPage),
+            "ranking" => typeof(RankingPage),
             "library" => typeof(LibraryPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(DownloadPage),
         };
 
         ContentFrame.Navigate(pageType);
+    }
+
+    public void NavigateToPageWithUrl(string tag, string url)
+    {
+        var pageType = tag switch
+        {
+            "download" => typeof(DownloadPage),
+            "ranking" => typeof(RankingPage),
+            "library" => typeof(LibraryPage),
+            "settings" => typeof(SettingsPage),
+            _ => typeof(DownloadPage),
+        };
+
+        ContentFrame.Navigate(pageType, url);
+
+        // Select the corresponding menu item
+        foreach (var item in AppNavigationView.MenuItems)
+        {
+            if (item is NavigationViewItem navItem && navItem.Tag is string navTag && navTag == tag)
+            {
+                AppNavigationView.SelectedItem = navItem;
+                break;
+            }
+        }
     }
 
     private void OnContentFrameNavigated(object sender, NavigationEventArgs e)

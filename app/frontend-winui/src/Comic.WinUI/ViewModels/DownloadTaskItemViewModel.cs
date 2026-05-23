@@ -17,6 +17,9 @@ public partial class DownloadTaskItemViewModel : ObservableObject
     public partial string SiteKey { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial string MangaTitle { get; set; } = string.Empty;
+
+    [ObservableProperty]
     public partial string Status { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -28,7 +31,29 @@ public partial class DownloadTaskItemViewModel : ObservableObject
     [ObservableProperty]
     public partial ApiError? TaskError { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsBatchMode { get; set; }
+
     public string ProgressText => $"{Progress:0}%";
+
+    public string DisplayName => string.IsNullOrWhiteSpace(MangaTitle) ? Url : MangaTitle;
+
+    public string StatusLabel => Status switch
+    {
+        "pending" => "等待中",
+        "running" => "下载中",
+        "paused" => "已暂停",
+        "pausing" => "暂停中",
+        "stopping" => "停止中",
+        "stopped" => "已停止",
+        "completed" => "已完成",
+        "partial" => "部分完成",
+        "failed" => "失败",
+        _ => Status,
+    };
 
     public bool HasTaskError => TaskError is not null && !string.IsNullOrWhiteSpace(TaskError.Message);
 
@@ -52,6 +77,7 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         Id = dto.Id;
         Url = dto.Url;
         SiteKey = dto.SiteKey;
+        MangaTitle = dto.MangaTitle;
         Status = dto.Status;
         StatusText = dto.StatusText;
         Progress = dto.Progress;
@@ -67,6 +93,8 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(StatusLabel));
         OnPropertyChanged(nameof(HasTaskError));
         OnPropertyChanged(nameof(ErrorSummary));
         OnPropertyChanged(nameof(SiteLabel));

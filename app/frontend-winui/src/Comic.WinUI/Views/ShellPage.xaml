@@ -62,6 +62,11 @@
                     <FontIcon Glyph="&#xE721;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="排行榜" Tag="ranking">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE8A3;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="本地漫画库" Tag="library">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE8D1;" />

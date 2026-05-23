@@ -65,7 +65,7 @@ class MangaCopyAdapter(BaseSiteAdapter):
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
-        session.trust_env = False
+        session.trust_env = True
         session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -116,7 +116,7 @@ class MangaCopyAdapter(BaseSiteAdapter):
         return bool(self._manual_proxy_dict)
 
     def configure_requests_session(self, session: requests.Session, for_image: bool = False):
-        session.trust_env = False
+        session.trust_env = True
         session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -763,7 +763,7 @@ class MangaCopyAdapter(BaseSiteAdapter):
                 pass
             return False
 
-    def get_manga_info_from_url(self, url: str):
+    def get_manga_info_from_url(self, url: str, stop_event=None):
         parsed = urlparse((url or "").strip())
         path_parts = [part for part in parsed.path.strip("/").split("/") if part]
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
@@ -13,23 +14,19 @@ namespace Comic.WinUI.ViewModels;
 public partial class LibraryPageViewModel : ObservableObject
 {
     private readonly BackendClient _backendClient;
+    private readonly DownloadEventStream _eventStream;
     private int _currentPage = 1;
     private int _totalItems;
     private readonly int _pageSize = 20;
+    private CancellationTokenSource? _exportCts;
 
-    public LibraryPageViewModel(BackendClient backendClient)
+    public LibraryPageViewModel(BackendClient backendClient, DownloadEventStream eventStream)
     {
         _backendClient = backendClient;
-        SiteOptions = new ObservableCollection<string>(SiteCatalog.LibrarySites.Select(s => s.DisplayName));
-        SelectedSite = SiteCatalog.LibrarySites.FirstOrDefault(s => s.Key == string.Empty)?.DisplayName ?? SiteOptions.FirstOrDefault();
+        _eventStream = eventStream;
     }
 
     public ObservableCollection<LibraryItemViewModel> Items { get; } = [];
-
-    public ObservableCollection<string> SiteOptions { get; }
-
-    [ObservableProperty]
-    public partial string? SelectedSite { get; set; }
 
     [ObservableProperty]
     public partial string Keyword { get; set; } = string.Empty;
@@ -42,6 +39,18 @@ public partial class LibraryPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string UpdateCheckStatus { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsExporting { get; set; }
+
+    [ObservableProperty]
+    public partial string ExportStatusText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial double ExportProgress { get; set; }
+
+    [ObservableProperty]
+    public partial bool ShowExportResult { get; set; }
 
     public string PageSummary => $"第 {_currentPage} 页 / 共 {_totalItems} 部";
 
@@ -59,7 +68,7 @@ public partial class LibraryPageViewModel : ObservableObject
         PageError = string.Empty;
         try
         {
-            var result = await _backendClient.GetLibraryAsync(SiteCatalog.GetKey(SelectedSite ?? string.Empty), Keyword.Trim(), _currentPage, _pageSize, cancellationToken);
+            var result = await _backendClient.GetLibraryAsync(keyword: Keyword.Trim(), page: _currentPage, pageSize: _pageSize, cancellationToken: cancellationToken);
             Items.Clear();
             foreach (var item in result.Items)
             {
@@ -191,15 +200,84 @@ public partial class LibraryPageViewModel : ObservableObject
             return;
         }
 
+        if (IsExporting)
+        {
+            return;
+        }
+
+        _exportCts?.Cancel();
+        _exportCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = _exportCts.Token;
+
         try
         {
-            await _backendClient.ExportCbzAsync(SelectedItem.RootDir, cancellationToken);
+            IsExporting = true;
+            ShowExportResult = true;
+            ExportStatusText = "正在启动导出...";
+            ExportProgress = 0;
             PageError = string.Empty;
+
+            var response = await _backendClient.ExportCbzAsync(SelectedItem.RootDir, token);
+            if (string.IsNullOrEmpty(response.TaskId))
+            {
+                PageError = "导出任务创建失败";
+                IsExporting = false;
+                return;
+            }
+
+            await foreach (var sseEvent in _eventStream.SubscribeExportAsync(response.TaskId, token))
+            {
+                if (sseEvent.JsonPayload is null) continue;
+
+                var progress = JsonSerializer.Deserialize<ExportCbzProgress>(sseEvent.JsonPayload);
+                if (progress is null) continue;
+
+                ExportStatusText = progress.TotalChapters > 0
+                    ? $"正在导出 {progress.CurrentIndex}/{progress.TotalChapters} 章: {progress.CurrentChapter}"
+                    : progress.Status == "completed" ? "导出完成" : progress.Status == "failed" ? $"导出失败: {progress.Error}" : "准备中...";
+
+                ExportProgress = progress.TotalChapters > 0
+                    ? (double)progress.CurrentIndex / progress.TotalChapters * 100.0
+                    : progress.Status == "completed" ? 100.0 : 0;
+
+                if (progress.Status == "completed")
+                {
+                    ExportStatusText = $"已导出 {progress.ExportedCount} 个 CBZ 到 {progress.ExportDir}";
+                    ExportProgress = 100;
+                    break;
+                }
+
+                if (progress.Status == "failed")
+                {
+                    PageError = $"导出失败: {progress.Error}";
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            ExportStatusText = "导出已取消";
         }
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
         }
+        catch (Exception ex)
+        {
+            PageError = $"导出异常: {ex.Message}";
+        }
+        finally
+        {
+            IsExporting = false;
+        }
+    }
+
+    [RelayCommand]
+    private void DismissExportResult()
+    {
+        ShowExportResult = false;
+        ExportStatusText = string.Empty;
+        ExportProgress = 0;
     }
 }
 

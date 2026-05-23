@@ -9,6 +9,7 @@ namespace Comic.WinUI.Views;
 public sealed partial class DownloadPage : Page
 {
     public DownloadPageViewModel ViewModel { get; private set; } = null!;
+    private string? _pendingUrl;
 
     public DownloadPage()
     {
@@ -19,18 +20,31 @@ public sealed partial class DownloadPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         ViewModel = ((App)Application.Current).Services.GetRequiredService<DownloadPageViewModel>();
-        System.Diagnostics.Debug.WriteLine($"[DownloadPage] OnNavigatedTo: ViewModel={ViewModel.GetHashCode()}, SearchResults={ViewModel.SearchResults.GetHashCode()}");
         Bindings.Update();
-        System.Diagnostics.Debug.WriteLine($"[DownloadPage] Bindings.Update done. SearchBarControl.ViewModel={SearchBarControl1?.ViewModel?.GetHashCode()}, SearchResultsList.ViewModel={SearchResultsList1?.ViewModel?.GetHashCode()}");
+
+        // Check if we received a URL parameter
+        if (e.Parameter is string url && !string.IsNullOrWhiteSpace(url))
+        {
+            _pendingUrl = url;
+        }
+
         base.OnNavigatedTo(e);
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine($"[DownloadPage] OnLoaded: ViewModel={ViewModel.GetHashCode()}");
         try
         {
             await ViewModel.InitializeCommand.ExecuteAsync(null);
+
+            // If we have a pending URL, set it and resolve
+            if (!string.IsNullOrWhiteSpace(_pendingUrl))
+            {
+                var url = _pendingUrl;
+                ViewModel.SearchKeyword = url;
+                _pendingUrl = null;
+                await ViewModel.ResolveDirectUrlCommand.ExecuteAsync(url);
+            }
         }
         catch
         {

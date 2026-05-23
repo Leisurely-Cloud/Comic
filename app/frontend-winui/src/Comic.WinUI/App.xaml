@@ -12,8 +12,13 @@
                 <ResourceDictionary Source="Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <converters:InvertBoolToVisibilityConverter x:Key="InvertBoolToVisibilityConverter" />
+            <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" />
+            <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
             <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
             <converters:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
+            <converters:SelectedCountConverter x:Key="SelectedCountConverter" />
+            <converters:HistoryPrevEnabledConverter x:Key="HistoryPrevEnabledConverter" />
+            <converters:StringToImageSourceConverter x:Key="StringToImageSourceConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -18,6 +18,7 @@ public partial class DownloadPageViewModel : ObservableObject
     private readonly BackendClient _backendClient;
     private readonly DownloadEventStream _eventStream;
     private readonly ShellViewModel _shellViewModel;
+    private readonly SearchHistoryService _searchHistoryService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -29,15 +30,19 @@ public partial class DownloadPageViewModel : ObservableObject
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _resolveCts;
     private int _lastEventId;
+    private int _searchPage;
+    private int _lastSearchPageSize;
 
-    public DownloadPageViewModel(BackendClient backendClient, DownloadEventStream eventStream, ShellViewModel shellViewModel)
+    public DownloadPageViewModel(BackendClient backendClient, DownloadEventStream eventStream, ShellViewModel shellViewModel, SearchHistoryService searchHistoryService)
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
         _shellViewModel = shellViewModel;
+        _searchHistoryService = searchHistoryService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         SiteOptions = new ObservableCollection<string>(SiteCatalog.DownloadSites.Select(s => s.DisplayName));
         SelectedSite = SiteCatalog.DownloadSites.FirstOrDefault(s => s.Key == "baozimh")?.DisplayName ?? SiteOptions.FirstOrDefault();
+        LoadSearchHistory();
     }
 
     public ObservableCollection<DownloadTaskItemViewModel> Tasks { get; } = [];
@@ -47,6 +52,23 @@ public partial class DownloadPageViewModel : ObservableObject
     public ObservableCollection<SearchResultItemViewModel> SearchResults { get; } = [];
 
     public ObservableCollection<ChapterItemViewModel> AvailableChapters { get; } = [];
+
+    public ObservableCollection<DownloadHistoryItem> HistoryItems { get; } = [];
+
+    public ObservableCollection<SearchHistoryEntry> SearchHistory { get; } = [];
+
+    public bool HasSearchHistory => SearchHistory.Count > 0;
+
+    [ObservableProperty]
+    public partial bool IsBatchMode { get; set; }
+
+    [ObservableProperty]
+    public partial int HistoryPage { get; set; } = 1;
+
+    [ObservableProperty]
+    public partial int HistoryTotal { get; set; }
+
+    public bool HasNextHistoryPage => HistoryPage * 20 < HistoryTotal;
 
     [ObservableProperty]
     public partial MangaResolveResponse? CurrentManga { get; set; }
@@ -82,13 +104,24 @@ public partial class DownloadPageViewModel : ObservableObject
     public partial bool HasSearchResults { get; set; }
 
     [ObservableProperty]
+    public partial bool IsLoadingMore { get; set; }
+
+    [ObservableProperty]
     public partial string SearchStatusText { get; set; } = string.Empty;
+
+    public bool CanLoadMoreSearchResults => HasSearchResults && !IsSearching && !IsLoadingMore && _lastSearchPageSize > 0;
 
     public string TaskCountSummary => Tasks.Count == 0 ? "暂无任务" : $"共 {Tasks.Count} 个任务";
 
     public bool HasCurrentTask => CurrentTask is not null;
 
     public bool HasManga => CurrentManga is not null;
+
+    public string CurrentMangaTitle => CurrentManga?.Title ?? string.Empty;
+    public string CurrentMangaSiteName => CurrentManga?.SiteName ?? string.Empty;
+    public string CurrentMangaLatestChapter => CurrentManga?.LatestChapter ?? string.Empty;
+    public string CurrentMangaCoverUrl => CurrentManga?.CoverUrl ?? string.Empty;
+    public string CurrentMangaDetailHint => CurrentManga?.DetailHint ?? string.Empty;
 
     public bool HasChapters => AvailableChapters.Count > 0;
 
@@ -111,7 +144,17 @@ public partial class DownloadPageViewModel : ObservableObject
             Tasks.Clear();
             foreach (var task in list.Items)
             {
-                Tasks.Add(DownloadTaskItemViewModel.FromDto(task));
+                var vm = DownloadTaskItemViewModel.FromDto(task);
+                vm.IsBatchMode = IsBatchMode;
+                vm.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(DownloadTaskItemViewModel.IsSelected))
+                    {
+                        OnPropertyChanged(nameof(SelectedTaskCount));
+                        OnPropertyChanged(nameof(HasSelectedTasks));
+                    }
+                };
+                Tasks.Add(vm);
             }
 
             CurrentTask = SelectPreferredTask();
@@ -143,13 +186,14 @@ public partial class DownloadPageViewModel : ObservableObject
     [RelayCommand]
     public async Task SearchAsync(CancellationToken cancellationToken = default)
     {
-        System.Diagnostics.Debug.WriteLine($"[SearchAsync] called, SearchKeyword='{SearchKeyword}'");
-
-        if (string.IsNullOrWhiteSpace(SearchKeyword))
+        var keyword = SearchKeyword;
+        if (string.IsNullOrWhiteSpace(keyword))
         {
             PageError = "请输入搜索关键词。";
             return;
         }
+
+        keyword = keyword.Trim();
 
         _searchCts?.Cancel();
         _searchCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -165,12 +209,12 @@ public partial class DownloadPageViewModel : ObservableObject
         try
         {
             var siteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty);
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] searching '{SearchKeyword.Trim()}' on site '{siteKey}'");
 
             var result = await _backendClient.SearchAsync(
-                SearchKeyword.Trim(), siteKey, 1, token);
+                keyword, siteKey, 1, token);
 
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] got {result.Items.Count} results, total={result.Total}");
+            _searchPage = 1;
+            _lastSearchPageSize = result.Items.Count;
 
             foreach (var item in result.Items)
             {
@@ -181,8 +225,13 @@ public partial class DownloadPageViewModel : ObservableObject
             SearchStatusText = HasSearchResults
                 ? $"找到 {SearchResults.Count} 部漫画"
                 : "未找到相关漫画，请换一个关键词试试";
+            OnPropertyChanged(nameof(CanLoadMoreSearchResults));
 
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] SearchResults.Count={SearchResults.Count}, HasSearchResults={HasSearchResults}");
+            if (HasSearchResults)
+            {
+                _searchHistoryService.Add(keyword, siteKey, SelectedSite ?? string.Empty, SearchResults.Count);
+                LoadSearchHistory();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -209,6 +258,55 @@ public partial class DownloadPageViewModel : ObservableObject
         finally
         {
             IsSearching = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task LoadMoreSearchResultsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_searchCts is not null && _searchCts.IsCancellationRequested) return;
+
+        var keyword = SearchKeyword?.Trim();
+        if (string.IsNullOrWhiteSpace(keyword)) return;
+
+        IsLoadingMore = true;
+        PageError = string.Empty;
+
+        try
+        {
+            var siteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty);
+            var nextPage = _searchPage + 1;
+            var result = await _backendClient.SearchAsync(keyword, siteKey, nextPage, cancellationToken);
+
+            _searchPage = nextPage;
+            _lastSearchPageSize = result.Items.Count;
+
+            foreach (var item in result.Items)
+            {
+                SearchResults.Add(SearchResultItemViewModel.FromSearch(item));
+            }
+
+            SearchStatusText = $"找到 {SearchResults.Count} 部漫画";
+            OnPropertyChanged(nameof(CanLoadMoreSearchResults));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = $"加载更多失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"加载更多异常: {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingMore = false;
         }
     }
 
@@ -260,9 +358,71 @@ public partial class DownloadPageViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    public async Task ResolveDirectUrlAsync(string? url, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        _resolveCts?.Cancel();
+        _resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = _resolveCts.Token;
+
+        IsResolving = true;
+        PageError = string.Empty;
+
+        try
+        {
+            var detail = await _backendClient.ResolveMangaAsync(
+                new MangaResolveRequest
+                {
+                    Url = url.Trim(),
+                    SiteKey = SiteCatalog.GetKey(SelectedSite ?? string.Empty),
+                },
+                token);
+            CurrentManga = detail;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = $"获取漫画详情失败: {ex.Error.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"获取详情异常: {ex.Message}";
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                IsResolving = false;
+            }
+        }
+    }
+
     partial void OnIsResolvingChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowChapterSelection));
+    }
+
+    partial void OnIsSearchingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanLoadMoreSearchResults));
+    }
+
+    partial void OnIsLoadingMoreChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanLoadMoreSearchResults));
+    }
+
+    partial void OnHasSearchResultsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanLoadMoreSearchResults));
     }
 
     partial void OnSelectedSearchResultChanged(SearchResultItemViewModel? value)
@@ -273,11 +433,56 @@ public partial class DownloadPageViewModel : ObservableObject
         }
     }
 
+    public void LoadSearchHistory()
+    {
+        SearchHistory.Clear();
+        foreach (var entry in _searchHistoryService.GetAll())
+            SearchHistory.Add(entry);
+        OnPropertyChanged(nameof(HasSearchHistory));
+    }
+
+    public void FilterSearchHistory(string keyword)
+    {
+        SearchHistory.Clear();
+        foreach (var entry in _searchHistoryService.Search(keyword))
+            SearchHistory.Add(entry);
+        OnPropertyChanged(nameof(HasSearchHistory));
+    }
+
+    [RelayCommand]
+    private void SelectHistoryEntry(SearchHistoryEntry? entry)
+    {
+        if (entry is null) return;
+        SearchKeyword = entry.Keyword;
+        SelectedSite = entry.SiteName;
+        _ = SearchCommand.ExecuteAsync(null);
+    }
+
+    [RelayCommand]
+    private void RemoveHistoryEntry(SearchHistoryEntry? entry)
+    {
+        if (entry is null) return;
+        _searchHistoryService.Remove(entry.Keyword, entry.SiteKey);
+        LoadSearchHistory();
+    }
+
+    [RelayCommand]
+    private void ClearSearchHistory()
+    {
+        _searchHistoryService.Clear();
+        LoadSearchHistory();
+    }
+
     partial void OnCurrentMangaChanged(MangaResolveResponse? value)
     {
         _dispatcherQueue.TryEnqueue(() =>
         {
             OnPropertyChanged(nameof(HasManga));
+            OnPropertyChanged(nameof(CurrentMangaTitle));
+            OnPropertyChanged(nameof(CurrentMangaSiteName));
+            OnPropertyChanged(nameof(CurrentMangaLatestChapter));
+            OnPropertyChanged(nameof(CurrentMangaCoverUrl));
+            OnPropertyChanged(nameof(CurrentMangaDetailHint));
             AvailableChapters.Clear();
             if (value?.Chapters is { Count: > 0 })
             {
@@ -359,6 +564,228 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (HttpRequestException)
         {
             PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task LoadHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _backendClient.GetDownloadHistoryAsync(HistoryPage, 20, cancellationToken);
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                HistoryItems.Clear();
+                foreach (var item in result.Items)
+                {
+                    HistoryItems.Add(item);
+                }
+                HistoryTotal = result.Total;
+                OnPropertyChanged(nameof(HasNextHistoryPage));
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"加载历史异常: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    public async Task HistoryPrevAsync(CancellationToken cancellationToken = default)
+    {
+        if (HistoryPage <= 1) return;
+        HistoryPage--;
+        await LoadHistoryAsync(cancellationToken);
+    }
+
+    [RelayCommand]
+    public async Task HistoryNextAsync(CancellationToken cancellationToken = default)
+    {
+        if (!HasNextHistoryPage) return;
+        HistoryPage++;
+        await LoadHistoryAsync(cancellationToken);
+    }
+
+    [RelayCommand]
+    public async Task ClearHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _backendClient.ClearDownloadHistoryAsync(cancellationToken);
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                HistoryItems.Clear();
+                HistoryTotal = 0;
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"清除历史异常: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    public void ToggleBatchMode()
+    {
+        IsBatchMode = !IsBatchMode;
+        if (!IsBatchMode)
+        {
+            foreach (var task in Tasks)
+            {
+                task.IsSelected = false;
+            }
+        }
+    }
+
+    [RelayCommand]
+    public void SelectAllTasks()
+    {
+        foreach (var task in Tasks)
+        {
+            task.IsSelected = true;
+        }
+    }
+
+    [RelayCommand]
+    public void DeselectAllTasks()
+    {
+        foreach (var task in Tasks)
+        {
+            task.IsSelected = false;
+        }
+    }
+
+    public int SelectedTaskCount => Tasks.Count(t => t.IsSelected);
+
+    public bool HasSelectedTasks => SelectedTaskCount > 0;
+
+    partial void OnIsBatchModeChanged(bool value)
+    {
+        foreach (var task in Tasks)
+        {
+            task.IsBatchMode = value;
+        }
+        OnPropertyChanged(nameof(SelectedTaskCount));
+        OnPropertyChanged(nameof(HasSelectedTasks));
+    }
+
+    [RelayCommand]
+    public async Task BatchStopAsync(CancellationToken cancellationToken = default)
+    {
+        var selectedIds = Tasks.Where(t => t.IsSelected).Select(t => t.Id).ToList();
+        if (selectedIds.Count == 0)
+        {
+            PageError = "请先选择要停止的任务。";
+            return;
+        }
+
+        IsBusy = true;
+        PageError = string.Empty;
+        try
+        {
+            var result = await _backendClient.BatchStopDownloadsAsync(selectedIds, cancellationToken);
+            foreach (var taskId in result.Stopped)
+            {
+                var task = Tasks.FirstOrDefault(t => t.Id == taskId);
+                if (task is not null)
+                {
+                    task.Status = "stopping";
+                    task.StatusText = "正在停止";
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"批量停止异常: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task BatchDeleteAsync(CancellationToken cancellationToken = default)
+    {
+        var selectedIds = Tasks.Where(t => t.IsSelected).Select(t => t.Id).ToList();
+        if (selectedIds.Count == 0)
+        {
+            PageError = "请先选择要删除的任务。";
+            return;
+        }
+
+        IsBusy = true;
+        PageError = string.Empty;
+        try
+        {
+            var result = await _backendClient.BatchDeleteDownloadsAsync(selectedIds, cancellationToken);
+            foreach (var taskId in result.Deleted)
+            {
+                var task = Tasks.FirstOrDefault(t => t.Id == taskId);
+                if (task is not null)
+                {
+                    Tasks.Remove(task);
+                }
+            }
+            OnPropertyChanged(nameof(TaskCountSummary));
+            OnPropertyChanged(nameof(SelectedTaskCount));
+            OnPropertyChanged(nameof(HasSelectedTasks));
+        }
+        catch (OperationCanceledException)
+        {
+            // swallowed
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "无法连接后端服务，请确认后端已启动。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"批量删除异常: {ex.Message}";
         }
         finally
         {
@@ -515,7 +942,17 @@ public partial class DownloadPageViewModel : ObservableObject
         var existing = Tasks.FirstOrDefault(item => string.Equals(item.Id, dto.Id, StringComparison.Ordinal));
         if (existing is null)
         {
-            Tasks.Insert(0, DownloadTaskItemViewModel.FromDto(dto));
+            var vm = DownloadTaskItemViewModel.FromDto(dto);
+            vm.IsBatchMode = IsBatchMode;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(DownloadTaskItemViewModel.IsSelected))
+                {
+                    OnPropertyChanged(nameof(SelectedTaskCount));
+                    OnPropertyChanged(nameof(HasSelectedTasks));
+                }
+            };
+            Tasks.Insert(0, vm);
             OnPropertyChanged(nameof(TaskCountSummary));
             return;
         }

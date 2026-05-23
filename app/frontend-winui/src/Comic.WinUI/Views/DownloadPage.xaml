@@ -17,29 +17,15 @@
         <!-- Search Bar -->
         <controls:SearchBarControl x:Name="SearchBarControl1" Grid.Row="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
 
-        <!-- Main Content -->
+        <!-- Main Content: Search Results (left) + Task List (right) -->
         <Grid Grid.Row="1" Margin="0,12,0,0" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="*" MinWidth="320" />
+                <ColumnDefinition Width="*" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left: Search Results -->
-            <controls:SearchResultsList x:Name="SearchResultsList1" Grid.Column="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-
-            <!-- Right: Detail + Chapters + Tasks -->
-            <Grid Grid.Column="1" RowSpacing="12">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="2*" />
-                    <RowDefinition Height="*" MinHeight="280" />
-                </Grid.RowDefinitions>
-
-                <!-- Manga Detail + Chapter Selection -->
-                <controls:MangaDetailCard Grid.Row="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-
-                <!-- Task List -->
-                <controls:TaskListPanel Grid.Row="1" Margin="0,12,0,0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-            </Grid>
+            <controls:SearchResultsList Grid.Column="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+            <controls:TaskListPanel Grid.Column="1" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
         </Grid>
     </Grid>
 </Page>

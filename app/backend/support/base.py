@@ -52,7 +52,7 @@ class BaseSiteAdapter:
     def fetch_search_cards(self, keyword: str, page: int = 1) -> List:
         raise NotImplementedError(f"{self.display_name} 暂未实现站内搜索")
 
-    def get_manga_info_from_url(self, url: str):
+    def get_manga_info_from_url(self, url: str, stop_event=None):
         raise NotImplementedError(f"{self.display_name} 暂未实现 URL 解析")
 
     def get_all_chapters(self, manga_id):

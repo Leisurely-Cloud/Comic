@@ -65,6 +65,42 @@ public sealed class ExportCbzResponse
     [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
 
+    [JsonPropertyName("task_id")]
+    public string TaskId { get; set; } = string.Empty;
+
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ExportCbzProgress
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("manga_title")]
+    public string MangaTitle { get; set; } = string.Empty;
+
+    [JsonPropertyName("current_chapter")]
+    public string CurrentChapter { get; set; } = string.Empty;
+
+    [JsonPropertyName("current_index")]
+    public int CurrentIndex { get; set; }
+
+    [JsonPropertyName("total_chapters")]
+    public int TotalChapters { get; set; }
+
+    [JsonPropertyName("exported_count")]
+    public int ExportedCount { get; set; }
+
+    [JsonPropertyName("export_dir")]
+    public string ExportDir { get; set; } = string.Empty;
+
+    [JsonPropertyName("skipped_chapters")]
+    public List<string> SkippedChapters { get; set; } = [];
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
 }

@@ -27,7 +27,53 @@ public sealed class DownloadEventStream
     {
         var uri = _backendClient.GetSseUri(taskId, lastEventId);
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        // Use CancellationToken.None to bypass HttpClient.Timeout (30s default) for long-lived SSE connections.
+        // Cancellation is handled externally via the caller's cancellationToken in the read loop.
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        var currentEvent = new SseDownloadEvent();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (line.StartsWith("id: ", StringComparison.Ordinal))
+            {
+                if (int.TryParse(line.AsSpan(4), out var id))
+                {
+                    currentEvent.EventId = id;
+                }
+            }
+            else if (line.StartsWith("event: ", StringComparison.Ordinal))
+            {
+                currentEvent.EventName = line[7..];
+            }
+            else if (line.StartsWith("data: ", StringComparison.Ordinal))
+            {
+                currentEvent.JsonPayload = line[6..];
+            }
+            else if (string.IsNullOrEmpty(line) && !string.IsNullOrEmpty(currentEvent.JsonPayload))
+            {
+                yield return currentEvent;
+                currentEvent = new SseDownloadEvent();
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<SseDownloadEvent> SubscribeExportAsync(
+        string taskId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var uri = _backendClient.GetExportSseUri(taskId);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
         response.EnsureSuccessStatusCode();
 
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

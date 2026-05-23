@@ -104,14 +104,68 @@ public sealed class BackendClient
         return PostJsonAsync<object, ExportCbzResponse>("api/library/export-cbz", new { root_dir = rootDir }, cancellationToken);
     }
 
+    public Task<RankingResponse> GetRankingAsync(string site = "baozimh", string section = "", int page = 1, CancellationToken cancellationToken = default)
+    {
+        var query = $"api/ranking?site={Uri.EscapeDataString(site)}&section={Uri.EscapeDataString(section)}&page={page}";
+        return ReadFromJsonAsync<RankingResponse>(query, cancellationToken);
+    }
+
+    public Task<RankingSectionsResponse> GetRankingSectionsAsync(string site = "baozimh", CancellationToken cancellationToken = default)
+    {
+        return ReadFromJsonAsync<RankingSectionsResponse>($"api/ranking/sections?site={Uri.EscapeDataString(site)}", cancellationToken);
+    }
+
+    public Task<ReaderChaptersResponse> GetReaderChaptersAsync(string rootDir, CancellationToken cancellationToken = default)
+    {
+        return ReadFromJsonAsync<ReaderChaptersResponse>($"api/library/reader?root_dir={Uri.EscapeDataString(rootDir)}", cancellationToken);
+    }
+
+    public Task<ReaderImagesResponse> GetChapterImagesAsync(string rootDir, string chapterDirName, CancellationToken cancellationToken = default)
+    {
+        return ReadFromJsonAsync<ReaderImagesResponse>($"api/library/reader/images?root_dir={Uri.EscapeDataString(rootDir)}&chapter={Uri.EscapeDataString(chapterDirName)}", cancellationToken);
+    }
+
+    public async Task<byte[]> GetImageBytesAsync(string imagePath, CancellationToken cancellationToken = default)
+    {
+        var uri = new Uri(_baseUri, $"api/library/reader/image?path={Uri.EscapeDataString(imagePath)}");
+        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
     public Task<SearchResponse> SearchAsync(string query, string site = "baozimh", int page = 1, CancellationToken cancellationToken = default)
     {
         return PostJsonAsync<object, SearchResponse>("api/search", new { query, site, page }, cancellationToken);
     }
 
+    public Task<DownloadHistoryResponse> GetDownloadHistoryAsync(int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
+    {
+        return ReadFromJsonAsync<DownloadHistoryResponse>($"api/downloads/history?page={page}&page_size={pageSize}", cancellationToken);
+    }
+
+    public Task<BatchActionResponse> BatchStopDownloadsAsync(List<string> taskIds, CancellationToken cancellationToken = default)
+    {
+        return PostJsonAsync<object, BatchActionResponse>("api/downloads/batch-stop", new { task_ids = taskIds }, cancellationToken);
+    }
+
+    public Task<BatchActionResponse> BatchDeleteDownloadsAsync(List<string> taskIds, CancellationToken cancellationToken = default)
+    {
+        return PostJsonAsync<object, BatchActionResponse>("api/downloads/batch-delete", new { task_ids = taskIds }, cancellationToken);
+    }
+
+    public Task<object> ClearDownloadHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        return PostJsonAsync<object, object>("api/downloads/clear-history", new { }, cancellationToken);
+    }
+
     public Uri GetSseUri(string taskId, int lastEventId = 0)
     {
         return new Uri(_baseUri, $"api/downloads/{taskId}/events?last_event_id={lastEventId}");
+    }
+
+    public Uri GetExportSseUri(string taskId)
+    {
+        return new Uri(_baseUri, $"api/library/export-cbz/events?task_id={taskId}");
     }
 
     private async Task<T> ReadFromJsonAsync<T>(string relativeUri, CancellationToken cancellationToken)
@@ -130,7 +184,9 @@ public sealed class BackendClient
     private async Task<TResponse> PostJsonAsync<TRequest, TResponse>(string relativeUri, TRequest request, CancellationToken cancellationToken)
     {
         var uri = new Uri(_baseUri, relativeUri);
-        using var response = await _httpClient.PostAsJsonAsync(uri, request, JsonOptions, cancellationToken);
+        var json = JsonSerializer.Serialize(request, JsonOptions);
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync(uri, content, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             await ThrowApiErrorAsync(response);

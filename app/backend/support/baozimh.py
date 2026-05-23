@@ -44,8 +44,8 @@ class BaozimhAdapter(BaseSiteAdapter):
     def fetch_search_cards(self, keyword: str, page: int = 1) -> List:
         return baozimh_fetch_search_manga_cards(keyword, page=page)
 
-    def get_manga_info_from_url(self, url: str):
-        return baozimh_get_manga_info_from_url(url)
+    def get_manga_info_from_url(self, url: str, stop_event=None):
+        return baozimh_get_manga_info_from_url(url, stop_event=stop_event)
 
     def get_all_chapters(self, manga_id):
         return baozimh_get_all_chapters(manga_id)

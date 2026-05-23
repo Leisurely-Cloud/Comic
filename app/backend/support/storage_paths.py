@@ -50,6 +50,10 @@ def get_manga_detail_cache_file_path() -> str:
     return os.path.join(get_runtime_state_dir(), "manga_detail_cache.json")
 
 
+def get_task_history_file_path() -> str:
+    return os.path.join(get_runtime_state_dir(), "task_history.json")
+
+
 def get_legacy_project_root_dir(current_file: str) -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))

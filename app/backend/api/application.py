@@ -11,14 +11,14 @@ from backend.models import MangaDetailRequest
 from backend.services.detail_cache_service import DetailCacheService
 from backend.services.library_service import LibraryService
 from backend.services.manga_service import MangaDetailService
-from backend.support.archive import export_manga_to_cbz
+from backend.support.archive import export_manga_to_cbz, list_exportable_image_files
 from backend.support.downcomic import sanitize_filename
 from backend.support.local_library import (
     build_downloaded_chapter_records_from_disk,
     save_library_entry_metadata,
 )
 from backend.support.site_adapters import SITE_ADAPTERS, get_adapter, resolve_adapter_from_url
-from backend.support.storage_paths import ensure_storage_root_dir, get_manga_detail_cache_file_path
+from backend.support.storage_paths import ensure_storage_root_dir, get_manga_detail_cache_file_path, get_task_history_file_path
 
 
 class Application:
@@ -38,6 +38,11 @@ class Application:
         )
         self._downloads: Dict[str, Dict[str, Any]] = {}
         self._download_runtime: Dict[str, Dict[str, Any]] = {}
+        self._task_history_file = get_task_history_file_path()
+        self._task_history: List[Dict[str, Any]] = self._load_task_history()
+        self._search_cache: Dict[str, tuple] = {}  # key -> (timestamp, results)
+        self._search_cache_ttl = 300  # 5 minutes
+        self._export_tasks: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
@@ -67,7 +72,17 @@ class Application:
     # Search
     # ------------------------------------------------------------------
     def search(self, query: str, site: str = "baozimh", page: int = 1) -> List[Dict[str, Any]]:
-        """Search for manga on the given site."""
+        """Search for manga on the given site, with short-lived result cache."""
+        import time
+
+        cache_key = f"{site}:{query}:{page}"
+        now = time.time()
+
+        with self._lock:
+            cached = self._search_cache.get(cache_key)
+            if cached and (now - cached[0]) < self._search_cache_ttl:
+                return cached[1]
+
         adapter = get_adapter(site)
         if not hasattr(adapter, "fetch_search_cards"):
             raise RuntimeError(f"站点 {site} 不支持搜索")
@@ -84,6 +99,16 @@ class Application:
                     "update_time": getattr(card, "update_time", ""),
                 }
             )
+
+        with self._lock:
+            self._search_cache[cache_key] = (now, results)
+            # Evict expired entries to prevent unbounded growth
+            if len(self._search_cache) > 200:
+                cutoff = now - self._search_cache_ttl
+                self._search_cache = {
+                    k: v for k, v in self._search_cache.items() if v[0] > cutoff
+                }
+
         return results
 
     # ------------------------------------------------------------------
@@ -194,23 +219,35 @@ class Application:
             if not getattr(adapter, "supports_download", False):
                 raise RuntimeError(f"{adapter.display_name} 当前不支持下载")
 
-            manga_id, manga_slug, start_slug = adapter.get_manga_info_from_url(task["url"])
+            self._append_log(task_id, "info", "正在解析漫画链接...")
+            manga_id, manga_slug, start_slug = adapter.get_manga_info_from_url(task["url"], stop_event=runtime["stop_event"])
+            self._append_log(task_id, "info", f"解析链接: manga_id={manga_id}, slug={manga_slug}")
             if not manga_id or not manga_slug:
-                raise RuntimeError("无法解析漫画链接")
+                raise RuntimeError(f"无法解析漫画链接 (id={manga_id}, slug={manga_slug})")
 
+            if runtime["stop_event"].is_set():
+                self._set_task_fields(task_id, status="stopped", status_text="已停止")
+                self._append_log(task_id, "info", "下载已停止")
+                self._record_task_to_history(task_id)
+                return
+
+            self._append_log(task_id, "info", "正在获取章节列表...")
             manga_title, all_chapters = adapter.get_all_chapters(manga_id)
             manga_title = manga_title or manga_slug
+            self._append_log(task_id, "info", f"漫画: {manga_title}，共 {len(all_chapters)} 章")
             root_dir = os.path.join(self._storage_root_dir, sanitize_filename(str(manga_title)))
             os.makedirs(root_dir, exist_ok=True)
 
             base_url_template = adapter.build_chapter_url_template(manga_slug)
+            requested = task.get("chapters") or []
             selected_chapters = self._select_chapters(
                 all_chapters,
-                requested_chapters=task.get("chapters") or [],
+                requested_chapters=requested,
                 start_slug=start_slug,
             )
+            self._append_log(task_id, "info", f"请求章节: {len(requested)} 个，匹配到: {len(selected_chapters)} 个")
             if not selected_chapters:
-                raise RuntimeError("没有匹配到可下载章节")
+                raise RuntimeError(f"没有匹配到可下载章节 (API返回 {len(all_chapters)} 章，请求 {len(requested)} 个)")
 
             chapter_concurrency, image_concurrency, setting_message = adapter.adjust_download_settings(1, 3)
             self._set_task_fields(
@@ -238,6 +275,7 @@ class Application:
                         status_text=f"已停止，完成 {completed}/{len(selected_chapters)} 章",
                     )
                     self._append_log(task_id, "info", "下载已停止")
+                    self._record_task_to_history(task_id)
                     return
 
                 self._wait_if_paused(task_id, runtime, completed, len(selected_chapters))
@@ -248,6 +286,7 @@ class Application:
                         status_text=f"已停止，完成 {completed}/{len(selected_chapters)} 章",
                     )
                     self._append_log(task_id, "info", "下载已停止")
+                    self._record_task_to_history(task_id)
                     return
 
                 chapter_title = str(chapter.get("title") or chapter.get("slug") or "未知章节")
@@ -275,6 +314,7 @@ class Application:
                             break
                         if downloaded_count <= 0:
                             raise RuntimeError(f"{chapter_title} 未下载到任何图片")
+                        self._append_log(task_id, "info", f"完成章节: {chapter_title} ({downloaded_count} 张图片)")
                         chapter_success = True
                         break
                     except Exception as exc:
@@ -305,6 +345,7 @@ class Application:
                         status_text=f"已停止，完成 {completed}/{len(selected_chapters)} 章",
                     )
                     self._append_log(task_id, "info", "下载已停止")
+                    self._record_task_to_history(task_id)
                     return
 
                 if chapter_success:
@@ -362,6 +403,7 @@ class Application:
                     completed=False,
                     failed_records=failed_records,
                 )
+                self._record_task_to_history(task_id)
                 return
 
             self._set_task_fields(
@@ -381,11 +423,13 @@ class Application:
                 completed=True,
                 failed_records=[],
             )
+            self._record_task_to_history(task_id)
         except Exception as ex:
             self._set_task_error(task_id, "download_failed", str(ex))
             self._set_task_fields(task_id, status="failed", status_text=f"下载失败: {ex}")
             self._append_log(task_id, "error", f"下载异常: {ex}")
             self._append_log(task_id, "debug", traceback.format_exc())
+            self._record_task_to_history(task_id)
         finally:
             with self._lock:
                 runtime = self._download_runtime.get(task_id)
@@ -522,6 +566,30 @@ class Application:
                 return True
             return False
 
+    def batch_stop_downloads(self, task_ids: List[str]) -> Dict[str, Any]:
+        stopped = []
+        failed = []
+        for task_id in task_ids:
+            if self.stop_download(task_id):
+                stopped.append(task_id)
+            else:
+                failed.append(task_id)
+        return {"stopped": stopped, "failed": failed}
+
+    def batch_delete_downloads(self, task_ids: List[str]) -> Dict[str, Any]:
+        deleted = []
+        failed = []
+        with self._lock:
+            for task_id in task_ids:
+                task = self._downloads.get(task_id)
+                if task and task.get("status") in ("completed", "failed", "stopped", "partial"):
+                    runtime = self._download_runtime.pop(task_id, None)
+                    del self._downloads[task_id]
+                    deleted.append(task_id)
+                else:
+                    failed.append(task_id)
+        return {"deleted": deleted, "failed": failed}
+
     # ------------------------------------------------------------------
     # Library
     # ------------------------------------------------------------------
@@ -593,24 +661,240 @@ class Application:
         return {"items": results}
 
     def export_cbz(self, root_dir: str) -> Dict[str, Any]:
+        import uuid
+
+        task_id = str(uuid.uuid4())[:8]
         entry = self._library_service.get_local_library_entry_by_root(
             root_dir=root_dir,
             saved_detail_cache=self._detail_cache,
         )
         manga_title = str((entry or {}).get("manga_title") or os.path.basename(root_dir.rstrip("\\/")) or "漫画下载")
         manga_url = str((entry or {}).get("manga_url") or "")
-        export_dir, exported_archives, skipped_chapters = export_manga_to_cbz(
-            root_dir=root_dir,
-            manga_title=manga_title,
-            manga_url=manga_url,
-        )
-        return {
-            "status": "ok",
-            "message": f"已导出 {len(exported_archives)} 个 CBZ 到 {export_dir}",
-            "export_dir": export_dir,
-            "exported_count": len(exported_archives),
-            "skipped_chapters": skipped_chapters,
+
+        task = {
+            "id": task_id,
+            "status": "running",
+            "manga_title": manga_title,
+            "current_chapter": "",
+            "current_index": 0,
+            "total_chapters": 0,
+            "exported_count": 0,
+            "export_dir": "",
+            "skipped_chapters": [],
+            "error": None,
         }
+        with self._lock:
+            self._export_tasks[task_id] = task
+
+        thread = threading.Thread(
+            target=self._process_export_cbz,
+            args=(task_id, root_dir, manga_title, manga_url),
+            daemon=True,
+        )
+        thread.start()
+
+        return {"status": "ok", "task_id": task_id}
+
+    def _process_export_cbz(self, task_id: str, root_dir: str, manga_title: str, manga_url: str) -> None:
+        try:
+            def on_progress(chapter_index: int, total_chapters: int, chapter_title: str) -> None:
+                with self._lock:
+                    task = self._export_tasks.get(task_id)
+                    if task is not None:
+                        task["current_chapter"] = chapter_title
+                        task["current_index"] = chapter_index
+                        task["total_chapters"] = total_chapters
+                        task["exported_count"] = chapter_index
+
+            export_dir, exported_archives, skipped_chapters = export_manga_to_cbz(
+                root_dir=root_dir,
+                manga_title=manga_title,
+                manga_url=manga_url,
+                progress_callback=on_progress,
+            )
+
+            with self._lock:
+                task = self._export_tasks.get(task_id)
+                if task is not None:
+                    task["status"] = "completed"
+                    task["export_dir"] = export_dir
+                    task["exported_count"] = len(exported_archives)
+                    task["total_chapters"] = len(exported_archives) + len(skipped_chapters)
+                    task["skipped_chapters"] = skipped_chapters
+        except Exception as ex:
+            with self._lock:
+                task = self._export_tasks.get(task_id)
+                if task is not None:
+                    task["status"] = "failed"
+                    task["error"] = str(ex)
+
+    def get_export_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self._export_tasks.get(task_id)
+
+    # ------------------------------------------------------------------
+    # Ranking
+    # ------------------------------------------------------------------
+    def get_ranking(
+        self,
+        site: str = "baozimh",
+        section: str = "",
+        page: int = 1,
+    ) -> Dict[str, Any]:
+        """Fetch ranking/leaderboard data for the given site."""
+        adapter = get_adapter(site)
+
+        if not getattr(adapter, "supports_discovery", False):
+            raise RuntimeError(f"站点 {adapter.display_name} 不支持排行榜浏览")
+
+        available_sections = adapter.get_section_options()
+        if not available_sections:
+            raise RuntimeError(f"站点 {adapter.display_name} 没有可用的排行榜分区")
+
+        if not section:
+            section = next(iter(available_sections.keys()), "")
+
+        if section not in available_sections:
+            raise RuntimeError(f"站点 {adapter.display_name} 不支持分区: {section}")
+
+        # available_sections maps display_name -> internal_key.
+        # Some adapters (e.g. baozimh) expect the internal key in fetch_section_cards,
+        # while others (mangacopy, manhuagui) use the display name as the key.
+        internal_key = available_sections.get(section, section)
+        cards = adapter.fetch_section_cards(internal_key, page=page)
+        items = []
+        for card in cards:
+            item = {
+                "title": getattr(card, "title", ""),
+                "url": getattr(card, "manga_url", ""),
+                "cover_url": getattr(card, "cover_url", ""),
+                "latest_chapter": getattr(card, "latest_chapter", ""),
+                "update_time": getattr(card, "update_time", ""),
+                "section": getattr(card, "section", ""),
+            }
+            detail_hint = getattr(card, "detail_hint", "")
+            if detail_hint:
+                item["detail_hint"] = detail_hint
+            detail_section_label = getattr(card, "detail_section_label", "")
+            if detail_section_label:
+                item["detail_section_label"] = detail_section_label
+            items.append(item)
+
+        return {
+            "items": items,
+            "total": len(items),
+            "section": section,
+            "available_sections": available_sections,
+            "is_single_page": adapter.is_single_page_section(section),
+        }
+
+    def get_ranking_sections(self, site: str = "baozimh") -> Dict[str, Any]:
+        """Get available ranking sections for a site."""
+        adapter = get_adapter(site)
+        sections = adapter.get_section_options()
+        return {
+            "site": site,
+            "site_name": adapter.display_name,
+            "sections": sections,
+        }
+
+    # ------------------------------------------------------------------
+    # Reader
+    # ------------------------------------------------------------------
+    def get_reader_chapters(self, root_dir: str) -> Dict[str, Any]:
+        """List chapters in a manga directory for the reader."""
+        if not os.path.isdir(root_dir):
+            return {"manga_title": os.path.basename(root_dir), "chapters": []}
+
+        records = build_downloaded_chapter_records_from_disk(root_dir)
+        chapters = []
+        for r in records:
+            chapters.append({
+                "dir_name": r.get("dir_name", ""),
+                "title": r.get("title", r.get("dir_name", "")),
+                "order": r.get("order") if r.get("order") is not None else 0,
+                "image_count": r.get("image_count", 0),
+            })
+        chapters.sort(key=lambda c: c.get("order") if c.get("order") is not None else 9999)
+
+        manga_title = os.path.basename(root_dir.rstrip("\\/"))
+        metadata_file = os.path.join(root_dir, "元数据.json")
+        if os.path.isfile(metadata_file):
+            try:
+                import json
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                manga_title = meta.get("manga_title") or manga_title
+            except Exception:
+                pass
+
+        return {"manga_title": manga_title, "chapters": chapters}
+
+    def get_chapter_images(self, root_dir: str, chapter_dir_name: str) -> Dict[str, Any]:
+        """List image file paths in a chapter directory for the reader."""
+        chapter_dir = os.path.join(root_dir, chapter_dir_name)
+        if not os.path.isdir(chapter_dir):
+            return {"images": []}
+
+        images = list_exportable_image_files(chapter_dir)
+        return {"images": images}
+
+    # ------------------------------------------------------------------
+    # Task history
+    # ------------------------------------------------------------------
+    def _load_task_history(self) -> List[Dict[str, Any]]:
+        try:
+            if os.path.exists(self._task_history_file):
+                import json
+                with open(self._task_history_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+        return []
+
+    def _save_task_history(self) -> None:
+        try:
+            import json
+            with open(self._task_history_file, "w", encoding="utf-8") as f:
+                json.dump(self._task_history[-200:], f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _record_task_to_history(self, task_id: str) -> None:
+        with self._lock:
+            task = self._downloads.get(task_id)
+            if task is None:
+                return
+            snapshot = {
+                "id": task.get("id", ""),
+                "url": task.get("url", ""),
+                "site": task.get("site", ""),
+                "manga_title": task.get("manga_title", ""),
+                "status": task.get("status", ""),
+                "progress": float(task.get("progress", 0.0) or 0.0),
+                "completed_chapter_count": int(task.get("completed_chapter_count", 0) or 0),
+                "total_chapter_count": int(task.get("total_chapter_count", 0) or 0),
+                "root_dir": task.get("root_dir", ""),
+                "task_error": task.get("task_error"),
+                "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            self._task_history.append(snapshot)
+        self._save_task_history()
+
+    def get_download_history(self, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        with self._lock:
+            total = len(self._task_history)
+            start = max(0, total - page * page_size)
+            end = max(0, total - (page - 1) * page_size)
+            items = list(reversed(self._task_history[start:end]))
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    def clear_download_history(self) -> None:
+        with self._lock:
+            self._task_history.clear()
+        self._save_task_history()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -667,6 +951,7 @@ class Application:
             "id": task.get("id", ""),
             "url": task.get("url", ""),
             "site": task.get("site", ""),
+            "manga_title": task.get("manga_title", ""),
             "status": task.get("status", ""),
             "status_text": task.get("status_text", ""),
             "progress": float(task.get("progress", 0.0) or 0.0),

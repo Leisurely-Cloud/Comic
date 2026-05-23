@@ -434,11 +434,14 @@ def safe_request(url, timeout=10, retries=5, delay=1, headers=None, stop_event=N
             # 如果使用了代理且失败，移除该代理
             if proxy:
                 proxy_pool.remove_proxy(proxy)
-                
+
             if attempt < retries:
                 if should_stop(stop_event):
                     return None
-                time.sleep(delay)
+                # Use interruptible sleep so stop_event is respected promptly
+                stop_event.wait(timeout=delay) if stop_event else time.sleep(delay)
+                if should_stop(stop_event):
+                    return None
             else:
                 with print_lock:
                     print(f"❌ Failed after {retries + 1} attempts: {url}")
@@ -1058,10 +1061,11 @@ def download_chapter_images(chapter_slug, base_url_template, root_dir="LuoxiaoHe
     return success_count, next_slug, {'slug': next_slug}
 
 
-def get_manga_info_from_url(url):
+def get_manga_info_from_url(url, stop_event=None):
     """
     从 URL 中提取漫画 ID 和 slug
     :param url: 漫画目录页或章节页 URL
+    :param stop_event: 可选的停止事件
     :return: (manga_id, manga_slug, start_slug)
     """
     parsed = urlparse(url)
@@ -1102,12 +1106,12 @@ def get_manga_info_from_url(url):
     with print_lock:
         print(f"🔍 Analyzing URL: {url} (Slug: {manga_slug})")
 
-    resp = safe_request(url, retries=1)
+    resp = safe_request(url, retries=1, stop_event=stop_event)
     if not resp:
         return None, None, None
-        
+
     soup = BeautifulSoup(resp.content, "html.parser")
-    
+
     # 尝试从目录页提取 data-mid
     # <div class="pb-6" id="allchapters" data-mid="878" ...>
     # 或者 <div id="mangachapters" data-mid="4349" ...>
@@ -1127,7 +1131,8 @@ def get_manga_info_from_url(url):
             
     if not manga_id:
         with print_lock:
-            print("❌ Could not find manga ID (data-mid or data-ms) in page.")
+            print(f"❌ Could not find manga ID (data-mid or data-ms) in page: {url}")
+            print(f"   Page title: {soup.title.string if soup.title else '(no title)'}")
         return None, None, None
         
     with print_lock:

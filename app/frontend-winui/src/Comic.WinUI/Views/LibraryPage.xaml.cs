@@ -34,4 +34,12 @@ public sealed partial class LibraryPage : Page
             // Load failure is already handled by ViewModel
         }
     }
+
+    private void OnReadClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedItem is not null && !string.IsNullOrEmpty(ViewModel.SelectedItem.RootDir))
+        {
+            Frame.Navigate(typeof(ReaderPage), ViewModel.SelectedItem.RootDir);
+        }
+    }
 }

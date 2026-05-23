@@ -5,56 +5,70 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Comic.WinUI.Models"
     mc:Ignorable="d">
 
     <Border Style="{StaticResource HeaderCardBorderStyle}">
         <StackPanel Spacing="14">
-            <!-- Title + Backend buttons -->
-            <Grid ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Spacing="4">
-                    <TextBlock Text="搜索下载" Style="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock Text="选择站点，输入漫画名称搜索，选择后开始下载。"
-                               Opacity="0.6" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Command="{x:Bind ViewModel.EnsureBackendRunningCommand, Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE768;" FontSize="14" />
-                            <TextBlock Text="启动后端" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{x:Bind ViewModel.RefreshBackendCommand, Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                            <TextBlock Text="刷新" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-            </Grid>
+            <TextBlock Text="搜索下载" Style="{StaticResource TitleTextBlockStyle}" />
             <!-- Search inputs -->
             <Grid ColumnSpacing="12" Margin="0,4,0,0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="140" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <ComboBox Grid.Column="0" Header="站点"
                           VerticalAlignment="Bottom"
                           ItemsSource="{x:Bind ViewModel.SiteOptions, Mode=OneWay}"
                           SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}" />
-                <TextBox Grid.Column="1" Header="漫画名称"
+                <AutoSuggestBox Grid.Column="1" Header="漫画名称"
+                         x:Name="SearchSuggestBox"
                          PlaceholderText="输入关键词搜索..."
-                         Text="{x:Bind ViewModel.SearchKeyword, Mode=TwoWay}" />
-                <Button Grid.Column="2" VerticalAlignment="Bottom" MinWidth="90"
-                        Style="{StaticResource AccentButtonStyle}"
+                         Text="{x:Bind ViewModel.SearchKeyword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         ItemsSource="{x:Bind ViewModel.SearchHistory, Mode=OneWay}"
+                         TextChanged="OnSearchTextChanged"
+                         SuggestionChosen="OnSuggestionChosen"
+                         QuerySubmitted="OnQuerySubmitted"
+                         GotFocus="OnSearchBoxGotFocus"
+                         KeyDown="OnSearchKeyDown">
+                    <AutoSuggestBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:SearchHistoryEntry">
+                            <Grid Padding="0,4" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Grid.Column="0" Glyph="&#xE81C;" FontSize="14" Opacity="0.4"
+                                          VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{x:Bind Keyword}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind SiteName}"
+                                           Opacity="0.5" FontSize="12" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="3"
+                                           Opacity="0.35" FontSize="11" VerticalAlignment="Center">
+                                    <Run Text="{x:Bind ResultCount}" /><Run Text="条结果" />
+                                </TextBlock>
+                            </Grid>
+                        </DataTemplate>
+                    </AutoSuggestBox.ItemTemplate>
+                </AutoSuggestBox>
+                <Button Grid.Column="2" VerticalAlignment="Bottom" MinWidth="80"
                         Command="{x:Bind ViewModel.SearchCommand, Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE721;" FontSize="14" />
                         <TextBlock Text="搜索" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="3" VerticalAlignment="Bottom" MinWidth="100"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Command="{x:Bind ViewModel.StartDownloadCommand, Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE896;" FontSize="14" />
+                        <TextBlock Text="开始下载" />
                     </StackPanel>
                 </Button>
             </Grid>

@@ -237,11 +237,11 @@ class ManhuaguiAdapter(BaseSiteAdapter):
         session = getattr(self._thread_local, attr_name, None)
         if session is None:
             if mode == "manual":
-                session = self._build_session(trust_env=False, proxy_dict=self._manual_proxy_dict)
+                session = self._build_session(trust_env=True, proxy_dict=self._manual_proxy_dict)
             elif mode == "env":
                 session = self._build_session(trust_env=True)
             else:
-                session = self._build_session(trust_env=False)
+                session = self._build_session(trust_env=True)
             setattr(self._thread_local, attr_name, session)
         return session
 
@@ -1144,7 +1144,7 @@ class ManhuaguiAdapter(BaseSiteAdapter):
             self._remove_file_quietly(f"{candidate_path}.part")
         return False
 
-    def get_manga_info_from_url(self, url: str):
+    def get_manga_info_from_url(self, url: str, stop_event=None):
         parsed = urlparse((url or "").strip())
         path_parts = [part for part in parsed.path.strip("/").split("/") if part]
 

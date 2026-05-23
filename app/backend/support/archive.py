@@ -146,12 +146,15 @@ def export_manga_to_cbz(
     root_dir: str,
     manga_title: str,
     manga_url: str = "",
+    progress_callback=None,
 ) -> Tuple[str, List[Tuple[str, int]], List[str]]:
     """遍历漫画根目录下的最终态章节目录，每个写出一个 CBZ。
 
     返回 (export_dir, exported_archives, skipped_chapters)：
     - exported_archives: [(cbz_path, image_count), ...]
     - skipped_chapters: 图片为空因而未产出 CBZ 的章节名
+
+    progress_callback(chapter_index, total_chapters, chapter_name) 在每章完成后调用。
     """
     resolved_root_dir = (root_dir or "").strip()
     if not resolved_root_dir or not os.path.isdir(resolved_root_dir):
@@ -188,6 +191,10 @@ def export_manga_to_cbz(
             exported_archives.append((archive_path, image_count))
         else:
             skipped_chapters.append(chapter_dir_name)
+
+        if progress_callback is not None:
+            chapter_title = chapter_dir_name.split("_", 1)[1] if "_" in chapter_dir_name else chapter_dir_name
+            progress_callback(chapter_index, total_chapters, chapter_title)
 
     if not exported_archives:
         raise RuntimeError("没有找到可写入 CBZ 的图片文件。")
