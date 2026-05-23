@@ -38,39 +38,51 @@ jobs:
         dotnet publish app/frontend-winui/src/Comic.WinUI/Comic.WinUI.csproj -c Release -r win-x64 --self-contained true -o publish/frontend
 
     - name: Copy XAML compiled files
+      shell: pwsh
       run: |
-        xcopy /E /I /Q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Assets publish\frontend\Assets
-        xcopy /E /I /Q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Views publish\frontend\Views
-        xcopy /E /I /Q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Controls publish\frontend\Controls
-        copy /Y app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\*.xbf publish\frontend\
-        copy /Y app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Comic.WinUI.pri publish\frontend\
+        $binDir = "app/frontend-winui/src/Comic.WinUI/bin/Release/net9.0-windows10.0.26100.0/win-x64"
+        $pubDir = "publish/frontend"
+        Copy-Item -Path "$binDir/Assets" -Destination "$pubDir/Assets" -Recurse -Force
+        Copy-Item -Path "$binDir/Views" -Destination "$pubDir/Views" -Recurse -Force
+        Copy-Item -Path "$binDir/Controls" -Destination "$pubDir/Controls" -Recurse -Force
+        Copy-Item -Path "$binDir/*.xbf" -Destination "$pubDir/" -Force
+        Copy-Item -Path "$binDir/Comic.WinUI.pri" -Destination "$pubDir/" -Force
 
     - name: Prepare backend
+      shell: pwsh
       run: |
-        xcopy /E /I /Q app\backend publish\backend
+        Copy-Item -Path "app/backend" -Destination "publish/backend" -Recurse -Force
 
     - name: Download embedded Python
+      shell: pwsh
       run: |
-        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.12.4/python-3.12.4-embed-amd64.zip" -OutFile "tools\pyembed.zip"
-        New-Item -ItemType Directory -Path "publish\python" -Force
+        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.12.4/python-3.12.4-embed-amd64.zip" -OutFile "tools/pyembed.zip"
+        New-Item -ItemType Directory -Path "publish/python" -Force
         Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::ExtractToDirectory('tools\pyembed.zip', 'publish\python')
+        [System.IO.Compression.ZipFile]::ExtractToDirectory('tools/pyembed.zip', 'publish/python')
 
     - name: Configure Python
+      shell: pwsh
       run: |
-        (Get-Content 'publish\python\python312._pth') -replace '#import site', 'import site' | Set-Content 'publish\python\python312._pth'
-        "python312.zip`n.`nLib/site-packages`nimport site" | Set-Content 'publish\python\python312._pth'
+        Set-Content -Path 'publish/python/python312._pth' -Value "python312.zip`n.`nLib/site-packages`nimport site"
 
     - name: Install pip and dependencies
+      shell: pwsh
       run: |
-        Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "tools\get-pip.py"
-        publish\python\python.exe tools\get-pip.py --no-warn-script-location
-        publish\python\python.exe -m pip install --target publish\python\Lib\site-packages requests beautifulsoup4 lxml --no-warn-script-location
+        Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "tools/get-pip.py"
+        & publish/python/python.exe tools/get-pip.py --no-warn-script-location
+        & publish/python/python.exe -m pip install --target publish/python/Lib/site-packages requests beautifulsoup4 lxml --no-warn-script-location
 
     - name: Create launcher scripts
+      shell: pwsh
       run: |
-        '@echo off`ncd /d "%~dp0"`nstart "" "frontend\Comic.WinUI.exe"' | Set-Content 'publish\ComicDownloader.bat' -Encoding ASCII
-        '@echo off`nchcp 65001 >nul`necho 初始化完成!`ntimeout /t 2 >nul' | Set-Content 'publish\setup.bat' -Encoding ASCII
+        Set-Content -Path 'publish/ComicDownloader.bat' -Value '@echo off
+cd /d "%~dp0"
+start "" "frontend\Comic.WinUI.exe"' -Encoding ASCII
+        Set-Content -Path 'publish/setup.bat' -Value '@echo off
+chcp 65001 >nul
+echo 初始化完成!
+timeout /t 2 >nul' -Encoding ASCII
 
     - name: Install Inno Setup
       run: |
