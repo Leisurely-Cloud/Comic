@@ -88,27 +88,15 @@
                         <DataTemplate x:DataType="vm:RankingItemViewModel"
                                       xmlns:vm="using:Comic.WinUI.ViewModels">
                             <Grid Padding="12" ColumnSpacing="12">
-                                <Grid.ContextFlyout>
-                                    <MenuFlyout>
-                                        <MenuFlyoutItem Text="下载此漫画"
-                                                         Command="{x:Bind DownloadCommand}"
-                                                         CommandParameter="{x:Bind Url}" />
-                                        <MenuFlyoutItem Text="复制链接"
-                                                         Click="OnCopyLinkClick"
-                                                         Tag="{x:Bind Url}" />
-                                    </MenuFlyout>
-                                </Grid.ContextFlyout>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Image Grid.Column="0"
-                                       Source="{x:Bind CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
-                                       Width="56" Height="78"
-                                       Stretch="UniformToFill"
-                                       CornerRadius="4" />
+                                <Border Grid.Column="0" CornerRadius="4" Width="56" Height="78">
+                                    <Image Source="{x:Bind CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                           Stretch="UniformToFill" />
+                                </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
@@ -121,15 +109,7 @@
                                                Opacity="0.4" FontSize="11"
                                                TextTrimming="CharacterEllipsis" MaxLines="1" />
                                 </StackPanel>
-                                <Button Grid.Column="2"
-                                        Style="{StaticResource SubtleButtonStyle}"
-                                        Command="{x:Bind DownloadCommand}"
-                                        CommandParameter="{x:Bind Url}"
-                                        ToolTipService.ToolTip="下载此漫画"
-                                        VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE896;" FontSize="16" />
-                                </Button>
-                                <TextBlock Grid.Column="3"
+                                <TextBlock Grid.Column="2"
                                            Text="{x:Bind UpdateTime, Mode=OneWay}"
                                            Opacity="0.4" FontSize="12"
                                            VerticalAlignment="Center" />

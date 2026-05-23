@@ -23,10 +23,29 @@ public sealed class BackendSettingsService
     public BackendSettingsService()
     {
         var repoRoot = FindRepositoryRoot(AppContext.BaseDirectory);
-        var backendScriptPath = repoRoot is null ? string.Empty : Path.Combine(repoRoot, "app", "backend", "run_backend.py");
-        var venvPythonPath = repoRoot is null ? string.Empty : Path.Combine(repoRoot, ".venv", "Scripts", "python.exe");
-        var defaultPython = File.Exists(venvPythonPath) ? venvPythonPath : "python";
-        var defaultWorkingDirectory = repoRoot is null ? Environment.CurrentDirectory : Path.Combine(repoRoot, "app");
+        var isPackaged = IsPackagedInstallation();
+
+        string backendScriptPath;
+        string defaultPython;
+        string defaultWorkingDirectory;
+
+        if (isPackaged)
+        {
+            // 打包后的布局：python 和 backend 在应用目录的上级
+            var appDir = Path.GetDirectoryName(AppContext.BaseDirectory) ?? AppContext.BaseDirectory;
+            var installDir = Path.GetDirectoryName(appDir) ?? appDir;
+            backendScriptPath = Path.Combine(installDir, "backend", "run_backend.py");
+            defaultPython = Path.Combine(installDir, "python", "python.exe");
+            defaultWorkingDirectory = Path.Combine(installDir, "backend");
+        }
+        else
+        {
+            // 开发环境布局
+            backendScriptPath = repoRoot is null ? string.Empty : Path.Combine(repoRoot, "app", "backend", "run_backend.py");
+            var venvPythonPath = repoRoot is null ? string.Empty : Path.Combine(repoRoot, ".venv", "Scripts", "python.exe");
+            defaultPython = File.Exists(venvPythonPath) ? venvPythonPath : "python";
+            defaultWorkingDirectory = repoRoot is null ? Environment.CurrentDirectory : Path.Combine(repoRoot, "app");
+        }
 
         _defaults = new BackendRuntimeSettings
         {
@@ -134,5 +153,19 @@ public sealed class BackendSettingsService
         }
 
         return null;
+    }
+
+    private static bool IsPackagedInstallation()
+    {
+        // 检查是否是打包后的安装版本
+        // 打包后，python 目录在 exe 的上级目录
+        var exeDir = AppContext.BaseDirectory;
+        var parentDir = Path.GetDirectoryName(exeDir);
+        if (parentDir is null) return false;
+
+        var pythonExe = Path.Combine(parentDir, "python", "python.exe");
+        var backendScript = Path.Combine(parentDir, "backend", "run_backend.py");
+
+        return File.Exists(pythonExe) && File.Exists(backendScript);
     }
 }

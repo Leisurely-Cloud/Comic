@@ -63,6 +63,18 @@ public sealed partial class RankingPage : Page
         }
     }
 
+    private void OnDownloadItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.Tag is string url && !string.IsNullOrEmpty(url))
+        {
+            var shellPage = FindParent<ShellPage>(this);
+            if (shellPage is not null)
+            {
+                shellPage.NavigateToPageWithUrl("download", url);
+            }
+        }
+    }
+
     private void OnCopyLinkClick(object sender, RoutedEventArgs e)
     {
         if (sender is MenuFlyoutItem menuFlyoutItem && menuFlyoutItem.Tag is string url && !string.IsNullOrEmpty(url))

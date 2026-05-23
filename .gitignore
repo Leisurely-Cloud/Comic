@@ -58,3 +58,13 @@ app/backend/backend-*.err.log
 
 # Large files that shouldn't be in repo
 core_mhgui.js
+
+# Installer build outputs
+publish/
+installer-output/
+*.binlog
+
+# Downloaded tools (except language files)
+tools/*.zip
+tools/*.py
+tools/*.exe
