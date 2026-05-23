@@ -2,6 +2,8 @@
 
 [English](#english) | [中文](#中文)
 
+> **注意：** 目前暂未发布正式版本，请通过源码运行。
+
 ---
 
 ![screenshot](./docs/screenshot.png)
@@ -15,10 +17,13 @@ A desktop manga/comic downloader with a modern WinUI 3 interface and a local Pyt
 ### Features
 
 - **Multi-site support** — Baozimh, MangaCopy, Manhuagui, and more
+- **Ranking browser** — Browse popular manga rankings by site and category
 - **Batch download** — Select and download multiple chapters at once
-- **CBZ export** — Export downloaded manga to CBZ format for comic readers
+- **CBZ export** — Export downloaded manga to CBZ format with progress tracking
 - **Local library** — Browse and manage your downloaded manga collection
+- **Built-in reader** — Read downloaded manga directly in the app
 - **Download control** — Pause, resume, and stop downloads with real-time progress
+- **Search history** — Quick access to previous search queries
 - **Proxy support** — Configure HTTP proxy for region-restricted sites
 - **Modern UI** — Native WinUI 3 desktop app with light/dark theme support
 
@@ -87,10 +92,13 @@ dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
 ### 功能特性
 
 - **多站点支持** — 包子漫画、MangaCopy、漫画柜等
+- **排行榜浏览** — 按站点和分类浏览热门漫画排行榜
 - **批量下载** — 选择多个章节一键下载
-- **CBZ 导出** — 将下载的漫画导出为 CBZ 格式，方便在各类阅读器中使用
+- **CBZ 导出** — 将下载的漫画导出为 CBZ 格式，实时显示导出进度
 - **本地书库** — 浏览和管理已下载的漫画
+- **内置阅读器** — 直接在应用内阅读已下载的漫画
 - **下载控制** — 支持暂停、继续、停止，实时显示下载进度
+- **搜索历史** — 快速访问之前的搜索记录
 - **代理支持** — 可配置 HTTP 代理访问受限站点
 - **现代化界面** — 原生 WinUI 3 桌面应用，支持明暗主题
 
