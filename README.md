@@ -2,7 +2,7 @@
 
 [English](#english) | [中文](#中文)
 
-> **v1.0.0 已发布！** [下载安装包](https://github.com/Leisurely-Cloud/Comic/releases/latest) — 单文件安装，无需额外依赖。
+> **v2.1.0 已发布！** [下载安装包](https://github.com/Leisurely-Cloud/Comic/releases/latest) — 单文件安装，无需额外依赖。
 
 ---
 
@@ -43,7 +43,7 @@ app/
 
 **Option 1: Download Installer (Recommended)**
 
-Download the latest `ComicDownloader-1.0.0-Setup.exe` from [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) and run it. No additional dependencies required.
+Download the latest `ComicDownloader-2.1.0-Setup.exe` from [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) and run it. No additional dependencies required.
 
 **Option 2: Run from Source**
 
@@ -138,7 +138,7 @@ app/
 
 **方式一：下载安装包（推荐）**
 
-从 [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) 下载 `ComicDownloader-1.0.0-Setup.exe`，双击安装即可，无需额外依赖。
+从 [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) 下载 `ComicDownloader-2.1.0-Setup.exe`，双击安装即可，无需额外依赖。
 
 **方式二：源码运行**
 
