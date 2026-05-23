@@ -37,6 +37,17 @@ public sealed class BackendProcessService
                 CreateNoWindow = true,
             };
 
+            // 设置 PYTHONPATH 让嵌入式 Python 能找到依赖包
+            var pythonDir = Path.GetDirectoryName(settings.PythonExecutablePath);
+            if (!string.IsNullOrEmpty(pythonDir))
+            {
+                var sitePackages = Path.Combine(pythonDir, "Lib", "site-packages");
+                if (Directory.Exists(sitePackages))
+                {
+                    startInfo.EnvironmentVariables["PYTHONPATH"] = sitePackages;
+                }
+            }
+
             var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("无法启动后端进程。");
             process.EnableRaisingEvents = true;
