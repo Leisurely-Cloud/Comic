@@ -24,12 +24,25 @@ if not exist "%ISCC%" (
 )
 
 echo [步骤 1] 发布 .NET 前端...
-dotnet publish app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj -c Release -r win-x64 --self-contained true -o publish\frontend -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+dotnet build app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj -c Release -r win-x64
+if %errorlevel% neq 0 (
+    echo [错误] 前端构建失败!
+    pause
+    exit /b 1
+)
+dotnet publish app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj -c Release -r win-x64 --self-contained true -o publish\frontend
 if %errorlevel% neq 0 (
     echo [错误] 前端发布失败!
     pause
     exit /b 1
 )
+
+echo   复制 XAML 编译文件...
+xcopy /e /i /q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Assets publish\frontend\Assets
+xcopy /e /i /q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Views publish\frontend\Views
+xcopy /e /i /q app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Controls publish\frontend\Controls
+copy /y app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\*.xbf publish\frontend\
+copy /y app\frontend-winui\src\Comic.WinUI\bin\Release\net9.0-windows10.0.26100.0\win-x64\Comic.WinUI.pri publish\frontend\
 
 echo.
 echo [步骤 2] 复制后端代码...
