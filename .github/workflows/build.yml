@@ -76,13 +76,10 @@ jobs:
     - name: Create launcher scripts
       shell: pwsh
       run: |
-        Set-Content -Path 'publish/ComicDownloader.bat' -Value '@echo off
-cd /d "%~dp0"
-start "" "frontend\Comic.WinUI.exe"' -Encoding ASCII
-        Set-Content -Path 'publish/setup.bat' -Value '@echo off
-chcp 65001 >nul
-echo 初始化完成!
-timeout /t 2 >nul' -Encoding ASCII
+        $launcher = "@echo off`r`ncd /d `"%~dp0`"`r`nstart `"`" `"frontend\Comic.WinUI.exe`""
+        Set-Content -Path 'publish/ComicDownloader.bat' -Value $launcher -Encoding ASCII
+        $setup = "@echo off`r`nchcp 65001 >nul`r`necho 初始化完成!`r`ntimeout /t 2 >nul"
+        Set-Content -Path 'publish/setup.bat' -Value $setup -Encoding ASCII
 
     - name: Install Inno Setup
       run: |
