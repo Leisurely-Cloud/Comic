@@ -2,7 +2,7 @@
 
 [English](#english) | [中文](#中文)
 
-> **注意：** 目前暂未发布正式版本，请通过源码运行。
+> **v1.0.0 已发布！** [下载安装包](https://github.com/Leisurely-Cloud/Comic/releases/latest) — 单文件安装，无需额外依赖。
 
 ---
 
@@ -41,6 +41,12 @@ app/
 
 ### Quick Start
 
+**Option 1: Download Installer (Recommended)**
+
+Download the latest `ComicDownloader-1.0.0-Setup.exe` from [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) and run it. No additional dependencies required.
+
+**Option 2: Run from Source**
+
 **Prerequisites:**
 - Windows 10/11
 - .NET 9 SDK
@@ -69,6 +75,20 @@ dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
 ```
+
+### Building the Installer
+
+**Prerequisites:**
+- .NET 9 SDK
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+
+**Build:**
+
+```bat
+build-installer.bat
+```
+
+Output: `installer-output/ComicDownloader-1.0.0-Setup.exe`
 
 ### Tech Stack
 
@@ -116,6 +136,12 @@ app/
 
 ### 快速开始
 
+**方式一：下载安装包（推荐）**
+
+从 [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) 下载 `ComicDownloader-1.0.0-Setup.exe`，双击安装即可，无需额外依赖。
+
+**方式二：源码运行**
+
 **环境要求：**
 - Windows 10/11
 - .NET 9 SDK
@@ -144,6 +170,20 @@ dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
 ```
+
+### 构建安装包
+
+**环境要求：**
+- .NET 9 SDK
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+
+**构建：**
+
+```bat
+build-installer.bat
+```
+
+输出：`installer-output/ComicDownloader-1.0.0-Setup.exe`
 
 ### 技术栈
 
