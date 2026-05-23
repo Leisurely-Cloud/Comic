@@ -61,9 +61,15 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\frontend\{#MyAppExeName}"; 
 Filename: "{app}\frontend\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// 检查 .NET 依赖（自包含版本不需要）
+// 安装前停止相关进程
 function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
 begin
+  // 停止 Comic.WinUI 进程
+  Exec('taskkill', '/F /IM Comic.WinUI.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 停止 Python 后端进程
+  Exec('taskkill', '/F /IM python.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;
 
