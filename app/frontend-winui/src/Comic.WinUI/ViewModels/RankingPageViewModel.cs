@@ -19,6 +19,7 @@ public partial class RankingPageViewModel : ObservableObject
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
 
+#pragma warning disable CS0649
     [ObservableProperty]
     private string _selectedSite = "baozimh";
 
@@ -45,6 +46,7 @@ public partial class RankingPageViewModel : ObservableObject
 
     [ObservableProperty]
     private int _currentPage = 1;
+#pragma warning restore CS0649
 
     public bool CanLoadMore => !IsSinglePage && !IsLoading;
 
