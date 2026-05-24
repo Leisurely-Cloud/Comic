@@ -158,13 +158,16 @@ public sealed class BackendSettingsService
     private static bool IsPackagedInstallation()
     {
         // 检查是否是打包后的安装版本
-        // 打包后，python 目录在 exe 的上级目录
+        // 打包后，exe 在 frontend 子目录，python 和 backend 在上级目录
         var exeDir = AppContext.BaseDirectory;
-        var parentDir = Path.GetDirectoryName(exeDir);
-        if (parentDir is null) return false;
+        var frontendDir = Path.GetDirectoryName(exeDir);
+        if (frontendDir is null) return false;
 
-        var pythonExe = Path.Combine(parentDir, "python", "python.exe");
-        var backendScript = Path.Combine(parentDir, "backend", "run_backend.py");
+        var installDir = Path.GetDirectoryName(frontendDir);
+        if (installDir is null) return false;
+
+        var pythonExe = Path.Combine(installDir, "python", "python.exe");
+        var backendScript = Path.Combine(installDir, "backend", "run_backend.py");
 
         return File.Exists(pythonExe) && File.Exists(backendScript);
     }
