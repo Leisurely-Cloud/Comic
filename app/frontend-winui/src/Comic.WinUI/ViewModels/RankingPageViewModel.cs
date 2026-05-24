@@ -48,6 +48,8 @@ public partial class RankingPageViewModel : ObservableObject
 
     public bool CanLoadMore => !IsSinglePage && !IsLoading;
 
+    public bool HasItems => RankingItems.Count > 0;
+
     public event EventHandler<string>? NavigateToDetailRequested;
     public event EventHandler<string>? DownloadMangaRequested;
 
@@ -55,6 +57,7 @@ public partial class RankingPageViewModel : ObservableObject
     {
         _client = App.GetService<BackendClient>();
         _dispatcher = DispatcherQueue.GetForCurrentThread();
+        RankingItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
     partial void OnSelectedSiteChanged(string value)

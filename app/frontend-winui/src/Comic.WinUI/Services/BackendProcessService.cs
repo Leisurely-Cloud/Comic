@@ -28,6 +28,7 @@ public sealed class BackendProcessService
             }
 
             var settings = _settingsService.GetSettings();
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = settings.PythonExecutablePath,
@@ -35,6 +36,8 @@ public sealed class BackendProcessService
                 WorkingDirectory = settings.WorkingDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
             };
 
             // 设置 PYTHONPATH 让嵌入式 Python 能找到依赖包
@@ -48,9 +51,36 @@ public sealed class BackendProcessService
                 }
             }
 
+            // 写入调试信息到多个位置
+            var debugInfo = $"FileName: {startInfo.FileName}\nArguments: {startInfo.Arguments}\nWorkingDirectory: {startInfo.WorkingDirectory}\nPYTHONPATH: {startInfo.EnvironmentVariables["PYTHONPATH"] ?? "not set"}\nTime: {DateTime.Now}\n";
+            try
+            {
+                File.WriteAllText(Path.Combine(settings.WorkingDirectory, "backend-debug.log"), debugInfo);
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "comic-backend-debug.log"), debugInfo);
+            }
+            catch { }
+
             var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("无法启动后端进程。");
             process.EnableRaisingEvents = true;
+
+            // 捕获 stderr 输出用于调试
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            process.Exited += async (_, _) =>
+            {
+                try
+                {
+                    var stderr = await stderrTask;
+                    var stdout = await stdoutTask;
+                    if (!string.IsNullOrEmpty(stderr) || !string.IsNullOrEmpty(stdout))
+                    {
+                        var logPath = Path.Combine(settings.WorkingDirectory, "backend-startup.log");
+                        await File.WriteAllTextAsync(logPath, $"STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}");
+                    }
+                }
+                catch { }
+            };
             process.Exited += (_, _) =>
             {
                 lock (_syncRoot)

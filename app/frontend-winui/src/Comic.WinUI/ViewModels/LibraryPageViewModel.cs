@@ -24,6 +24,7 @@ public partial class LibraryPageViewModel : ObservableObject
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
+        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
     public ObservableCollection<LibraryItemViewModel> Items { get; } = [];
@@ -41,6 +42,9 @@ public partial class LibraryPageViewModel : ObservableObject
     public partial string UpdateCheckStatus { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial bool IsLoading { get; set; }
+
+    [ObservableProperty]
     public partial bool IsExporting { get; set; }
 
     [ObservableProperty]
@@ -51,6 +55,8 @@ public partial class LibraryPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool ShowExportResult { get; set; }
+
+    public bool HasItems => Items.Count > 0;
 
     public string PageSummary => $"第 {_currentPage} 页 / 共 {_totalItems} 部";
 
@@ -66,6 +72,7 @@ public partial class LibraryPageViewModel : ObservableObject
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         PageError = string.Empty;
+        IsLoading = true;
         try
         {
             var result = await _backendClient.GetLibraryAsync(keyword: Keyword.Trim(), page: _currentPage, pageSize: _pageSize, cancellationToken: cancellationToken);
@@ -94,6 +101,10 @@ public partial class LibraryPageViewModel : ObservableObject
         catch (Exception ex)
         {
             PageError = $"操作异常: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
         }
     }
 

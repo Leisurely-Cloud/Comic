@@ -25,7 +25,7 @@
                     <StackPanel Grid.Column="0" Spacing="4">
                         <TextBlock Text="本地漫画库" Style="{StaticResource TitleTextBlockStyle}" />
                         <TextBlock Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
-                                   Opacity="0.6" />
+                                   Opacity="0.7" />
                     </StackPanel>
                     <Button Grid.Column="1" VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.RefreshLibraryCommand, Mode=OneWay}">
@@ -54,17 +54,21 @@
                 </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="16">
                     <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
-                               Foreground="Tomato" />
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                     <TextBlock Text="{x:Bind ViewModel.UpdateCheckStatus, Mode=OneWay}"
-                               Foreground="Green" />
+                               Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
                 </StackPanel>
             </StackPanel>
         </Border>
 
         <!-- Main Content -->
-        <Grid Grid.Row="1" Margin="0,12,0,0" ColumnSpacing="16">
+        <ScrollViewer Grid.Row="1" Margin="0,12,0,0"
+                      HorizontalScrollBarVisibility="Auto"
+                      HorizontalScrollMode="Auto"
+                      VerticalScrollBarVisibility="Disabled">
+        <Grid ColumnSpacing="16" MinWidth="600">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" MinWidth="300" />
                 <ColumnDefinition Width="300" />
             </Grid.ColumnDefinitions>
 
@@ -78,10 +82,40 @@
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Text="漫画列表"
                                Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,10" />
+
+                    <!-- Loading Indicator -->
+                    <StackPanel Grid.Row="1"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                                Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                                      Width="48" Height="48"
+                                      HorizontalAlignment="Center" />
+                        <TextBlock Text="正在加载漫画库..."
+                                   Style="{StaticResource BodyTextBlockStyle}"
+                                   Opacity="0.7"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Empty State -->
+                    <StackPanel Grid.Row="1"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                                Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                        <FontIcon Glyph="&#xE8D1;" FontSize="48" Opacity="0.5"
+                                  HorizontalAlignment="Center" />
+                        <TextBlock Text="漫画库为空"
+                                   Style="{StaticResource BodyTextBlockStyle}"
+                                   Opacity="0.7"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="下载漫画后将在此显示"
+                                   FontSize="12" Opacity="0.6"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+
                     <ListView Grid.Row="1"
                               ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
                               SelectedItem="{x:Bind ViewModel.SelectedItem, Mode=TwoWay}"
-                              SelectionMode="Single">
+                              SelectionMode="Single"
+                              Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="viewModels:LibraryItemViewModel"
                                           xmlns:viewModels="using:Comic.WinUI.ViewModels">
@@ -100,9 +134,9 @@
                                         <TextBlock Text="{x:Bind Title}"
                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{x:Bind SiteName}" Opacity="0.6" FontSize="12" />
+                                        <TextBlock Text="{x:Bind SiteName}" Opacity="0.7" FontSize="12" />
                                     </StackPanel>
-                                    <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.3"
+                                    <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.5"
                                               VerticalAlignment="Center" />
                                 </Grid>
                             </DataTemplate>
@@ -131,7 +165,7 @@
                                 <ColumnDefinition Width="50" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="站点" Opacity="0.6" />
+                            <TextBlock Grid.Column="0" Text="站点" Opacity="0.7" />
                             <TextBlock Grid.Column="1"
                                        Text="{x:Bind ViewModel.SelectedSiteName, Mode=OneWay}" />
                         </Grid>
@@ -140,12 +174,12 @@
                                 <ColumnDefinition Width="50" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="章数" Opacity="0.6" />
+                            <TextBlock Grid.Column="0" Text="章数" Opacity="0.7" />
                             <TextBlock Grid.Column="1"
                                        Text="{x:Bind ViewModel.SelectedChapterSummary, Mode=OneWay}" />
                         </Grid>
                         <TextBlock Text="{x:Bind ViewModel.SelectedLastChapter, Mode=OneWay}"
-                                   TextWrapping="WrapWholeWords" Opacity="0.7" FontSize="12" />
+                                   TextWrapping="WrapWholeWords" Opacity="0.8" FontSize="12" />
                         <Grid ColumnSpacing="8" RowSpacing="8" Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -198,7 +232,7 @@
                                          Maximum="100" Height="4"
                                          Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <TextBlock Text="{x:Bind ViewModel.ExportStatusText, Mode=OneWay}"
-                                       FontSize="12" Opacity="0.7"
+                                       FontSize="12" Opacity="0.8"
                                        TextWrapping="WrapWholeWords" />
                             <Button Content="完成"
                                     HorizontalAlignment="Right"
@@ -209,5 +243,6 @@
                 </ScrollViewer>
             </Border>
         </Grid>
+        </ScrollViewer>
     </Grid>
 </Page>

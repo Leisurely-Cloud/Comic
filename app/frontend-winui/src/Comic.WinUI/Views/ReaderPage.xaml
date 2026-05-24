@@ -54,7 +54,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="章节"
-                           VerticalAlignment="Center" Opacity="0.6" />
+                           VerticalAlignment="Center" Opacity="0.7" />
                 <ComboBox Grid.Column="1"
                           ItemsSource="{x:Bind ViewModel.Chapters, Mode=OneWay}"
                           SelectedItem="{x:Bind ViewModel.SelectedChapter, Mode=TwoWay}"
@@ -66,7 +66,7 @@
                         Click="OnPreviousChapterClick"
                         IsEnabled="{x:Bind ViewModel.HasPreviousChapter, Mode=OneWay}" />
                 <TextBlock Grid.Column="3" Text="{x:Bind ViewModel.ChapterProgress, Mode=OneWay}"
-                           VerticalAlignment="Center" Opacity="0.7" MinWidth="50"
+                           VerticalAlignment="Center" Opacity="0.8" MinWidth="50"
                            TextAlignment="Center" />
                 <Button Grid.Column="4" Content="下一章"
                         Click="OnNextChapterClick"
@@ -101,9 +101,17 @@
             </Button>
 
             <!-- Loading indicator -->
-            <ProgressRing Grid.Column="1" IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
-                           Width="48" Height="48"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                        Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                              Width="48" Height="48"
+                              HorizontalAlignment="Center" />
+                <TextBlock Text="正在加载..."
+                           Style="{StaticResource BodyTextBlockStyle}"
+                           Opacity="0.7"
+                           HorizontalAlignment="Center" />
+            </StackPanel>
         </Grid>
 
         <!-- Bottom bar: page navigation -->
@@ -120,7 +128,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{x:Bind ViewModel.SelectedChapter.Title, Mode=OneWay}"
-                           VerticalAlignment="Center" Opacity="0.6"
+                           VerticalAlignment="Center" Opacity="0.7"
                            TextTrimming="CharacterEllipsis" HorizontalAlignment="Right" />
                 <Button Grid.Column="1" Content="上一张" Click="OnPreviousImageClick"
                         IsEnabled="{x:Bind ViewModel.HasPreviousImageOrChapter, Mode=OneWay}" />
@@ -139,7 +147,7 @@
                 Background="{ThemeResource ControlFillColorDefaultBrush}"
                 CornerRadius="8" Padding="16,10">
             <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
-                       Foreground="Tomato" TextWrapping="Wrap" />
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
         </Border>
     </Grid>
 </Page>

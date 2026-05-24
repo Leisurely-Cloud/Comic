@@ -17,7 +17,7 @@
             <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,10">
                 <TextBlock Text="搜索结果" Style="{StaticResource SubtitleTextBlockStyle}" />
                 <TextBlock Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}"
-                           Opacity="0.6" VerticalAlignment="Center" />
+                           Opacity="0.7" VerticalAlignment="Center" />
             </StackPanel>
             <Grid Grid.Row="1">
                 <Grid.RowDefinitions>
@@ -29,12 +29,25 @@
                             Orientation="Horizontal" Spacing="8" Margin="0,0,0,8"
                             HorizontalAlignment="Center">
                     <ProgressRing IsActive="True" Width="16" Height="16" />
-                    <TextBlock Text="搜索中..." Opacity="0.7" VerticalAlignment="Center" />
+                    <TextBlock Text="搜索中..." Opacity="0.8" VerticalAlignment="Center" />
                 </StackPanel>
+                <!-- Empty State -->
+                <StackPanel Grid.Row="1"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                            Visibility="{x:Bind ViewModel.HasSearchResults, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <FontIcon Glyph="&#xE721;" FontSize="48" Opacity="0.5"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="输入关键词搜索漫画"
+                               Style="{StaticResource BodyTextBlockStyle}"
+                               Opacity="0.7"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
                 <ListView Grid.Row="1"
                           ItemsSource="{x:Bind ViewModel.SearchResults, Mode=OneWay}"
                           SelectedItem="{x:Bind ViewModel.SelectedSearchResult, Mode=TwoWay}"
-                          SelectionMode="Single">
+                          SelectionMode="Single"
+                          Visibility="{x:Bind ViewModel.HasSearchResults, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="viewModels:SearchResultItemViewModel">
                             <Grid Padding="8,10" ColumnSpacing="12">
@@ -56,11 +69,11 @@
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                                TextTrimming="CharacterEllipsis" />
                                     <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Text="{x:Bind LatestChapter}" Opacity="0.6" FontSize="12" />
-                                        <TextBlock Text="{x:Bind UpdateTime}" Opacity="0.4" FontSize="12" />
+                                        <TextBlock Text="{x:Bind LatestChapter}" Opacity="0.7" FontSize="12" />
+                                        <TextBlock Text="{x:Bind UpdateTime}" Opacity="0.6" FontSize="12" />
                                     </StackPanel>
                                 </StackPanel>
-                                <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.3"
+                                <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.5"
                                           VerticalAlignment="Center" />
                             </Grid>
                         </DataTemplate>
@@ -74,7 +87,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="6"
                                 Visibility="{x:Bind ViewModel.IsLoadingMore, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}">
                         <ProgressRing IsActive="True" Width="14" Height="14" />
-                        <TextBlock Text="加载中..." Opacity="0.7" VerticalAlignment="Center" />
+                        <TextBlock Text="加载中..." Opacity="0.8" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>
             </Grid>

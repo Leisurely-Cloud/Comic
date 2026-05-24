@@ -22,7 +22,7 @@
                        FontSize="28" />
             <TextBlock Text="浏览各站点热门漫画排行榜"
                        Style="{StaticResource BodyTextBlockStyle}"
-                       Opacity="0.6" />
+                       Opacity="0.7" />
         </StackPanel>
 
         <!-- Filters -->
@@ -53,21 +53,27 @@
         <!-- Content -->
         <Grid Grid.Row="2">
             <!-- Loading -->
-            <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center"
-                          Width="48" Height="48"
-                          Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="12"
+                        Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                              Width="48" Height="48" />
+                <TextBlock Text="正在加载排行榜..."
+                           Style="{StaticResource BodyTextBlockStyle}"
+                           Opacity="0.7"
+                           HorizontalAlignment="Center" />
+            </StackPanel>
 
             <!-- Error -->
             <StackPanel HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Spacing="12"
                         Visibility="{x:Bind ViewModel.HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                <FontIcon Glyph="&#xE783;" FontSize="48" Foreground="Tomato" />
+                <FontIcon Glyph="&#xE783;" FontSize="48" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                 <TextBlock Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
                            Style="{StaticResource BodyTextBlockStyle}"
-                           Foreground="Tomato"
+                           Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                            TextWrapping="Wrap" />
                 <Button Content="重试"
                         Click="OnRetryClick" />
@@ -80,10 +86,23 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
+                <!-- Empty State -->
+                <StackPanel Grid.Row="0"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                            Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <FontIcon Glyph="&#xE8A3;" FontSize="48" Opacity="0.5"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="暂无排行榜数据"
+                               Style="{StaticResource BodyTextBlockStyle}"
+                               Opacity="0.7"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
                 <ListView Grid.Row="0"
                           ItemsSource="{x:Bind ViewModel.RankingItems, Mode=OneWay}"
                           SelectionMode="Single"
-                          SelectionChanged="OnRankingItemSelectionChanged">
+                          SelectionChanged="OnRankingItemSelectionChanged"
+                          Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="vm:RankingItemViewModel"
                                       xmlns:vm="using:Comic.WinUI.ViewModels">
@@ -102,16 +121,16 @@
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                                TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{x:Bind DetailSectionLabel, Mode=OneWay}"
-                                               Opacity="0.6" FontSize="12" />
+                                               Opacity="0.7" FontSize="12" />
                                     <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}"
-                                               Opacity="0.5" FontSize="12" />
+                                               Opacity="0.6" FontSize="12" />
                                     <TextBlock Text="{x:Bind DetailHint, Mode=OneWay}"
-                                               Opacity="0.4" FontSize="11"
+                                               Opacity="0.6" FontSize="11"
                                                TextTrimming="CharacterEllipsis" MaxLines="1" />
                                 </StackPanel>
                                 <TextBlock Grid.Column="2"
                                            Text="{x:Bind UpdateTime, Mode=OneWay}"
-                                           Opacity="0.4" FontSize="12"
+                                           Opacity="0.6" FontSize="12"
                                            VerticalAlignment="Center" />
                             </Grid>
                         </DataTemplate>

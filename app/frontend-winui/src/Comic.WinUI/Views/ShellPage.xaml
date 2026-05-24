@@ -33,7 +33,7 @@
                                            FontSize="12" />
                             </Border>
                             <TextBlock Text="{x:Bind ViewModel.StorageRoot, Mode=OneWay}"
-                                       Opacity="0.5" FontSize="12" VerticalAlignment="Center"
+                                       Opacity="0.7" FontSize="12" VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" MaxWidth="400" />
                         </StackPanel>
                     </StackPanel>
@@ -84,9 +84,9 @@
                     Visibility="{x:Bind ViewModel.HasShellError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
                     Style="{StaticResource CompactCardBorderStyle}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE783;" Foreground="Tomato" VerticalAlignment="Center" FontSize="14" />
+                    <FontIcon Glyph="&#xE783;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" FontSize="14" />
                     <TextBlock Text="{x:Bind ViewModel.ShellErrorSummary, Mode=OneWay}"
-                               Foreground="Tomato" TextWrapping="WrapWholeWords" FontSize="12"
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="WrapWholeWords" FontSize="12"
                                VerticalAlignment="Center" />
                 </StackPanel>
             </Border>

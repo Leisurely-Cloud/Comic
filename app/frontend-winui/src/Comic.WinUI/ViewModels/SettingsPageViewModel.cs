@@ -13,7 +13,6 @@ public partial class SettingsPageViewModel : ObservableObject
 {
     private readonly BackendClient _backendClient;
     private readonly BackendSettingsService _backendSettingsService;
-
     public SettingsPageViewModel(BackendClient backendClient, BackendSettingsService backendSettingsService)
     {
         _backendClient = backendClient;

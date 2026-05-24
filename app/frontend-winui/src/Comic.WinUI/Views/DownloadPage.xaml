@@ -18,14 +18,19 @@
         <controls:SearchBarControl x:Name="SearchBarControl1" Grid.Row="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
 
         <!-- Main Content: Search Results (left) + Task List (right) -->
-        <Grid Grid.Row="1" Margin="0,12,0,0" ColumnSpacing="16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="320" />
-                <ColumnDefinition Width="*" MinWidth="320" />
-            </Grid.ColumnDefinitions>
+        <ScrollViewer Grid.Row="1" Margin="0,12,0,0"
+                      HorizontalScrollBarVisibility="Auto"
+                      HorizontalScrollMode="Auto"
+                      VerticalScrollBarVisibility="Disabled">
+            <Grid ColumnSpacing="16" MinWidth="640">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="320" />
+                    <ColumnDefinition Width="*" MinWidth="320" />
+                </Grid.ColumnDefinitions>
 
-            <controls:SearchResultsList Grid.Column="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-            <controls:TaskListPanel Grid.Column="1" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-        </Grid>
+                <controls:SearchResultsList Grid.Column="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+                <controls:TaskListPanel Grid.Column="1" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </Page>

@@ -31,7 +31,7 @@
                 </SelectorBar>
                 <TextBlock x:Name="TaskCountLabel" Grid.Column="1"
                            Text="{x:Bind ViewModel.TaskCountSummary, Mode=OneWay}"
-                           Opacity="0.6" VerticalAlignment="Center" Margin="12,0,0,0" />
+                           Opacity="0.7" VerticalAlignment="Center" Margin="12,0,0,0" />
                 <StackPanel x:Name="BatchToggleButtons" Grid.Column="2" Orientation="Horizontal" Spacing="4">
                     <Button Content="批量操作" Click="OnToggleBatchModeClick"
                             Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource InvertBoolToVisibilityConverter}}" />
@@ -49,7 +49,7 @@
                         IsEnabled="{x:Bind ViewModel.HasSelectedTasks, Mode=OneWay}" />
                 <Button Content="删除所选" Click="OnBatchDeleteClick"
                         IsEnabled="{x:Bind ViewModel.HasSelectedTasks, Mode=OneWay}" />
-                <TextBlock VerticalAlignment="Center" Opacity="0.6"
+                <TextBlock VerticalAlignment="Center" Opacity="0.7"
                            Text="{x:Bind ViewModel.SelectedTaskCount, Mode=OneWay, Converter={StaticResource SelectedCountConverter}}" />
             </StackPanel>
 
@@ -73,7 +73,7 @@
                                    VerticalAlignment="Center" />
                         <TextBlock Grid.Column="2"
                                    Text="{x:Bind ViewModel.CurrentTask.ProgressText, Mode=OneWay}"
-                                   Opacity="0.7" VerticalAlignment="Center" />
+                                   Opacity="0.8" VerticalAlignment="Center" />
                     </Grid>
                     <ProgressBar Minimum="0" Maximum="100"
                                  Value="{x:Bind ViewModel.CurrentTask.Progress, Mode=OneWay}" />
@@ -99,7 +99,7 @@
                                       VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" Spacing="2">
                                 <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontSize="13" />
-                                <TextBlock Text="{x:Bind LatestLogMessage, Mode=OneWay}" Opacity="0.5"
+                                <TextBlock Text="{x:Bind LatestLogMessage, Mode=OneWay}" Opacity="0.7"
                                            TextTrimming="CharacterEllipsis" FontSize="11" />
                             </StackPanel>
                             <TextBlock Grid.Column="2" Text="{x:Bind StatusLabel, Mode=OneWay}"
@@ -130,7 +130,7 @@
                                 <StackPanel Grid.Column="0" Spacing="2">
                                     <TextBlock Text="{x:Bind MangaTitle}" FontSize="13"
                                                TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{x:Bind Url}" Opacity="0.5" FontSize="11"
+                                    <TextBlock Text="{x:Bind Url}" Opacity="0.6" FontSize="11"
                                                TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                                 <TextBlock Grid.Column="1" FontSize="12" VerticalAlignment="Center">
@@ -145,7 +145,7 @@
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                     <Button Content="上一页" Click="OnHistoryPrevClick"
                             IsEnabled="{x:Bind ViewModel.HistoryPage, Mode=OneWay, Converter={StaticResource HistoryPrevEnabledConverter}}" />
-                    <TextBlock VerticalAlignment="Center" Opacity="0.7">
+                    <TextBlock VerticalAlignment="Center" Opacity="0.8">
                         <Run Text="第 " /><Run Text="{x:Bind ViewModel.HistoryPage, Mode=OneWay}" /><Run Text=" 页" />
                     </TextBlock>
                     <Button Content="下一页" Click="OnHistoryNextClick"

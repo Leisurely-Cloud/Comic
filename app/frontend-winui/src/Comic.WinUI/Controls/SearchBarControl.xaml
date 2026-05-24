@@ -18,6 +18,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <ComboBox Grid.Column="0" Header="站点"
                           VerticalAlignment="Bottom"
@@ -41,29 +42,38 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <FontIcon Grid.Column="0" Glyph="&#xE81C;" FontSize="14" Opacity="0.4"
+                                <FontIcon Grid.Column="0" Glyph="&#xE81C;" FontSize="14" Opacity="0.6"
                                           VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="1" Text="{x:Bind Keyword}"
                                            VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="2" Text="{x:Bind SiteName}"
-                                           Opacity="0.5" FontSize="12" VerticalAlignment="Center" />
+                                           Opacity="0.7" FontSize="12" VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="3"
-                                           Opacity="0.35" FontSize="11" VerticalAlignment="Center">
+                                           Opacity="0.6" FontSize="11" VerticalAlignment="Center">
                                     <Run Text="{x:Bind ResultCount}" /><Run Text="条结果" />
                                 </TextBlock>
                             </Grid>
                         </DataTemplate>
                     </AutoSuggestBox.ItemTemplate>
                 </AutoSuggestBox>
-                <Button Grid.Column="2" VerticalAlignment="Bottom" MinWidth="80"
+                <Button Grid.Column="2" VerticalAlignment="Bottom"
+                        Visibility="{x:Bind ViewModel.HasSearchHistory, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Command="{x:Bind ViewModel.ClearSearchHistoryCommand, Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                        <TextBlock Text="清除历史" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="3" VerticalAlignment="Bottom" MinWidth="80"
                         Command="{x:Bind ViewModel.SearchCommand, Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE721;" FontSize="14" />
                         <TextBlock Text="搜索" />
                     </StackPanel>
                 </Button>
-                <Button Grid.Column="3" VerticalAlignment="Bottom" MinWidth="100"
+                <Button Grid.Column="4" VerticalAlignment="Bottom" MinWidth="100"
                         Style="{StaticResource AccentButtonStyle}"
                         Command="{x:Bind ViewModel.StartDownloadCommand, Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -74,7 +84,7 @@
             </Grid>
             <!-- Error message -->
             <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
-                       Foreground="Tomato" TextWrapping="WrapWholeWords" />
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="WrapWholeWords" />
         </StackPanel>
     </Border>
 </UserControl>
