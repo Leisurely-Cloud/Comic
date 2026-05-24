@@ -43,7 +43,7 @@ public sealed class SearchHistoryEntry
     public string SiteName { get; set; } = string.Empty;
 
     [JsonPropertyName("timestamp")]
-    public DateTime Timestamp { get; set; } = DateTime.Now;
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.Now;
 
     [JsonPropertyName("result_count")]
     public int ResultCount { get; set; }
