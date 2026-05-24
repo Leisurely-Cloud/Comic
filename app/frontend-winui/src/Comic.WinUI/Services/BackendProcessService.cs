@@ -51,17 +51,9 @@ public sealed class BackendProcessService
                 }
             }
 
-            // 写入调试信息到多个位置
+            // 调试信息仅输出到调试窗口
             var debugInfo = $"FileName: {startInfo.FileName}\nArguments: {startInfo.Arguments}\nWorkingDirectory: {startInfo.WorkingDirectory}\nPYTHONPATH: {startInfo.EnvironmentVariables["PYTHONPATH"] ?? "not set"}\nTime: {DateTime.Now}\n";
-            try
-            {
-                File.WriteAllText(Path.Combine(settings.WorkingDirectory, "backend-debug.log"), debugInfo);
-                File.WriteAllText(Path.Combine(Path.GetTempPath(), "comic-backend-debug.log"), debugInfo);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to write debug info: {ex.Message}");
-            }
+            System.Diagnostics.Debug.WriteLine(debugInfo);
 
             var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("无法启动后端进程。");
