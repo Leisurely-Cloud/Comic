@@ -56,7 +56,11 @@ public sealed partial class ShellPage : Page
             _ => typeof(DownloadPage),
         };
 
-        ContentFrame.Navigate(pageType);
+        var transition = new Microsoft.UI.Xaml.Media.Animation.SlideNavigationTransitionInfo
+        {
+            Effect = Microsoft.UI.Xaml.Media.Animation.SlideNavigationTransitionEffect.FromRight
+        };
+        ContentFrame.Navigate(pageType, null, transition);
     }
 
     public void NavigateToPageWithUrl(string tag, string url)
@@ -70,7 +74,11 @@ public sealed partial class ShellPage : Page
             _ => typeof(DownloadPage),
         };
 
-        ContentFrame.Navigate(pageType, url);
+        var transition = new Microsoft.UI.Xaml.Media.Animation.SlideNavigationTransitionInfo
+        {
+            Effect = Microsoft.UI.Xaml.Media.Animation.SlideNavigationTransitionEffect.FromRight
+        };
+        ContentFrame.Navigate(pageType, url, transition);
 
         // Select the corresponding menu item
         foreach (var item in AppNavigationView.MenuItems)
