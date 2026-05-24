@@ -1,55 +1,55 @@
-# Changelog
+# 更新日志
 
 ## v2.2.0 — 2026-05-24
 
-### Features / 新功能
+### 新功能
 
-- Splash screen on app startup
-- Slide animation for page navigation
-- Loading states and empty states for better UX
-- Responsive layout improvements
-- Search history management
+- 启动画面（Splash Screen）
+- 页面切换滑动动画
+- 加载状态和空状态优化
+- 响应式布局改进
+- 搜索历史管理
 
-### Fixes / 修复
+### 修复
 
-- Correct packaged installation path detection
-- Auto-kill Python processes before installation
-- CI build errors: release permissions and MVVMTK0045 warnings
+- 修正打包安装路径检测
+- 安装前自动终止 Python 进程
+- CI 构建错误：发布权限和 MVVMTK0045 警告
 
-### Chores / 维护
+### 维护
 
-- Add AGENTS.md to .gitignore
-- Use partial properties for CommunityToolkit.Mvvm ObservableProperty
+- 将 AGENTS.md 加入 .gitignore
+- 使用 partial property 替代 CommunityToolkit.Mvvm 的 ObservableProperty
 
 ## v2.1.0 — 2026-05-03
 
-### Architecture / 架构重构
+### 架构重构
 
-- Migrated from single-file Python GUI to `app/` layout (WinUI 3 frontend + Python backend API)
-- Backend: REST API on `127.0.0.1:18765` with SSE for real-time download progress
-- Frontend: WinUI 3 desktop client with MVVM (CommunityToolkit.Mvvm)
-- Removed all legacy root-level Python GUI files
+- 从单文件 Python GUI 迁移至 `app/` 目录结构（WinUI 3 前端 + Python 后端 API）
+- 后端：REST API（`127.0.0.1:18765`），支持 SSE 实时下载进度
+- 前端：WinUI 3 桌面客户端，使用 MVVM 架构（CommunityToolkit.Mvvm）
+- 移除所有旧版根目录 Python GUI 文件
 
-### Features / 新功能
+### 新功能
 
-- WinUI 3 modern desktop UI with light/dark theme
-- Automatic backend process management (start/stop from client)
-- Download progress streaming via Server-Sent Events
-- CBZ export with ComicInfo.xml metadata
-- Local library browser with pagination
-- Settings persistence in LocalAppData
+- WinUI 3 现代桌面界面，支持明暗主题
+- 自动管理后端进程（客户端启停）
+- 通过 Server-Sent Events 流式传输下载进度
+- CBZ 导出，包含 ComicInfo.xml 元数据
+- 本地书库浏览，支持分页
+- 设置持久化存储于 LocalAppData
 
-### Supported Sites / 支持站点
+### 支持站点
 
-- Baozimh (包子漫画)
+- 包子漫画（Baozimh）
 - MangaCopy
-- Manhuagui (漫画柜)
+- 漫画柜（Manhuagui）
 
 ## v2.0.0 — 2025
 
-### Features
+### 新功能
 
-- Multi-site GUI with batch download support
-- Proxy pool for region-restricted access
-- Download resume and retry logic
-- Chapter naming conventions and metadata tracking
+- 多站点 GUI，支持批量下载
+- 代理池，支持区域限制访问
+- 下载恢复和重试逻辑
+- 章节命名规范和元数据追踪
