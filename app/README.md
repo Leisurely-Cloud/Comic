@@ -1,46 +1,42 @@
-# App Layout
+# 应用目录
 
-This directory contains the active application implementation: `WinUI 3` frontend plus local Python backend.
+本目录包含应用主体实现：WinUI 3 前端 + 本地 Python 后端。
 
-## Structure
+## 目录结构
 
-- `backend/`
-  Local HTTP API, real download orchestration, library scanning, metadata persistence, and CBZ export.
-- `backend/support/`
-  Preserved site adapters and low-level download helpers reused by the new backend.
-- `backend/tests/`
-  Backend regression tests covering API behavior, task lifecycle, SSE concurrency, and origin checks.
-- `frontend-winui/`
-  WinUI 3 desktop client source.
+- `backend/` — 本地 HTTP API、下载调度、书库扫描、元数据持久化、CBZ 导出
+- `backend/support/` — 站点适配器和底层下载工具
+- `backend/tests/` — 后端测试，覆盖 API 行为、任务生命周期、SSE 并发等
+- `frontend-winui/` — WinUI 3 桌面客户端源码
 
-## Run
+## 运行
 
-Backend only:
+**后端：**
 
 ```powershell
 .\.venv\Scripts\python.exe .\app\backend\run_backend.py
 ```
 
-WinUI build:
+**前端：**
 
 ```powershell
 dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
 ```
 
-One-click launcher:
+**一键启动：**
 
 ```bat
 start-winui.cmd
 ```
 
-## Test
+## 测试
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
 ```
 
-## Notes
+## 说明
 
-- The WinUI app can manage the backend process directly from the shell view.
-- The backend listens on loopback only and rejects non-loopback `Origin` headers.
-- Download tasks now run through the real adapter pipeline and update the local library metadata as chapters complete.
+- WinUI 应用可直接管理后端进程的启停
+- 后端仅监听本地回环地址，拒绝非回环 Origin 请求
+- 下载任务通过站点适配器执行，章节完成后自动更新本地书库元数据
