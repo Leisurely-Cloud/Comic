@@ -45,6 +45,7 @@ download_resume_data.json
 # AI tooling
 .trellis/
 .claude/
+AGENTS.md
 
 # WinUI3 build outputs
 **/bin/
