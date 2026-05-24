@@ -58,7 +58,10 @@ public sealed class BackendProcessService
                 File.WriteAllText(Path.Combine(settings.WorkingDirectory, "backend-debug.log"), debugInfo);
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "comic-backend-debug.log"), debugInfo);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to write debug info: {ex.Message}");
+            }
 
             var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("无法启动后端进程。");
@@ -79,7 +82,10 @@ public sealed class BackendProcessService
                         await File.WriteAllTextAsync(logPath, $"STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}");
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to log backend output: {ex.Message}");
+                }
             };
             process.Exited += (_, _) =>
             {

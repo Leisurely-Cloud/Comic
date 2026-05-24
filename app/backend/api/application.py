@@ -73,8 +73,6 @@ class Application:
     # ------------------------------------------------------------------
     def search(self, query: str, site: str = "baozimh", page: int = 1) -> List[Dict[str, Any]]:
         """Search for manga on the given site, with short-lived result cache."""
-        import time
-
         cache_key = f"{site}:{query}:{page}"
         now = time.time()
 
