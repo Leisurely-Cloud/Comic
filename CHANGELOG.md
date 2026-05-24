@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.2.0 — 2026-05-24
+
+### Features / 新功能
+
+- Splash screen on app startup
+- Slide animation for page navigation
+- Loading states and empty states for better UX
+- Responsive layout improvements
+- Search history management
+
+### Fixes / 修复
+
+- Correct packaged installation path detection
+- Auto-kill Python processes before installation
+- CI build errors: release permissions and MVVMTK0045 warnings
+
+### Chores / 维护
+
+- Add AGENTS.md to .gitignore
+- Use partial properties for CommunityToolkit.Mvvm ObservableProperty
+
 ## v2.1.0 — 2026-05-03
 
 ### Architecture / 架构重构
