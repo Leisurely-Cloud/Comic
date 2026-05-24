@@ -65,12 +65,12 @@
                                     </Image>
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="{x:Bind Title}"
+                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                                TextTrimming="CharacterEllipsis" />
                                     <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Text="{x:Bind LatestChapter}" Opacity="0.7" FontSize="12" />
-                                        <TextBlock Text="{x:Bind UpdateTime}" Opacity="0.6" FontSize="12" />
+                                        <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}" Opacity="0.7" FontSize="12" />
+                                        <TextBlock Text="{x:Bind UpdateTime, Mode=OneWay}" Opacity="0.6" FontSize="12" />
                                     </StackPanel>
                                 </StackPanel>
                                 <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.5"

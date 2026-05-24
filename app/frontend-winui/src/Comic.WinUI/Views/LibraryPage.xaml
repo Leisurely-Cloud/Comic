@@ -131,10 +131,10 @@
                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Text="{x:Bind Title}"
+                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{x:Bind SiteName}" Opacity="0.7" FontSize="12" />
+                                        <TextBlock Text="{x:Bind SiteName, Mode=OneWay}" Opacity="0.7" FontSize="12" />
                                     </StackPanel>
                                     <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.5"
                                               VerticalAlignment="Center" />

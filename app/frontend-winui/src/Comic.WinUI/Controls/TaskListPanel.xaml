@@ -128,15 +128,15 @@
                                     <ColumnDefinition Width="60" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{x:Bind MangaTitle}" FontSize="13"
+                                    <TextBlock Text="{x:Bind MangaTitle, Mode=OneWay}" FontSize="13"
                                                TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{x:Bind Url}" Opacity="0.6" FontSize="11"
+                                    <TextBlock Text="{x:Bind Url, Mode=OneWay}" Opacity="0.6" FontSize="11"
                                                TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                                 <TextBlock Grid.Column="1" FontSize="12" VerticalAlignment="Center">
-                                    <Run Text="{x:Bind CompletedChapterCount}" /><Run Text="/" /><Run Text="{x:Bind TotalChapterCount}" /><Run Text=" 章" />
+                                    <Run Text="{x:Bind CompletedChapterCount, Mode=OneWay}" /><Run Text="/" /><Run Text="{x:Bind TotalChapterCount, Mode=OneWay}" /><Run Text=" 章" />
                                 </TextBlock>
-                                <TextBlock Grid.Column="2" Text="{x:Bind Status}"
+                                <TextBlock Grid.Column="2" Text="{x:Bind Status, Mode=OneWay}"
                                            VerticalAlignment="Center" FontSize="12" />
                             </Grid>
                         </DataTemplate>
