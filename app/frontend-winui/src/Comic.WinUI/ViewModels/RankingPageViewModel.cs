@@ -19,34 +19,32 @@ public partial class RankingPageViewModel : ObservableObject
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
 
-#pragma warning disable CS0649
     [ObservableProperty]
-    private string _selectedSite = "baozimh";
+    public partial string SelectedSite { get; set; } = "baozimh";
 
     [ObservableProperty]
-    private string _selectedSection = "";
+    public partial string SelectedSection { get; set; } = "";
 
     [ObservableProperty]
-    private ObservableCollection<SectionItem> _sections = new();
+    public partial ObservableCollection<SectionItem> Sections { get; set; } = new();
 
     [ObservableProperty]
-    private SectionItem? _selectedSectionItem;
+    public partial SectionItem? SelectedSectionItem { get; set; }
 
     [ObservableProperty]
-    private bool _isLoading;
+    public partial bool IsLoading { get; set; }
 
     [ObservableProperty]
-    private bool _hasError;
+    public partial bool HasError { get; set; }
 
     [ObservableProperty]
-    private string _errorMessage = "";
+    public partial string ErrorMessage { get; set; } = "";
 
     [ObservableProperty]
-    private bool _isSinglePage;
+    public partial bool IsSinglePage { get; set; }
 
     [ObservableProperty]
-    private int _currentPage = 1;
-#pragma warning restore CS0649
+    public partial int CurrentPage { get; set; } = 1;
 
     public bool CanLoadMore => !IsSinglePage && !IsLoading;
 
