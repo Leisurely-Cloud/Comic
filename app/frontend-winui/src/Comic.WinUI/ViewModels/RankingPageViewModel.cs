@@ -9,6 +9,7 @@ using Comic.WinUI.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Comic.WinUI.ViewModels;
 
@@ -19,8 +20,10 @@ public partial class RankingPageViewModel : ObservableObject
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
 
+    public ObservableCollection<string> SiteOptions { get; }
+
     [ObservableProperty]
-    public partial string SelectedSite { get; set; } = "baozimh";
+    public partial string SelectedSite { get; set; } = "包子漫画";
 
     [ObservableProperty]
     public partial string SelectedSection { get; set; } = "";
@@ -57,6 +60,7 @@ public partial class RankingPageViewModel : ObservableObject
     {
         _client = App.GetService<BackendClient>();
         _dispatcher = DispatcherQueue.GetForCurrentThread();
+        SiteOptions = new ObservableCollection<string>(SiteCatalog.DownloadSites.Select(s => s.DisplayName));
         RankingItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
@@ -104,7 +108,8 @@ public partial class RankingPageViewModel : ObservableObject
             IsLoading = true;
             CurrentPage++;
 
-            var result = await _client.GetRankingAsync(SelectedSite, SelectedSection, CurrentPage);
+            var siteKey = SiteCatalog.GetKey(SelectedSite);
+            var result = await _client.GetRankingAsync(siteKey, SelectedSection, CurrentPage);
             if (result == null) return;
 
             _dispatcher.TryEnqueue(() =>
@@ -144,6 +149,15 @@ public partial class RankingPageViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private void CopyLink(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        var package = new DataPackage();
+        package.SetText(url);
+        Clipboard.SetContent(package);
+    }
+
     public async Task InitializeAsync()
     {
         await LoadSectionsAsync();
@@ -156,7 +170,8 @@ public partial class RankingPageViewModel : ObservableObject
             HasError = false;
             ErrorMessage = "";
 
-            var result = await _client.GetRankingSectionsAsync(SelectedSite);
+            var siteKey = SiteCatalog.GetKey(SelectedSite);
+            var result = await _client.GetRankingSectionsAsync(siteKey);
             if (result == null) return;
 
             var siteName = result.SiteName ?? SelectedSite;
@@ -199,7 +214,8 @@ public partial class RankingPageViewModel : ObservableObject
             ErrorMessage = "";
             CurrentPage = 1;
 
-            var result = await _client.GetRankingAsync(SelectedSite, SelectedSection, CurrentPage);
+            var siteKey = SiteCatalog.GetKey(SelectedSite);
+            var result = await _client.GetRankingAsync(siteKey, SelectedSection, CurrentPage);
             if (result == null) return;
 
             IsSinglePage = result.IsSinglePage;

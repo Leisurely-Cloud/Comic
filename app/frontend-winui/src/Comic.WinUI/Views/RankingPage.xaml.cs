@@ -1,4 +1,3 @@
-using System;
 using Comic.WinUI.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -35,15 +34,6 @@ public sealed partial class RankingPage : Page
         }
     }
 
-    private void OnSiteSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (SiteComboBox.SelectedItem is ComboBoxItem item)
-        {
-            var siteKey = item.Tag as string ?? "baozimh";
-            ViewModel.SelectedSite = siteKey;
-        }
-    }
-
     private void OnRetryClick(object sender, RoutedEventArgs e)
     {
         _ = ViewModel.RefreshCommand.ExecuteAsync(null);
@@ -60,28 +50,6 @@ public sealed partial class RankingPage : Page
         {
             ViewModel.NavigateToDetailCommand.Execute(item.Url);
             listView.SelectedItem = null;
-        }
-    }
-
-    private void OnDownloadItemClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement element && element.Tag is string url && !string.IsNullOrEmpty(url))
-        {
-            var shellPage = FindParent<ShellPage>(this);
-            if (shellPage is not null)
-            {
-                shellPage.NavigateToPageWithUrl("download", url);
-            }
-        }
-    }
-
-    private void OnCopyLinkClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem menuFlyoutItem && menuFlyoutItem.Tag is string url && !string.IsNullOrEmpty(url))
-        {
-            Windows.ApplicationModel.DataTransfer.DataPackage package = new();
-            package.SetText(url);
-            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
         }
     }
 

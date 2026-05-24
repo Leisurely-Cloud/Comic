@@ -30,14 +30,9 @@
             <TextBlock Text="站点:"
                        VerticalAlignment="Center"
                        Style="{StaticResource BodyTextBlockStyle}" />
-            <ComboBox x:Name="SiteComboBox"
-                      SelectedIndex="0"
-                      MinWidth="120"
-                      SelectionChanged="OnSiteSelectionChanged">
-                <ComboBoxItem Content="包子漫画" Tag="baozimh" />
-                <ComboBoxItem Content="拷贝漫画" Tag="mangacopy" />
-                <ComboBoxItem Content="漫画柜" Tag="manhuagui" />
-            </ComboBox>
+            <ComboBox ItemsSource="{x:Bind ViewModel.SiteOptions, Mode=OneWay}"
+                      SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}"
+                      MinWidth="120" />
 
             <TextBlock Text="分区:"
                        VerticalAlignment="Center"
