@@ -31,6 +31,7 @@ from .file_utils import (
     normalize_chapterlist_url,
     unwrap_cover_url,
     coerce_html_attr_to_str,
+    BASE_SITE_URL,
 )
 from .homepage_scraper import (
     HomepageMangaCard,
@@ -52,8 +53,7 @@ from .manga_info import (
     get_all_chapters,
 )
 
-# 重新导出 BASE_SITE_URL
-BASE_SITE_URL = "https://baozimh.org"
+# BASE_SITE_URL 已从 file_utils 导入
 
 __all__ = [
     # ProxyPool

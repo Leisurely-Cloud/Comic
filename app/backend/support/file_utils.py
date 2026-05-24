@@ -22,6 +22,9 @@ def sanitize_filename(name: str) -> str:
     return name or "unnamed"
 
 
+BASE_SITE_URL = "https://baozimh.org"
+
+
 def build_absolute_url(url: str, base_url: str = "") -> str:
     """将相对 URL 转换为绝对 URL。"""
     if not url:
@@ -30,7 +33,7 @@ def build_absolute_url(url: str, base_url: str = "") -> str:
         return url
     if base_url:
         return urljoin(base_url, url)
-    return url
+    return urljoin(BASE_SITE_URL, url)
 
 
 def normalize_chapterlist_url(manga_url: str) -> str:
