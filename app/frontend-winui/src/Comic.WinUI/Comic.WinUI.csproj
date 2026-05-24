@@ -19,6 +19,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>preview</LangVersion>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
