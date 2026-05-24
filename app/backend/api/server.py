@@ -370,7 +370,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 18765) -> None:
     """Start the HTTP server."""
     server = ThreadingHTTPServer((host, port), ApiHandler)
     print(f"Backend API running on http://{host}:{port}/")

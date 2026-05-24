@@ -42,8 +42,10 @@ class DetailCacheService:
     def save(self, cache: Dict[str, Any]) -> None:
         try:
             os.makedirs(os.path.dirname(self._cache_file) or ".", exist_ok=True)
-            with open(self._cache_file, "w", encoding="utf-8") as f:
+            tmp_path = self._cache_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(cache, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self._cache_file)
         except Exception as exc:
             self._warn(f"保存漫画详情缓存失败: {exc}")
 

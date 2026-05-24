@@ -857,8 +857,10 @@ class Application:
     def _save_task_history(self) -> None:
         try:
             import json
-            with open(self._task_history_file, "w", encoding="utf-8") as f:
+            tmp_path = self._task_history_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self._task_history[-200:], f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self._task_history_file)
         except Exception:
             pass
 

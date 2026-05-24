@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import time
@@ -19,7 +21,6 @@ except ImportError:
         if args:
             return args[0]
         return kwargs.get("iterable", [])
-import logging
 from requests.adapters import HTTPAdapter
 from .storage_paths import ensure_storage_root_dir, get_storage_root_dir, APP_STATE_DIR_NAME
 
@@ -364,13 +365,6 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://baozimh.org/",
 }
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # 连接池配置
 SESSION_POOL = threading.local()
