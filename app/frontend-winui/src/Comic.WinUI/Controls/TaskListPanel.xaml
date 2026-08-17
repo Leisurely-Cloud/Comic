@@ -127,7 +127,7 @@
             </Grid>
 
             <!-- Current Task Progress -->
-            <Border x:Name="ProgressSection" Grid.Row="2" Margin="0,4,0,0" MaxHeight="560"
+            <Border x:Name="ProgressSection" Grid.Row="2" Margin="0,4,0,0"
                     Style="{StaticResource CompactCardBorderStyle}">
                 <Grid>
                 <StackPanel Spacing="8"
@@ -207,7 +207,7 @@
                             <TextBlock Grid.Column="2" Text="页数 · 进度 · 状态" FontSize="11" Opacity="0.58"
                                        VerticalAlignment="Center" />
                         </Grid>
-                        <ListView x:Name="ChapterListView" Grid.Row="1" MaxHeight="360"
+                        <ListView x:Name="ChapterListView" Grid.Row="1" MaxHeight="720"
                                   ItemsSource="{x:Bind ViewModel.CurrentTask.Chapters, Mode=OneWay}"
                                   SelectionMode="None"
                                   ScrollViewer.VerticalScrollMode="Enabled"
