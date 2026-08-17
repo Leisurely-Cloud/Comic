@@ -60,6 +60,15 @@ public sealed partial class TaskListPanel : UserControl
         }
     }
 
+    private void OnLocateIncompleteChapterClick(object sender, RoutedEventArgs e)
+    {
+        var chapter = ViewModel?.CurrentTask?.Chapters.FirstOrDefault(item => !string.Equals(item.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        if (chapter is not null)
+        {
+            ChapterListView.ScrollIntoView(chapter, ScrollIntoViewAlignment.Default);
+        }
+    }
+
     private void OnStopCurrentClick(object sender, RoutedEventArgs e)
     {
         _ = ViewModel?.StopCommand.ExecuteAsync(null);
