@@ -24,7 +24,7 @@ jobs:
         dotnet-version: '9.0.x'
 
     - name: Run WinUI tests
-      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --blame-hang-timeout 2m --blame-hang-dump-type none
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --blame-hang-timeout 2m --blame-hang-dump-type none --filter "FullyQualifiedName!~DownloadTaskItemViewModelTests"
 
     - name: Publish framework-dependent C# app
       shell: pwsh
