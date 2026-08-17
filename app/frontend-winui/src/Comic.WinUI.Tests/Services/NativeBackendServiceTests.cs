@@ -1,5 +1,6 @@
 using Comic.WinUI.Models;
 using Comic.WinUI.Services.Native;
+using System.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO.Compression;
 using System.Xml.Linq;
@@ -201,10 +202,12 @@ public sealed class NativeBackendServiceTests
 
         var response = await service.ExportCbzAsync(_mangaRoot);
         ExportCbzProgress progress;
+        var timeout = Stopwatch.StartNew();
         do
         {
             await Task.Delay(20);
             progress = await service.GetExportProgressAsync(response.TaskId);
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(60), "CBZ export did not finish within 60 seconds.");
         }
         while (progress.Status == "running");
 
