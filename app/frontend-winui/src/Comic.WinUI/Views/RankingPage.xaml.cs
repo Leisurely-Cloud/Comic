@@ -44,12 +44,11 @@ public sealed partial class RankingPage : Page
         _ = ViewModel.LoadMoreCommand.ExecuteAsync(null);
     }
 
-    private void OnRankingItemSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void OnRankingItemClick(object sender, ItemClickEventArgs e)
     {
-        if (sender is ListView listView && listView.SelectedItem is RankingItemViewModel item)
+        if (e.ClickedItem is RankingItemViewModel item)
         {
-            ViewModel.NavigateToDetailCommand.Execute(item.Url);
-            listView.SelectedItem = null;
+            ViewModel.DownloadMangaCommand.Execute(item.Url);
         }
     }
 

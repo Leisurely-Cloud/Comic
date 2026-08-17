@@ -11,39 +11,29 @@
     <Grid Padding="24,16,24,24" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Header + Search -->
-        <Border Grid.Row="0" Style="{StaticResource CardBorderStyle}">
-            <StackPanel Spacing="10">
-                <Grid ColumnSpacing="16">
+        <Border Grid.Row="0" Style="{StaticResource HeaderCardBorderStyle}">
+            <StackPanel Spacing="8">
+                <Grid ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Spacing="4">
-                        <TextBlock Text="本地漫画库" Style="{StaticResource TitleTextBlockStyle}" />
+                    <StackPanel Grid.Column="0" Width="170" Spacing="1" VerticalAlignment="Center">
+                        <TextBlock Text="我的书库" Style="{StaticResource TitleTextBlockStyle}" />
                         <TextBlock Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
-                                   Opacity="0.7" />
+                                   Style="{StaticResource PageDescriptionTextBlockStyle}" />
                     </StackPanel>
-                    <Button Grid.Column="1" VerticalAlignment="Center"
-                            Command="{x:Bind ViewModel.RefreshLibraryCommand, Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                            <TextBlock Text="刷新" />
-                        </StackPanel>
-                    </Button>
-                </Grid>
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox Grid.Column="0" Header="关键词"
-                             PlaceholderText="搜索本地漫画..."
+                    <TextBox Grid.Column="1" VerticalAlignment="Center"
+                             PlaceholderText="按漫画名称或作者筛选书库"
                              Text="{x:Bind ViewModel.Keyword, Mode=TwoWay}" />
-                    <Button Grid.Column="1" VerticalAlignment="Bottom"
+                    <Button Grid.Column="2" VerticalAlignment="Center"
                             Style="{StaticResource AccentButtonStyle}"
                             Command="{x:Bind ViewModel.SearchCommand, Mode=OneWay}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -51,25 +41,66 @@
                             <TextBlock Text="搜索" />
                         </StackPanel>
                     </Button>
+                    <Button Grid.Column="3" VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.RefreshLibraryCommand, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                            <TextBlock Text="刷新" />
+                        </StackPanel>
+                    </Button>
                 </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="16">
                     <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
+                               Visibility="{x:Bind ViewModel.PageError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                                Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                     <TextBlock Text="{x:Bind ViewModel.UpdateCheckStatus, Mode=OneWay}"
+                               Visibility="{x:Bind ViewModel.UpdateCheckStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                                Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
                 </StackPanel>
             </StackPanel>
         </Border>
 
+        <!-- Prominent export status -->
+        <Border Grid.Row="1" Style="{StaticResource SettingsRowBorderStyle}"
+                Visibility="{x:Bind ViewModel.ShowExportResult, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid ColumnSpacing="12" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Grid.Column="0" Glyph="&#xE7B7;" FontSize="18" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind ViewModel.ExportStatusTitle, Mode=OneWay}"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{x:Bind ViewModel.ExportStatusText, Mode=OneWay}"
+                               FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="打开输出目录"
+                        Visibility="{x:Bind ViewModel.ExportOutputDirectory, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
+                        Command="{x:Bind ViewModel.OpenExportDirectoryCommand, Mode=OneWay}" />
+                <Button Grid.Column="3" Content="完成"
+                        Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                        Command="{x:Bind ViewModel.DismissExportResultCommand, Mode=OneWay}" />
+                <ProgressBar Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
+                             Value="{x:Bind ViewModel.ExportProgress, Mode=OneWay}"
+                             Maximum="100" Height="4"
+                             Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+            </Grid>
+        </Border>
+
         <!-- Main Content -->
-        <ScrollViewer Grid.Row="1" Margin="0,12,0,0"
-                      HorizontalScrollBarVisibility="Auto"
-                      HorizontalScrollMode="Auto"
-                      VerticalScrollBarVisibility="Disabled">
-        <Grid ColumnSpacing="16" MinWidth="600">
+        <Grid Grid.Row="2"
+              ColumnSpacing="16"
+              SizeChanged="OnLibraryContentSizeChanged">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="300" />
-                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="DetailColumn" Width="320" />
             </Grid.ColumnDefinitions>
 
             <!-- Library List -->
@@ -80,8 +111,9 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="漫画列表"
-                               Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,10" />
+                    <StackPanel Grid.Row="0" Spacing="2" Margin="0,0,0,8">
+                        <TextBlock Text="已下载漫画" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+                    </StackPanel>
 
                     <!-- Loading Indicator -->
                     <StackPanel Grid.Row="1"
@@ -125,14 +157,22 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Width="44" Height="44" CornerRadius="6"
+                                    <Border Grid.Column="0" Width="48" Height="64" CornerRadius="6"
                                             Background="{ThemeResource ControlFillColorDefaultBrush}">
-                                        <FontIcon Glyph="&#xE8F1;" FontSize="20"
-                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Grid>
+                                            <FontIcon Glyph="&#xE8F1;" FontSize="20" Opacity="0.35"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Image Source="{x:Bind CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                                   Stretch="UniformToFill" />
+                                        </Grid>
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                         <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind AuthorDisplay, Mode=OneWay}"
+                                                   Visibility="{x:Bind AuthorDisplay, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
+                                                   Opacity="0.8" FontSize="12"
                                                    TextTrimming="CharacterEllipsis" />
                                         <TextBlock Text="{x:Bind SiteName, Mode=OneWay}" Opacity="0.7" FontSize="12" />
                                     </StackPanel>
@@ -156,10 +196,30 @@
             <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="8">
-                        <TextBlock Text="详情" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="漫画详情" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+                        <Border Width="120" Height="160" CornerRadius="8"
+                                HorizontalAlignment="Center"
+                                Background="{ThemeResource ControlFillColorDefaultBrush}">
+                            <Grid>
+                                <FontIcon Glyph="&#xE8F1;" FontSize="30" Opacity="0.3"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Image Source="{x:Bind ViewModel.SelectedCoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                       Stretch="UniformToFill" />
+                            </Grid>
+                        </Border>
                         <TextBlock Text="{x:Bind ViewModel.SelectedTitle, Mode=OneWay}"
                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                    TextWrapping="WrapWholeWords" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="50" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="作者" Opacity="0.7" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{x:Bind ViewModel.SelectedAuthor, Mode=OneWay}"
+                                       TextWrapping="WrapWholeWords" />
+                        </Grid>
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="50" />
@@ -225,24 +285,9 @@
                                 </StackPanel>
                             </Button>
                         </Grid>
-                        <!-- Export Progress -->
-                        <StackPanel Spacing="4" Margin="0,4,0,0"
-                                    Visibility="{x:Bind ViewModel.ShowExportResult, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <ProgressBar Value="{x:Bind ViewModel.ExportProgress, Mode=OneWay}"
-                                         Maximum="100" Height="4"
-                                         Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <TextBlock Text="{x:Bind ViewModel.ExportStatusText, Mode=OneWay}"
-                                       FontSize="12" Opacity="0.8"
-                                       TextWrapping="WrapWholeWords" />
-                            <Button Content="完成"
-                                    HorizontalAlignment="Right"
-                                    Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}"
-                                    Command="{x:Bind ViewModel.DismissExportResultCommand, Mode=OneWay}" />
-                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
         </Grid>
-        </ScrollViewer>
     </Grid>
 </Page>

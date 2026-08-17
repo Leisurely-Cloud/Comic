@@ -7,87 +7,354 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,24">
-        <StackPanel Spacing="16">
-            <TextBlock Text="应用设置" Style="{StaticResource TitleTextBlockStyle}" />
+    <Grid Padding="30,22,30,24" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-            <!-- Connection Settings -->
-            <Border Style="{StaticResource CardBorderStyle}">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="后端连接" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <TextBox Header="后端地址"
-                             Text="{x:Bind ViewModel.BackendBaseUrl, Mode=TwoWay}"
-                             PlaceholderText="http://127.0.0.1:18765/" />
-                    <TextBox Header="Python 可执行文件"
-                             Text="{x:Bind ViewModel.PythonExecutablePath, Mode=TwoWay}"
-                             PlaceholderText="python" />
-                    <TextBox Header="启动参数"
-                             Text="{x:Bind ViewModel.PythonArguments, Mode=TwoWay}"
-                             PlaceholderText="-m backend.api" />
-                    <TextBox Header="工作目录"
-                             Text="{x:Bind ViewModel.WorkingDirectory, Mode=TwoWay}"
-                             PlaceholderText="留空使用默认" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button Style="{StaticResource AccentButtonStyle}"
-                                Command="{x:Bind ViewModel.SaveCommand, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE74E;" FontSize="14" />
-                                <TextBlock Text="保存" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{x:Bind ViewModel.RefreshBackendInfoCommand, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                                <TextBlock Text="刷新" />
-                            </StackPanel>
-                        </Button>
+        <Grid x:Name="SettingsHeader"
+              Grid.Row="0"
+              ColumnSpacing="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Text="设置" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="管理界面、下载、阅读和本地数据。"
+                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Button Content="恢复默认值"
+                        Command="{x:Bind ViewModel.ResetCommand, Mode=OneWay}" />
+                <Button Style="{StaticResource AccentButtonStyle}"
+                        MinWidth="110"
+                        Command="{x:Bind ViewModel.SaveCommand, Mode=OneWay}"
+                        IsEnabled="{x:Bind ViewModel.IsSaving, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <ProgressRing IsActive="{x:Bind ViewModel.IsSaving, Mode=OneWay}"
+                                      Width="14" Height="14"
+                                      Visibility="{x:Bind ViewModel.IsSaving, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <TextBlock Text="保存设置" />
                     </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <ScrollViewer x:Name="SettingsSectionNavigation"
+                      Grid.Row="1"
+                      HorizontalScrollBarVisibility="Hidden"
+                      HorizontalScrollMode="Disabled">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Tag="GeneralSection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE713;" FontSize="14" />
+                        <TextBlock Text="常规" />
+                    </StackPanel>
+                </Button>
+                <Button Tag="DownloadSection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE896;" FontSize="14" />
+                        <TextBlock Text="下载" />
+                    </StackPanel>
+                </Button>
+                <Button Tag="ReaderSection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE8A5;" FontSize="14" />
+                        <TextBlock Text="阅读器" />
+                    </StackPanel>
+                </Button>
+                <Button Tag="LibrarySection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE8D1;" FontSize="14" />
+                        <TextBlock Text="书库" />
+                    </StackPanel>
+                </Button>
+                <Button Tag="MaintenanceSection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE74C;" FontSize="14" />
+                        <TextBlock Text="数据与维护" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="SettingsScrollViewer"
+                      Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      HorizontalScrollMode="Disabled"
+                      HorizontalContentAlignment="Stretch">
+            <StackPanel x:Name="SettingsContentPanel"
+                        Spacing="24"
+                        HorizontalAlignment="Stretch">
+                <StackPanel x:Name="GeneralSection" Spacing="8">
+                    <TextBlock Text="常规设置" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE790;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="界面主题" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="选择应用的浅色、深色或系统主题。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.ThemeOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedTheme, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="启动时展开侧栏" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="关闭后以紧凑导航启动，窗口较窄时仍会自动适应。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <Grid Grid.Column="2" Width="210"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="12"
+                                            HorizontalAlignment="Right">
+                                    <TextBlock Text="{x:Bind ViewModel.NavigationPaneStateText, Mode=OneWay}"
+                                               VerticalAlignment="Center" />
+                                    <ToggleSwitch IsOn="{x:Bind ViewModel.ExpandNavigationPane, Mode=TwoWay}"
+                                                  OnContent="" OffContent=""
+                                                  MinWidth="0" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel x:Name="DownloadSection" Spacing="8">
+                    <TextBlock Text="下载" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8B7;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="漫画下载目录" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="只影响新任务，不会移动已经下载的漫画。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <Grid Grid.Column="2" Width="480" ColumnSpacing="8"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Height="40" VerticalAlignment="Center"
+                                         Text="{x:Bind ViewModel.StorageRoot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         PlaceholderText="选择漫画下载目录" />
+                                <Button Grid.Column="1" Content="浏览..." Height="40"
+                                        VerticalAlignment="Center" Click="OnBrowseFolderClick" />
+                                <Button Grid.Column="2"
+                                        Height="40" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="打开当前填写的目录"
+                                        Command="{x:Bind ViewModel.OpenStorageRootCommand, Mode=OneWay}">
+                                    <FontIcon Glyph="&#xE838;" FontSize="14" />
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8FD;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="章节默认选择" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="打开漫画详情时自动勾选章节，下载前仍可手动调整。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.ChapterSelectionOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedChapterSelection, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel x:Name="ReaderSection" Spacing="8">
+                    <TextBlock Text="阅读器" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8A5;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="默认阅读模式" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="每次打开阅读器时采用的初始模式，阅读中仍可切换。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.ReaderModeOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedReaderMode, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE71E;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="条漫默认缩放" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="设定新打开的条漫宽度，范围为 50% 到 200%。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Slider Width="190" Minimum="50" Maximum="200" StepFrequency="10" SnapsTo="StepValues"
+                                        Value="{x:Bind ViewModel.DefaultStripZoomPercent, Mode=TwoWay}" />
+                                <TextBlock Width="48" TextAlignment="Right" VerticalAlignment="Center"
+                                           Text="{x:Bind ViewModel.DefaultStripZoomText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel x:Name="LibrarySection" Spacing="8">
+                    <TextBlock Text="书库" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8D1;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="每页显示数量" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="控制“我的书库”每一页展示多少部漫画。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.LibraryPageSizeOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedLibraryPageSize, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel x:Name="MaintenanceSection" Spacing="8">
+                    <TextBlock Text="数据与维护" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8B7;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="应用数据目录" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="查看应用设置文件和保存的搜索记录。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="打开数据目录" HorizontalAlignment="Right"
+                                    Command="{x:Bind ViewModel.OpenDataDirectoryCommand, Mode=OneWay}" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE721;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="搜索记录" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="清除搜索框中保存的历史关键词。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="清空搜索记录" HorizontalAlignment="Right"
+                                    Click="OnClearSearchHistoryClick" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE823;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="下载历史" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="只清除已结束任务的历史，不删除漫画文件。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="清空下载历史" HorizontalAlignment="Right"
+                                    Click="OnClearDownloadHistoryClick" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <Rectangle Height="12" Fill="Transparent" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid x:Name="SettingsStatusPanel"
+              Grid.Row="3">
+            <Border Style="{StaticResource CompactCardBorderStyle}"
+                    Visibility="{x:Bind ViewModel.SaveStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE73E;" Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                              VerticalAlignment="Center" FontSize="14" />
+                    <TextBlock Text="{x:Bind ViewModel.SaveStatus, Mode=OneWay}"
+                               TextWrapping="WrapWholeWords" VerticalAlignment="Center" />
                 </StackPanel>
             </Border>
-
-            <!-- Backend Info -->
-            <Border Style="{StaticResource CardBorderStyle}">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="后端信息" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <Grid ColumnSpacing="8" RowSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="存储根目录" Opacity="0.7" />
-                        <TextBlock Grid.Row="0" Grid.Column="1"
-                                   Text="{x:Bind ViewModel.StorageRoot, Mode=OneWay}"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="旧版目录" Opacity="0.7" />
-                        <TextBlock Grid.Row="1" Grid.Column="1"
-                                   Text="{x:Bind ViewModel.LegacyRoot, Mode=OneWay}"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="下载器" Opacity="0.7" />
-                        <TextBlock Grid.Row="2" Grid.Column="1"
-                                   Text="{x:Bind ViewModel.DownloadRunnerStatus, Mode=OneWay}" />
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="支持站点" Opacity="0.7" />
-                        <TextBlock Grid.Row="3" Grid.Column="1"
-                                   Text="{x:Bind ViewModel.SupportedSites, Mode=OneWay}"
-                                   TextWrapping="Wrap" />
-                    </Grid>
-                </StackPanel>
-            </Border>
-
             <Border Style="{StaticResource CompactCardBorderStyle}"
                     Visibility="{x:Bind ViewModel.SettingsError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE783;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" FontSize="14" />
+                    <FontIcon Glyph="&#xE783;" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                              VerticalAlignment="Center" FontSize="14" />
                     <TextBlock Text="{x:Bind ViewModel.SettingsError, Mode=OneWay}"
-                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="WrapWholeWords"
-                               VerticalAlignment="Center" />
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                               TextWrapping="WrapWholeWords" VerticalAlignment="Center" />
                 </StackPanel>
             </Border>
-        </StackPanel>
+        </Grid>
     </Grid>
 </Page>

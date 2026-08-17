@@ -1,53 +1,16 @@
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-
 namespace Comic.WinUI.Models;
-
-public sealed class SiteOption
-{
-    public required string Key { get; init; }
-
-    public required string DisplayName { get; init; }
-}
 
 public static class SiteCatalog
 {
-    private static readonly IReadOnlyDictionary<string, string> Names = new Dictionary<string, string>
-    {
-        [""] = "全部站点",
-        ["baozimh"] = "包子漫画",
-        ["mangacopy"] = "拷贝漫画",
-        ["manhuagui"] = "漫画柜",
-    };
-
-    public static ReadOnlyCollection<SiteOption> DownloadSites { get; } = new(
-    [
-        new SiteOption { Key = "baozimh", DisplayName = "包子漫画" },
-        new SiteOption { Key = "mangacopy", DisplayName = "拷贝漫画" },
-        new SiteOption { Key = "manhuagui", DisplayName = "漫画柜" },
-    ]);
-
-    public static ReadOnlyCollection<SiteOption> LibrarySites { get; } = new(
-    [
-        new SiteOption { Key = "", DisplayName = "全部站点" },
-        new SiteOption { Key = "baozimh", DisplayName = "包子漫画" },
-        new SiteOption { Key = "mangacopy", DisplayName = "拷贝漫画" },
-        new SiteOption { Key = "manhuagui", DisplayName = "漫画柜" },
-    ]);
+    public const string Key = "jmcomic";
+    public const string DisplayName = "禁漫天堂";
 
     public static string GetDisplayName(string siteKey)
     {
-        return Names.TryGetValue(siteKey ?? string.Empty, out var displayName)
-            ? displayName
-            : (siteKey ?? string.Empty);
+        return string.Equals(siteKey, Key, System.StringComparison.OrdinalIgnoreCase)
+            ? DisplayName
+            : "未知来源";
     }
 
-    public static string GetKey(string displayName)
-    {
-        foreach (var kvp in Names)
-        {
-            if (kvp.Value == displayName) return kvp.Key;
-        }
-        return "baozimh";
-    }
+    public static string GetKey(string displayName) => Key;
 }

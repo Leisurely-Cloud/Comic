@@ -53,7 +53,6 @@ public sealed partial class SearchBarControl : UserControl
             _suppressNextSearch = true;
             sender.Text = entry.Keyword;
             ViewModel.SearchKeyword = entry.Keyword;
-            ViewModel.SelectedSite = entry.SiteName;
         }
     }
 
@@ -69,7 +68,6 @@ public sealed partial class SearchBarControl : UserControl
         if (args.ChosenSuggestion is SearchHistoryEntry entry)
         {
             ViewModel.SearchKeyword = entry.Keyword;
-            ViewModel.SelectedSite = entry.SiteName;
             _ = ViewModel?.SearchCommand.ExecuteAsync(null);
         }
         else if (!string.IsNullOrWhiteSpace(args.QueryText))
@@ -103,5 +101,21 @@ public sealed partial class SearchBarControl : UserControl
             }
             e.Handled = true;
         }
+    }
+
+    private void OnRemoveHistoryClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: SearchHistoryEntry entry })
+        {
+            return;
+        }
+
+        _suppressNextSearch = false;
+        ViewModel.RemoveHistoryEntryCommand.Execute(entry);
+        if (!string.IsNullOrWhiteSpace(SearchSuggestBox.Text))
+        {
+            ViewModel.FilterSearchHistory(SearchSuggestBox.Text);
+        }
+        SearchSuggestBox.IsSuggestionListOpen = ViewModel.HasSearchHistory;
     }
 }

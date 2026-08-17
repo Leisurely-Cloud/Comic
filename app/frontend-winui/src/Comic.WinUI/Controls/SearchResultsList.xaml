@@ -14,16 +14,32 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,10">
-                <TextBlock Text="搜索结果" Style="{StaticResource SubtitleTextBlockStyle}" />
-                <TextBlock Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}"
+            <Grid Grid.Row="0" Margin="0,0,0,8" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="搜索结果"
+                           Style="{StaticResource SectionHeaderTextBlockStyle}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}"
                            Opacity="0.7" VerticalAlignment="Center" />
-            </StackPanel>
+                <Grid Grid.Column="2">
+                    <Button Content="加载更多" Padding="10,4"
+                            Visibility="{x:Bind ViewModel.CanLoadMoreSearchResults, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"
+                            Command="{x:Bind ViewModel.LoadMoreSearchResultsCommand, Mode=OneWay}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                                Visibility="{x:Bind ViewModel.IsLoadingMore, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}">
+                        <ProgressRing IsActive="True" Width="14" Height="14" />
+                        <TextBlock Text="加载中..." FontSize="12" Opacity="0.75" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
             <Grid Grid.Row="1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <StackPanel Grid.Row="0" Visibility="{x:Bind ViewModel.IsSearching, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"
                             Orientation="Horizontal" Spacing="8" Margin="0,0,0,8"
@@ -37,9 +53,12 @@
                             Visibility="{x:Bind ViewModel.HasSearchResults, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
                     <FontIcon Glyph="&#xE721;" FontSize="48" Opacity="0.5"
                               HorizontalAlignment="Center" />
-                    <TextBlock Text="输入关键词搜索漫画"
+                    <TextBlock Text="还没有搜索结果"
                                Style="{StaticResource BodyTextBlockStyle}"
                                Opacity="0.7"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="先在上方输入漫画名称"
+                               FontSize="12" Opacity="0.55"
                                HorizontalAlignment="Center" />
                 </StackPanel>
 
@@ -50,26 +69,29 @@
                           Visibility="{x:Bind ViewModel.HasSearchResults, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="viewModels:SearchResultItemViewModel">
-                            <Grid Padding="8,10" ColumnSpacing="12">
+                            <Grid Padding="6,7" ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Width="48" Height="64" CornerRadius="4"
+                                <Border Grid.Column="0" Width="44" Height="58" CornerRadius="4"
                                         Background="{ThemeResource ControlFillColorDefaultBrush}">
                                     <Image Stretch="UniformToFill">
                                         <Image.Source>
-                                            <BitmapImage UriSource="{x:Bind CoverUrl}" DecodePixelWidth="48" />
+                                            <BitmapImage UriSource="{x:Bind CoverUrl}" DecodePixelWidth="44" />
                                         </Image.Source>
                                     </Image>
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
-                                               TextTrimming="CharacterEllipsis" />
+                                               TextWrapping="WrapWholeWords"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxLines="2" />
                                     <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}" Opacity="0.7" FontSize="12" />
+                                        <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}" Opacity="0.7" FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="140" />
                                         <TextBlock Text="{x:Bind UpdateTime, Mode=OneWay}" Opacity="0.6" FontSize="12" />
                                     </StackPanel>
                                 </StackPanel>
@@ -79,17 +101,6 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
-                            HorizontalAlignment="Center" Margin="0,8,0,0">
-                    <Button Content="加载更多"
-                            Visibility="{x:Bind ViewModel.CanLoadMoreSearchResults, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"
-                            Command="{x:Bind ViewModel.LoadMoreSearchResultsCommand, Mode=OneWay}" />
-                    <StackPanel Orientation="Horizontal" Spacing="6"
-                                Visibility="{x:Bind ViewModel.IsLoadingMore, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}">
-                        <ProgressRing IsActive="True" Width="14" Height="14" />
-                        <TextBlock Text="加载中..." Opacity="0.8" VerticalAlignment="Center" />
-                    </StackPanel>
-                </StackPanel>
             </Grid>
         </Grid>
     </Border>

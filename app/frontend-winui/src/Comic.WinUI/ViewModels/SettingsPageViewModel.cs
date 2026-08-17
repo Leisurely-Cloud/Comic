@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,157 +15,233 @@ namespace Comic.WinUI.ViewModels;
 public partial class SettingsPageViewModel : ObservableObject
 {
     private readonly BackendClient _backendClient;
-    private readonly BackendSettingsService _backendSettingsService;
-    public SettingsPageViewModel(BackendClient backendClient, BackendSettingsService backendSettingsService)
+    private readonly ApplicationSettingsService _applicationSettings;
+    private readonly ShellViewModel _shellViewModel;
+    private readonly SearchHistoryService _searchHistoryService;
+
+    public SettingsPageViewModel(
+        BackendClient backendClient,
+        ApplicationSettingsService applicationSettings,
+        ShellViewModel shellViewModel,
+        SearchHistoryService searchHistoryService)
     {
         _backendClient = backendClient;
-        _backendSettingsService = backendSettingsService;
-
-        var settings = _backendSettingsService.GetSettings();
-        BackendBaseUrl = settings.BackendBaseUrl;
-        PythonExecutablePath = settings.PythonExecutablePath;
-        PythonArguments = settings.PythonArguments;
-        WorkingDirectory = settings.WorkingDirectory;
+        _applicationSettings = applicationSettings;
+        _shellViewModel = shellViewModel;
+        _searchHistoryService = searchHistoryService;
     }
 
-    [ObservableProperty]
-    public partial string BackendBaseUrl { get; set; } = "http://127.0.0.1:18765/";
+    public IReadOnlyList<SettingOption> ThemeOptions { get; } =
+    [
+        new(ApplicationSettingsService.SystemTheme, "跟随系统"),
+        new(ApplicationSettingsService.LightTheme, "浅色"),
+        new(ApplicationSettingsService.DarkTheme, "深色"),
+    ];
 
-    [ObservableProperty]
-    public partial string PythonExecutablePath { get; set; } = "python";
+    public IReadOnlyList<SettingOption> ChapterSelectionOptions { get; } =
+    [
+        new(ApplicationSettingsService.SelectNone, "默认不选择"),
+        new(ApplicationSettingsService.SelectLatest, "默认选择最新一章"),
+        new(ApplicationSettingsService.SelectAll, "默认全选"),
+    ];
 
-    [ObservableProperty]
-    public partial string PythonArguments { get; set; } = "-m backend.api";
+    public IReadOnlyList<SettingOption> ReaderModeOptions { get; } =
+    [
+        new(ApplicationSettingsService.ReaderPaged, "单页模式"),
+        new(ApplicationSettingsService.ReaderStrip, "条漫模式"),
+    ];
 
-    [ObservableProperty]
-    public partial string WorkingDirectory { get; set; } = string.Empty;
+    public IReadOnlyList<SettingOption> LibraryPageSizeOptions { get; } =
+    [
+        new("10", "每页 10 部"),
+        new("20", "每页 20 部"),
+        new("30", "每页 30 部"),
+        new("50", "每页 50 部"),
+    ];
 
     [ObservableProperty]
     public partial string StorageRoot { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial string LegacyRoot { get; set; } = string.Empty;
+    public partial string BackendType { get; set; } = "C# 进程内服务";
 
     [ObservableProperty]
-    public partial bool DownloadRunnerConfigured { get; set; }
-
-    public string DownloadRunnerStatus => DownloadRunnerConfigured ? "已配置" : "未配置";
-
-    [ObservableProperty]
-    public partial string SupportedSites { get; set; } = string.Empty;
+    public partial string SupportedSites { get; set; } = SiteCatalog.DisplayName;
 
     [ObservableProperty]
     public partial string SettingsError { get; set; } = string.Empty;
 
-    partial void OnDownloadRunnerConfiguredChanged(bool value)
-    {
-        OnPropertyChanged(nameof(DownloadRunnerStatus));
-    }
+    [ObservableProperty]
+    public partial string SaveStatus { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsSaving { get; set; }
+
+    [ObservableProperty]
+    public partial SettingOption? SelectedTheme { get; set; }
+
+    [ObservableProperty]
+    public partial SettingOption? SelectedChapterSelection { get; set; }
+
+    [ObservableProperty]
+    public partial bool ExpandNavigationPane { get; set; }
+
+    public string NavigationPaneStateText => ExpandNavigationPane ? "开" : "关";
+
+    partial void OnExpandNavigationPaneChanged(bool value) =>
+        OnPropertyChanged(nameof(NavigationPaneStateText));
+
+    [ObservableProperty]
+    public partial SettingOption? SelectedReaderMode { get; set; }
+
+    [ObservableProperty]
+    public partial double DefaultStripZoomPercent { get; set; } = 100;
+
+    [ObservableProperty]
+    public partial SettingOption? SelectedLibraryPageSize { get; set; }
+
+    public string DefaultStripZoomText => $"{DefaultStripZoomPercent:0}%";
+
+    partial void OnDefaultStripZoomPercentChanged(double value) =>
+        OnPropertyChanged(nameof(DefaultStripZoomText));
 
     [RelayCommand]
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            var runtime = _backendSettingsService.GetSettings();
-            BackendBaseUrl = runtime.BackendBaseUrl;
-            PythonExecutablePath = runtime.PythonExecutablePath;
-            PythonArguments = runtime.PythonArguments;
-            WorkingDirectory = runtime.WorkingDirectory;
-
-            _backendClient.SetBaseAddress(BackendBaseUrl);
             var settings = await _backendClient.GetSettingsAsync(cancellationToken);
             StorageRoot = settings.StorageRoot;
-            LegacyRoot = settings.LegacyRoot;
-            DownloadRunnerConfigured = settings.DownloadRunnerConfigured;
-            SupportedSites = string.Join(", ", settings.SupportedSites.Select(SiteCatalog.GetDisplayName));
+            SupportedSites = SiteCatalog.DisplayName;
+            SelectedTheme = ThemeOptions.First(option => option.Key == _applicationSettings.Theme);
+            SelectedChapterSelection = ChapterSelectionOptions.First(
+                option => option.Key == _applicationSettings.ChapterSelectionMode);
+            ExpandNavigationPane = _applicationSettings.ExpandNavigationPane;
+            SelectedReaderMode = ReaderModeOptions.First(option => option.Key == _applicationSettings.DefaultReaderMode);
+            DefaultStripZoomPercent = _applicationSettings.DefaultStripZoomPercent;
+            SelectedLibraryPageSize = LibraryPageSizeOptions.First(
+                option => option.Key == _applicationSettings.LibraryPageSize.ToString());
             SettingsError = string.Empty;
+            SaveStatus = string.Empty;
         }
         catch (OperationCanceledException)
         {
-            // swallowed
-        }
-        catch (BackendApiException ex)
-        {
-            SettingsError = $"加载设置失败: {ex.Error.Message}";
-        }
-        catch (HttpRequestException)
-        {
-            SettingsError = "无法连接后端服务，请确认后端已启动。";
         }
         catch (Exception ex)
         {
-            SettingsError = $"加载设置异常: {ex.Message}";
+            SettingsError = $"加载设置失败: {ex.Message}";
         }
     }
 
     [RelayCommand]
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
+        IsSaving = true;
+        SettingsError = string.Empty;
+        SaveStatus = string.Empty;
         try
         {
-            _backendClient.SetBaseAddress(BackendBaseUrl);
-            var runtime = new BackendRuntimeSettings
-            {
-                BackendBaseUrl = BackendBaseUrl,
-                PythonExecutablePath = PythonExecutablePath,
-                PythonArguments = PythonArguments,
-                WorkingDirectory = WorkingDirectory,
-            };
-            _backendSettingsService.SaveSettings(runtime);
-            try
-            {
-                await _backendClient.UpdateSettingsAsync(new
-                {
-                    pythonExecutablePath = PythonExecutablePath,
-                    pythonArguments = PythonArguments,
-                    workingDirectory = WorkingDirectory,
-                }, cancellationToken);
-                SettingsError = string.Empty;
-            }
-            catch (OperationCanceledException)
-            {
-                // swallowed
-            }
-            catch (BackendApiException ex)
-            {
-                SettingsError = $"本地设置已保存，但后端未同步: {ex.Error.Message}";
-                return;
-            }
-            catch (HttpRequestException)
-            {
-                SettingsError = "本地设置已保存，但后端未同步: 无法连接后端服务。";
-                return;
-            }
-            catch (Exception ex)
-            {
-                SettingsError = $"本地设置已保存，但后端未同步: {ex.Message}";
-                return;
-            }
-
-            SettingsError = string.Empty;
+            var settings = await _backendClient.UpdateSettingsAsync(
+                new SettingsUpdateRequest { StorageRoot = StorageRoot },
+                cancellationToken);
+            StorageRoot = settings.StorageRoot;
+            _applicationSettings.UpdatePreferences(
+                SelectedTheme?.Key ?? ApplicationSettingsService.SystemTheme,
+                SelectedChapterSelection?.Key ?? ApplicationSettingsService.SelectNone,
+                ExpandNavigationPane,
+                SelectedReaderMode?.Key ?? ApplicationSettingsService.ReaderPaged,
+                (int)Math.Round(DefaultStripZoomPercent),
+                int.TryParse(SelectedLibraryPageSize?.Key, out var pageSize) ? pageSize : 20);
+            _shellViewModel.StorageRoot = StorageRoot;
+            _shellViewModel.IsNavigationPaneOpen = ExpandNavigationPane;
+            SaveStatus = "设置已保存并立即生效。";
         }
         catch (OperationCanceledException)
         {
-            // swallowed
-        }
-        catch (BackendApiException ex)
-        {
-            SettingsError = $"保存失败: {ex.Error.Message}";
-        }
-        catch (HttpRequestException)
-        {
-            SettingsError = "保存失败: 无法连接后端服务。";
         }
         catch (Exception ex)
         {
-            SettingsError = $"保存异常: {ex.Message}";
+            SettingsError = $"保存设置失败: {ex.Message}";
+        }
+        finally
+        {
+            IsSaving = false;
         }
     }
 
     [RelayCommand]
-    public async Task RefreshBackendInfoAsync(CancellationToken cancellationToken = default)
+    private void Reset()
     {
-        await LoadAsync(cancellationToken);
+        StorageRoot = ApplicationSettingsService.ResolveDefaultStorageRoot();
+        SelectedTheme = ThemeOptions.First();
+        SelectedChapterSelection = ChapterSelectionOptions.First();
+        ExpandNavigationPane = true;
+        SelectedReaderMode = ReaderModeOptions.First();
+        DefaultStripZoomPercent = 100;
+        SelectedLibraryPageSize = LibraryPageSizeOptions.First(option => option.Key == "20");
+        SettingsError = string.Empty;
+        SaveStatus = "已恢复默认值，点击“保存设置”后生效。";
+    }
+
+    [RelayCommand]
+    private void OpenStorageRoot()
+    {
+        try
+        {
+            Directory.CreateDirectory(StorageRoot);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = StorageRoot,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            SettingsError = $"打开下载目录失败: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void OpenDataDirectory()
+    {
+        try
+        {
+            Directory.CreateDirectory(_applicationSettings.SettingsDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _applicationSettings.SettingsDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            SettingsError = $"打开数据目录失败: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void ClearSearchHistory()
+    {
+        _searchHistoryService.Clear();
+        SettingsError = string.Empty;
+        SaveStatus = "搜索记录已清空。";
+    }
+
+    [RelayCommand]
+    private async Task ClearDownloadHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _backendClient.ClearDownloadHistoryAsync(cancellationToken);
+            SettingsError = string.Empty;
+            SaveStatus = "下载历史已清空，正在运行的任务不受影响。";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SettingsError = $"清空下载历史失败: {ex.Message}";
+        }
     }
 }

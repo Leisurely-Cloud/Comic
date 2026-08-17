@@ -1,5 +1,6 @@
 using System;
 using Comic.WinUI.Services;
+using Comic.WinUI.Services.Native;
 using Comic.WinUI.ViewModels;
 using Comic.WinUI.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,7 @@ public sealed partial class App : Application
     private Window? _window;
 
     public IServiceProvider Services { get; }
+    public Window? MainWindow => _window;
 
     public static T GetService<T>() where T : class
     {
@@ -33,23 +35,18 @@ public sealed partial class App : Application
     {
         var services = new ServiceCollection();
 
-        services.AddSingleton<BackendSettingsService>();
-        services.AddHttpClient("backend")
+        services.AddHttpClient<JmComicService>()
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {
                 ConnectTimeout = TimeSpan.FromSeconds(5),
-            })
-            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30));
-        services.AddSingleton<BackendClient>(provider =>
-        {
-            var settings = provider.GetRequiredService<BackendSettingsService>().GetSettings();
-            var factory = provider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-            var httpClient = factory.CreateClient("backend");
-            return new BackendClient(httpClient, settings.BackendBaseUrl);
-        });
-        services.AddSingleton<BackendProcessService>();
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
+        services.AddSingleton<NativeBackendService>();
+        services.AddSingleton<BackendClient>();
         services.AddSingleton<DownloadEventStream>();
         services.AddSingleton<SearchHistoryService>();
+        services.AddSingleton<ApplicationSettingsService>();
+        services.AddSingleton<ReadingProgressService>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();
         services.AddTransient<LibraryPageViewModel>();
@@ -69,13 +66,14 @@ public sealed partial class App : Application
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        var shellViewModel = Services.GetRequiredService<ShellViewModel>();
-        shellViewModel.StopBackendCommand.Execute(null);
+        if (Services is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        e.Handled = true;
         System.Diagnostics.Debug.WriteLine($"Unhandled exception: {e.Exception}");
     }
 }

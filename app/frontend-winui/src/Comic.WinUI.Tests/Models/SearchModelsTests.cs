@@ -36,15 +36,15 @@ public class SearchModelsTests
         var entry = new SearchHistoryEntry
         {
             Keyword = "test",
-            SiteKey = "baozimh",
-            SiteName = "包子漫画",
+            SiteKey = "jmcomic",
+            SiteName = "禁漫天堂",
             ResultCount = 10,
             Timestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
 
         Assert.AreEqual("test", entry.Keyword);
-        Assert.AreEqual("baozimh", entry.SiteKey);
-        Assert.AreEqual("包子漫画", entry.SiteName);
+        Assert.AreEqual("jmcomic", entry.SiteKey);
+        Assert.AreEqual("禁漫天堂", entry.SiteName);
         Assert.AreEqual(10, entry.ResultCount);
     }
 
@@ -54,8 +54,8 @@ public class SearchModelsTests
         var entry = new SearchHistoryEntry
         {
             Keyword = "test",
-            SiteKey = "baozimh",
-            SiteName = "包子漫画",
+            SiteKey = "jmcomic",
+            SiteName = "禁漫天堂",
             ResultCount = 10,
             Timestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };

@@ -26,6 +26,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Button Grid.Column="0" Click="OnBackClick">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -37,6 +38,12 @@
                            Style="{StaticResource BodyStrongTextBlockStyle}"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
+                <ToggleSwitch Grid.Column="2"
+                              OffContent="单页"
+                              OnContent="条漫"
+                              IsOn="{x:Bind ViewModel.IsStripMode, Mode=TwoWay}"
+                              Toggled="OnReaderModeToggled"
+                              VerticalAlignment="Center" />
             </Grid>
         </Border>
 
@@ -52,6 +59,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="章节"
                            VerticalAlignment="Center" Opacity="0.7" />
@@ -59,23 +67,44 @@
                           ItemsSource="{x:Bind ViewModel.Chapters, Mode=OneWay}"
                           SelectedItem="{x:Bind ViewModel.SelectedChapter, Mode=TwoWay}"
                           DisplayMemberPath="Title"
+                          SelectionChanged="OnChapterSelectionChanged"
                           VerticalAlignment="Center"
                           HorizontalAlignment="Stretch"
                           MinWidth="200" />
-                <Button Grid.Column="2" Content="上一章"
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Button Width="34" Padding="0"
+                            Content="−"
+                            Click="OnStripZoomOutClick"
+                            IsEnabled="{x:Bind ViewModel.CanZoomStripOut, Mode=OneWay}"
+                            ToolTipService.ToolTip="缩小（Ctrl + 滚轮向下）" />
+                    <Button MinWidth="62" Padding="8,4"
+                            Content="{x:Bind ViewModel.StripZoomText, Mode=OneWay}"
+                            Click="OnStripZoomResetClick"
+                            ToolTipService.ToolTip="适应阅读区宽度（100%）" />
+                    <Button Width="34" Padding="0"
+                            Content="+"
+                            Click="OnStripZoomInClick"
+                            IsEnabled="{x:Bind ViewModel.CanZoomStripIn, Mode=OneWay}"
+                            ToolTipService.ToolTip="放大（Ctrl + 滚轮向上）" />
+                </StackPanel>
+                <Button Grid.Column="3" Content="上一章"
                         Click="OnPreviousChapterClick"
                         IsEnabled="{x:Bind ViewModel.HasPreviousChapter, Mode=OneWay}" />
-                <TextBlock Grid.Column="3" Text="{x:Bind ViewModel.ChapterProgress, Mode=OneWay}"
+                <TextBlock Grid.Column="4" Text="{x:Bind ViewModel.ChapterProgress, Mode=OneWay}"
                            VerticalAlignment="Center" Opacity="0.8" MinWidth="50"
                            TextAlignment="Center" />
-                <Button Grid.Column="4" Content="下一章"
+                <Button Grid.Column="5" Content="下一章"
                         Click="OnNextChapterClick"
                         IsEnabled="{x:Bind ViewModel.HasNextChapter, Mode=OneWay}" />
             </Grid>
         </Border>
 
         <!-- Image viewer -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="2"
+              Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -100,25 +129,87 @@
                 <FontIcon Glyph="&#xE76C;" FontSize="24" />
             </Button>
 
-            <!-- Loading indicator -->
-            <StackPanel Grid.Column="1"
-                        HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
-                        Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
-                              Width="48" Height="48"
-                              HorizontalAlignment="Center" />
-                <TextBlock Text="正在加载..."
-                           Style="{StaticResource BodyTextBlockStyle}"
-                           Opacity="0.7"
-                           HorizontalAlignment="Center" />
-            </StackPanel>
         </Grid>
+
+        <!-- Strip reader: virtualized continuous vertical images -->
+        <ScrollViewer x:Name="StripScrollViewer"
+                      Grid.Row="2"
+                      HorizontalScrollMode="Enabled"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollMode="Enabled"
+                      VerticalScrollBarVisibility="Auto"
+                      SizeChanged="OnStripViewportSizeChanged"
+                      ViewChanged="OnStripViewChanged"
+                      Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+            <ItemsRepeater x:Name="StripImageRepeater"
+                           HorizontalAlignment="Center"
+                           ItemsSource="{x:Bind ViewModel.StripImages, Mode=OneWay}"
+                           ElementPrepared="OnStripElementPrepared"
+                           ElementClearing="OnStripElementClearing">
+                <ItemsRepeater.Layout>
+                    <StackLayout Orientation="Vertical" Spacing="0" />
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="viewModels:ReaderStripImageItemViewModel"
+                                  xmlns:viewModels="using:Comic.WinUI.ViewModels">
+                        <Grid MinHeight="480"
+                              HorizontalAlignment="Stretch">
+                            <Image Source="{x:Bind Image, Mode=OneWay}"
+                                   Stretch="Uniform"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Top" />
+                            <ProgressRing Width="40" Height="40"
+                                          IsActive="{x:Bind IsLoading, Mode=OneWay}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Visibility="{x:Bind IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Border HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Margin="8"
+                                    Padding="8,4"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+                                <TextBlock Text="{x:Bind PageLabel}"
+                                           FontSize="11"
+                                           Opacity="0.7" />
+                            </Border>
+                            <Border Margin="24"
+                                    Padding="12"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <TextBlock Text="{x:Bind Error, Mode=OneWay}"
+                                           Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="680" />
+                            </Border>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+        </ScrollViewer>
+
+        <!-- Loading indicator shared by both reader modes -->
+        <StackPanel Grid.Row="2"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                    Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+            <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                          Width="48" Height="48"
+                          HorizontalAlignment="Center" />
+            <TextBlock Text="正在加载..."
+                       Style="{StaticResource BodyTextBlockStyle}"
+                       Opacity="0.7"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
 
         <!-- Bottom bar: page navigation -->
         <Border Grid.Row="3" Padding="16,10"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="0,1,0,0">
+                BorderThickness="0,1,0,0"
+                Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

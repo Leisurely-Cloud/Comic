@@ -1,113 +1,76 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Net.Http;
-using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
+using Comic.WinUI.Services.Native;
 
 namespace Comic.WinUI.Services;
 
+/// <summary>把进程内任务快照适配为现有页面使用的异步事件流。</summary>
 public sealed class DownloadEventStream
 {
-    private readonly BackendClient _backendClient;
-    private readonly HttpClient _httpClient;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = SnakeCaseNamingPolicy.Instance,
+    };
 
-    public DownloadEventStream(BackendClient backendClient, HttpClient httpClient)
+    private readonly BackendClient _backendClient;
+
+    public DownloadEventStream(BackendClient backendClient)
     {
         _backendClient = backendClient;
-        _httpClient = httpClient;
     }
 
-    public async IAsyncEnumerable<SseDownloadEvent> SubscribeAsync(
+    public async IAsyncEnumerable<DownloadStateEvent> SubscribeAsync(
         string taskId,
         int lastEventId = 0,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var uri = _backendClient.GetSseUri(taskId, lastEventId);
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        // Use CancellationToken.None to bypass HttpClient.Timeout (30s default) for long-lived SSE connections.
-        // Cancellation is handled externally via the caller's cancellationToken in the read loop.
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        var currentEvent = new SseDownloadEvent();
+        var eventId = lastEventId;
+        string? previousPayload = null;
         while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
+            var task = await _backendClient.GetDownloadAsync(taskId, cancellationToken);
+            var payload = JsonSerializer.Serialize(task, JsonOptions);
+            if (!string.Equals(payload, previousPayload, StringComparison.Ordinal))
             {
-                break;
-            }
-
-            if (line.StartsWith("id: ", StringComparison.Ordinal))
-            {
-                if (int.TryParse(line.AsSpan(4), out var id))
+                previousPayload = payload;
+                yield return new DownloadStateEvent
                 {
-                    currentEvent.EventId = id;
-                }
+                    EventId = ++eventId,
+                    EventName = "snapshot",
+                    JsonPayload = payload,
+                };
             }
-            else if (line.StartsWith("event: ", StringComparison.Ordinal))
-            {
-                currentEvent.EventName = line[7..];
-            }
-            else if (line.StartsWith("data: ", StringComparison.Ordinal))
-            {
-                currentEvent.JsonPayload = line[6..];
-            }
-            else if (string.IsNullOrEmpty(line) && !string.IsNullOrEmpty(currentEvent.JsonPayload))
-            {
-                yield return currentEvent;
-                currentEvent = new SseDownloadEvent();
-            }
+            if (NativeBackendService.IsTerminal(task.Status)) yield break;
+            await Task.Delay(150, cancellationToken);
         }
     }
 
-    public async IAsyncEnumerable<SseDownloadEvent> SubscribeExportAsync(
+    public async IAsyncEnumerable<DownloadStateEvent> SubscribeExportAsync(
         string taskId,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var uri = _backendClient.GetExportSseUri(taskId);
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        var currentEvent = new SseDownloadEvent();
+        var eventId = 0;
+        string? previousPayload = null;
         while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
+            var progress = await _backendClient.GetExportProgressAsync(taskId, cancellationToken);
+            var payload = JsonSerializer.Serialize(progress, JsonOptions);
+            if (!string.Equals(payload, previousPayload, StringComparison.Ordinal))
             {
-                break;
-            }
-
-            if (line.StartsWith("id: ", StringComparison.Ordinal))
-            {
-                if (int.TryParse(line.AsSpan(4), out var id))
+                previousPayload = payload;
+                yield return new DownloadStateEvent
                 {
-                    currentEvent.EventId = id;
-                }
+                    EventId = ++eventId,
+                    EventName = "export",
+                    JsonPayload = payload,
+                };
             }
-            else if (line.StartsWith("event: ", StringComparison.Ordinal))
-            {
-                currentEvent.EventName = line[7..];
-            }
-            else if (line.StartsWith("data: ", StringComparison.Ordinal))
-            {
-                currentEvent.JsonPayload = line[6..];
-            }
-            else if (string.IsNullOrEmpty(line) && !string.IsNullOrEmpty(currentEvent.JsonPayload))
-            {
-                yield return currentEvent;
-                currentEvent = new SseDownloadEvent();
-            }
+            if (progress.Status is "completed" or "failed") yield break;
+            await Task.Delay(150, cancellationToken);
         }
     }
 }

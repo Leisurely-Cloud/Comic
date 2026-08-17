@@ -84,7 +84,14 @@ public sealed class SearchHistoryService
         {
             if (!File.Exists(_filePath)) return [];
             var json = File.ReadAllText(_filePath);
-            return JsonSerializer.Deserialize<List<SearchHistoryEntry>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<SearchHistoryEntry>>(json) ?? [])
+                .Where(entry => string.Equals(entry.SiteKey, SiteCatalog.Key, StringComparison.Ordinal))
+                .Select(entry =>
+                {
+                    entry.SiteName = SiteCatalog.DisplayName;
+                    return entry;
+                })
+                .ToList();
         }
         catch
         {

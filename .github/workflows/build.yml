@@ -23,74 +23,18 @@ jobs:
       with:
         dotnet-version: '9.0.x'
 
-    - name: Setup Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+    - name: Run WinUI tests
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64
 
-    - name: Install Python dependencies
-      run: |
-        pip install requests beautifulsoup4 lxml
-
-    - name: Build WinUI App
-      run: |
-        dotnet build app/frontend-winui/src/Comic.WinUI/Comic.WinUI.csproj -c Release -r win-x64
-
-    - name: Publish self-contained
-      run: |
-        dotnet publish app/frontend-winui/src/Comic.WinUI/Comic.WinUI.csproj -c Release -r win-x64 --self-contained true -o publish/frontend
-
-    - name: Copy XAML compiled files
+    - name: Publish framework-dependent C# app
       shell: pwsh
-      run: |
-        $binDir = "app/frontend-winui/src/Comic.WinUI/bin/Release/net9.0-windows10.0.26100.0/win-x64"
-        $pubDir = "publish/frontend"
-        Copy-Item -Path "$binDir/Assets" -Destination "$pubDir/Assets" -Recurse -Force
-        Copy-Item -Path "$binDir/Views" -Destination "$pubDir/Views" -Recurse -Force
-        Copy-Item -Path "$binDir/Controls" -Destination "$pubDir/Controls" -Recurse -Force
-        Copy-Item -Path "$binDir/*.xbf" -Destination "$pubDir/" -Force
-        Copy-Item -Path "$binDir/Comic.WinUI.pri" -Destination "$pubDir/" -Force
-
-    - name: Prepare backend
-      shell: pwsh
-      run: |
-        Copy-Item -Path "app/backend" -Destination "publish/backend" -Recurse -Force
-
-    - name: Download embedded Python
-      shell: pwsh
-      run: |
-        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.12.4/python-3.12.4-embed-amd64.zip" -OutFile "tools/pyembed.zip"
-        New-Item -ItemType Directory -Path "publish/python" -Force
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::ExtractToDirectory('tools/pyembed.zip', 'publish/python')
-
-    - name: Configure Python
-      shell: pwsh
-      run: |
-        Set-Content -Path 'publish/python/python312._pth' -Value "python312.zip`n.`nLib/site-packages`nimport site"
-
-    - name: Install pip and dependencies
-      shell: pwsh
-      run: |
-        Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "tools/get-pip.py"
-        & publish/python/python.exe tools/get-pip.py --no-warn-script-location
-        & publish/python/python.exe -m pip install --target publish/python/Lib/site-packages requests beautifulsoup4 lxml --no-warn-script-location
-
-    - name: Create launcher scripts
-      shell: pwsh
-      run: |
-        $launcher = "@echo off`r`ncd /d `"%~dp0`"`r`nstart `"`" `"frontend\Comic.WinUI.exe`""
-        Set-Content -Path 'publish/ComicDownloader.bat' -Value $launcher -Encoding ASCII
-        $setup = "@echo off`r`nchcp 65001 >nul`r`necho 初始化完成!`r`ntimeout /t 2 >nul"
-        Set-Content -Path 'publish/setup.bat' -Value $setup -Encoding ASCII
+      run: ./scripts/build-and-package.ps1
 
     - name: Install Inno Setup
-      run: |
-        choco install innosetup -y
+      run: choco install innosetup -y
 
     - name: Build installer
-      run: |
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
 
     - name: Upload installer artifact
       uses: actions/upload-artifact@v4
