@@ -8,29 +8,98 @@
     xmlns:controls="using:Comic.WinUI.Controls"
     mc:Ignorable="d">
 
+    <Page.Resources>
+        <Style x:Key="WorkspaceToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="MinWidth" Value="126" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </Page.Resources>
+
     <Grid Padding="24,16,24,24" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Search Bar -->
-        <controls:SearchBarControl x:Name="SearchBarControl1" Grid.Row="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+        <Grid Grid.Row="0" ColumnSpacing="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Width="250" Spacing="2" VerticalAlignment="Center">
+                <TextBlock Text="找漫画" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="按“搜索 → 选择漫画 → 勾选章节 → 创建任务”的顺序完成下载。"
+                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+            </StackPanel>
+            <Border Grid.Column="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="4"
+                    CornerRadius="10"
+                    BorderThickness="1"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <ToggleButton x:Name="DiscoveryWorkspaceTab"
+                                  Style="{StaticResource WorkspaceToggleButtonStyle}"
+                                  IsChecked="True"
+                                  Click="OnWorkspaceTabClick">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE721;" FontSize="14" />
+                            <TextBlock Text="搜索与选章" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton x:Name="TasksWorkspaceTab"
+                                  Style="{StaticResource WorkspaceToggleButtonStyle}"
+                                  Click="OnWorkspaceTabClick">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE896;" FontSize="14" />
+                            <TextBlock Text="下载任务" />
+                        </StackPanel>
+                    </ToggleButton>
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource CompactCardBorderStyle}"
+                    VerticalAlignment="Center">
+                <TextBlock Text="{x:Bind ViewModel.TaskCountSummary, Mode=OneWay}"
+                           FontSize="12" Opacity="0.75" />
+            </Border>
+        </Grid>
 
-        <!-- Main Content: Search Results (left) + Task List (right) -->
-        <ScrollViewer Grid.Row="1" Margin="0,12,0,0"
-                      HorizontalScrollBarVisibility="Auto"
-                      HorizontalScrollMode="Auto"
-                      VerticalScrollBarVisibility="Disabled">
-            <Grid ColumnSpacing="16" MinWidth="640">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" MinWidth="320" />
-                    <ColumnDefinition Width="*" MinWidth="320" />
-                </Grid.ColumnDefinitions>
+        <Grid Grid.Row="1">
+            <Grid x:Name="DiscoveryWorkspace" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                <controls:SearchResultsList Grid.Column="0" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
-                <controls:TaskListPanel Grid.Column="1" ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+                <controls:SearchBarControl x:Name="SearchBarControl1"
+                                           ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+
+                <Grid Grid.Row="1" ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="400" />
+                        <ColumnDefinition Width="*" MinWidth="0" />
+                    </Grid.ColumnDefinitions>
+
+                    <controls:SearchResultsList Grid.Column="0"
+                                                ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+                    <controls:MangaSelectionPanel Grid.Column="1"
+                                                  ViewModel="{x:Bind ViewModel, Mode=OneWay}"
+                                                  DownloadStarted="OnDownloadStarted" />
+                </Grid>
             </Grid>
-        </ScrollViewer>
+
+            <controls:TaskListPanel x:Name="TaskWorkspace"
+                                    Visibility="Collapsed"
+                                    ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+        </Grid>
     </Grid>
 </Page>

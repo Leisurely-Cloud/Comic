@@ -9,6 +9,19 @@
     xmlns:models="using:Comic.WinUI.Models"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <Style x:Key="TaskScopeToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="MinWidth" Value="118" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Resources>
+
     <Border Style="{StaticResource CardBorderStyle}">
         <Grid RowSpacing="8">
             <Grid.RowDefinitions>
@@ -18,21 +31,49 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Header: Tab selector + action buttons -->
+            <!-- Header: task scope + batch actions -->
             <Grid Grid.Row="0" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <SelectorBar x:Name="TabSelector" Grid.Column="0" SelectionChanged="OnTabSelectionChanged">
-                    <SelectorBarItem Text="当前任务" IsSelected="True" />
-                    <SelectorBarItem Text="历史记录" />
-                </SelectorBar>
-                <TextBlock x:Name="TaskCountLabel" Grid.Column="1"
-                           Text="{x:Bind ViewModel.TaskCountSummary, Mode=OneWay}"
-                           Opacity="0.7" VerticalAlignment="Center" Margin="12,0,0,0" />
-                <StackPanel x:Name="BatchToggleButtons" Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                <StackPanel Grid.Column="0" Spacing="3">
+                    <Border HorizontalAlignment="Left"
+                            Padding="3"
+                            CornerRadius="10"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            Background="{ThemeResource ControlFillColorDefaultBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="2">
+                            <ToggleButton x:Name="CurrentTasksTab"
+                                          Style="{StaticResource TaskScopeToggleButtonStyle}"
+                                          IsChecked="True"
+                                          Click="OnTaskTabClick">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE9D9;" FontSize="14" />
+                                    <TextBlock Text="当前任务" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="HistoryTab"
+                                          Style="{StaticResource TaskScopeToggleButtonStyle}"
+                                          Click="OnHistoryTabClick">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE823;" FontSize="14" />
+                                    <TextBlock Text="历史记录" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="TaskCountLabel"
+                               Text="{x:Bind ViewModel.TaskCountSummary, Mode=OneWay}"
+                               Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                    <TextBlock x:Name="HistoryCountLabel"
+                               Text="{x:Bind ViewModel.HistorySummary, Mode=OneWay}"
+                               Style="{StaticResource PageDescriptionTextBlockStyle}"
+                               Visibility="Collapsed" />
+                </StackPanel>
+                <StackPanel x:Name="BatchToggleButtons" Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                            VerticalAlignment="Center">
                     <Button Content="批量操作" Click="OnToggleBatchModeClick"
                             Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
                     <Button Content="退出批量" Click="OnToggleBatchModeClick"
@@ -43,41 +84,190 @@
             <!-- Batch action bar -->
             <StackPanel x:Name="BatchActionBar" Grid.Row="1" Orientation="Horizontal" Spacing="8"
                         Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Button Content="全选" Click="OnSelectAllClick" />
-                <Button Content="取消全选" Click="OnDeselectAllClick" />
+                <Button Content="全选任务" Click="OnSelectAllClick" />
+                <Button Content="取消全部" Click="OnDeselectAllClick" />
                 <Button Content="停止所选" Click="OnBatchStopClick"
                         IsEnabled="{x:Bind ViewModel.HasSelectedTasks, Mode=OneWay}" />
                 <Button Content="删除所选" Click="OnBatchDeleteClick"
                         IsEnabled="{x:Bind ViewModel.HasSelectedTasks, Mode=OneWay}" />
                 <TextBlock VerticalAlignment="Center" Opacity="0.7"
-                           Text="{x:Bind ViewModel.SelectedTaskCount, Mode=OneWay, Converter={StaticResource SelectedCountConverter}}" />
+                           Text="{x:Bind ViewModel.SelectedBatchSummary, Mode=OneWay}" />
             </StackPanel>
+
+            <Grid x:Name="HistoryActionBar" Grid.Row="1" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Click="OnSelectAllHistoryClick">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE9D5;" FontSize="13" />
+                            <TextBlock Text="全选本页" />
+                        </StackPanel>
+                    </Button>
+                    <Button Content="取消选择"
+                            Click="OnDeselectAllHistoryClick"
+                            IsEnabled="{x:Bind ViewModel.HasSelectedHistory, Mode=OneWay}" />
+                    <Button Click="OnDeleteSelectedHistoryClick"
+                            IsEnabled="{x:Bind ViewModel.HasSelectedHistory, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74D;" FontSize="13" />
+                            <TextBlock Text="删除所选" />
+                        </StackPanel>
+                    </Button>
+                    <TextBlock VerticalAlignment="Center"
+                               Opacity="0.7"
+                               Text="{x:Bind ViewModel.SelectedHistorySummary, Mode=OneWay}" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="清空全部"
+                        Click="OnClearHistoryClick"
+                        IsEnabled="{x:Bind ViewModel.HasHistoryItems, Mode=OneWay}" />
+            </Grid>
 
             <!-- Current Task Progress -->
             <Border x:Name="ProgressSection" Grid.Row="2" Margin="0,4,0,0"
                     Style="{StaticResource CompactCardBorderStyle}">
-                <StackPanel Spacing="6">
+                <Grid>
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasCurrentTask, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Padding="6,2" FontSize="12"
-                                Content="停止"
-                                IsEnabled="{x:Bind ViewModel.HasCurrentTask, Mode=OneWay}"
-                                Click="OnStopCurrentClick" />
-                        <TextBlock Grid.Column="1"
-                                   Text="{x:Bind ViewModel.CurrentTask.StatusText, Mode=OneWay}"
-                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Text="{x:Bind ViewModel.CurrentTask.DisplayName, Mode=OneWay}"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentTask.StatusText, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.68"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="暂停" Padding="10,4"
+                                    Command="{x:Bind ViewModel.PauseCommand, Mode=OneWay}" />
+                            <Button Content="继续" Padding="10,4"
+                                    Command="{x:Bind ViewModel.ResumeCommand, Mode=OneWay}" />
+                            <Button Content="停止" Padding="10,4"
+                                    Command="{x:Bind ViewModel.StopCommand, Mode=OneWay}" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid Margin="2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="总进度"
+                                   FontSize="12"
+                                   Opacity="0.68"
                                    VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2"
-                                   Text="{x:Bind ViewModel.CurrentTask.ProgressText, Mode=OneWay}"
-                                   Opacity="0.8" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                            <TextBlock Text="{x:Bind ViewModel.CurrentTask.ProgressText, Mode=OneWay}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentTask.DownloadSpeedText, Mode=OneWay}"
+                                       FontSize="12"
+                                       Opacity="0.72"
+                                       MinWidth="86"
+                                       TextAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
                     </Grid>
                     <ProgressBar Minimum="0" Maximum="100"
+                                 Height="6"
                                  Value="{x:Bind ViewModel.CurrentTask.Progress, Mode=OneWay}" />
+                    <Grid Margin="0,6,0,0"
+                          Visibility="{x:Bind ViewModel.CurrentTask.HasChapters, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Margin="2,0,2,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="章节明细" FontSize="13" FontWeight="SemiBold" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                                        Margin="0,0,12,0"
+                                        Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Button Content="全选章节" Padding="8,3"
+                                        Command="{x:Bind ViewModel.SelectAllCurrentTaskChaptersCommand, Mode=OneWay}" />
+                                <Button Content="清空" Padding="8,3"
+                                        Command="{x:Bind ViewModel.DeselectAllCurrentTaskChaptersCommand, Mode=OneWay}" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="页数 · 进度 · 状态" FontSize="11" Opacity="0.58"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                        <ListView Grid.Row="1" MaxHeight="240"
+                                  ItemsSource="{x:Bind ViewModel.CurrentTask.Chapters, Mode=OneWay}"
+                                  SelectionMode="None"
+                                  ScrollViewer.VerticalScrollMode="Enabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="viewModels:DownloadChapterProgressItemViewModel">
+                                    <Grid Padding="4,6" ColumnSpacing="12" RowSpacing="3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="52" />
+                                            <ColumnDefinition Width="64" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <CheckBox Grid.Row="0" Grid.Column="0"
+                                                  IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                                  Visibility="{x:Bind IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="0" Grid.Column="1"
+                                                   Text="{x:Bind Title, Mode=OneWay}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Row="0" Grid.Column="2"
+                                                   Text="{x:Bind ImageProgressText, Mode=OneWay}"
+                                                   FontSize="12" Opacity="0.68"
+                                                   TextAlignment="Right"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="0" Grid.Column="3"
+                                                   Text="{x:Bind ProgressText, Mode=OneWay}"
+                                                   FontSize="12" Opacity="0.68"
+                                                   TextAlignment="Right"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="0" Grid.Column="4"
+                                                   Text="{x:Bind StatusLabel, Mode=OneWay}"
+                                                   FontSize="12" FontWeight="SemiBold"
+                                                   TextAlignment="Right"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4"
+                                                   Text="{x:Bind Error, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8"
+                            HorizontalAlignment="Center"
+                            Visibility="{x:Bind ViewModel.HasCurrentTask, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <FontIcon Glyph="&#xE896;" FontSize="14" Opacity="0.5"
+                              VerticalAlignment="Center" />
+                    <TextBlock Text="暂无下载任务，请先到“搜索与选章”创建任务。"
+                               FontSize="12" Opacity="0.65" VerticalAlignment="Center" />
+                </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Main Content: Task list -->
@@ -87,7 +277,7 @@
                       SelectionMode="Single">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="viewModels:DownloadTaskItemViewModel">
-                        <Grid Padding="4,6" ColumnSpacing="10">
+                        <Grid Padding="6,8" ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -98,14 +288,19 @@
                                       Visibility="{x:Bind IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
                                       VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" Spacing="2">
-                                <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontSize="13" />
+                                <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" />
                                 <TextBlock Text="{x:Bind LatestLogMessage, Mode=OneWay}" Opacity="0.7"
                                            TextTrimming="CharacterEllipsis" FontSize="11" />
                             </StackPanel>
                             <TextBlock Grid.Column="2" Text="{x:Bind StatusLabel, Mode=OneWay}"
-                                       VerticalAlignment="Center" FontSize="12" />
+                                       VerticalAlignment="Center" FontSize="12"
+                                       TextAlignment="Right" />
                             <TextBlock Grid.Column="3" Text="{x:Bind ProgressText, Mode=OneWay}"
-                                       VerticalAlignment="Center" FontSize="12" />
+                                       VerticalAlignment="Center" FontSize="12"
+                                       FontWeight="SemiBold"
+                                       TextAlignment="Right" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
@@ -117,32 +312,149 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <ListView Grid.Row="0" ItemsSource="{x:Bind ViewModel.HistoryItems, Mode=OneWay}"
-                          SelectionMode="None">
+                <ListView Grid.Row="0"
+                          ItemsSource="{x:Bind ViewModel.HistoryItems, Mode=OneWay}"
+                          SelectionMode="None"
+                          Visibility="{x:Bind ViewModel.HasHistoryItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,8" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="models:DownloadHistoryItem">
-                            <Grid Padding="4,6" ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="60" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{x:Bind MangaTitle, Mode=OneWay}" FontSize="13"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{x:Bind Url, Mode=OneWay}" Opacity="0.6" FontSize="11"
-                                               TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                                <TextBlock Grid.Column="1" FontSize="12" VerticalAlignment="Center">
-                                    <Run Text="{x:Bind CompletedChapterCount, Mode=OneWay}" /><Run Text="/" /><Run Text="{x:Bind TotalChapterCount, Mode=OneWay}" /><Run Text=" 章" />
-                                </TextBlock>
-                                <TextBlock Grid.Column="2" Text="{x:Bind Status, Mode=OneWay}"
-                                           VerticalAlignment="Center" FontSize="12" />
-                            </Grid>
+                            <Border Padding="14"
+                                    CornerRadius="9"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                <Border.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="删除这条历史记录"
+                                                        CommandParameter="{x:Bind Id, Mode=OneWay}"
+                                                        Click="OnDeleteHistoryItemClick">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE74D;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Border.ContextFlyout>
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="210" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <CheckBox Grid.Column="0"
+                                              IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                              VerticalAlignment="Center"
+                                              AutomationProperties.Name="选择此历史记录" />
+
+                                    <Border Grid.Column="1"
+                                            Width="64" Height="86"
+                                            CornerRadius="7"
+                                            VerticalAlignment="Top"
+                                            Background="{ThemeResource ControlFillColorDefaultBrush}">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xE8F1;" FontSize="24" Opacity="0.32"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Image Source="{x:Bind CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                                   Stretch="UniformToFill" />
+                                        </Grid>
+                                    </Border>
+
+                                    <StackPanel Grid.Column="2" Spacing="5" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind DisplayTitle, Mode=OneWay}"
+                                                   FontSize="15" FontWeight="SemiBold"
+                                                   TextWrapping="WrapWholeWords"
+                                                   MaxLines="2" />
+                                        <StackPanel Orientation="Horizontal" Spacing="18">
+                                            <TextBlock FontSize="12" Opacity="0.76">
+                                                <Run Text="作者：" /><Run Text="{x:Bind AuthorDisplay, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock FontSize="12" Opacity="0.76">
+                                                <Run Text="来源：" /><Run Text="{x:Bind SiteDisplay, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <TextBlock Text="{x:Bind ErrorText, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <TextBlock Text="{x:Bind Url, Mode=OneWay}"
+                                                   FontSize="11" Opacity="0.55"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="3" Spacing="6" VerticalAlignment="Center">
+                                        <Border Padding="9,4"
+                                                CornerRadius="6"
+                                                HorizontalAlignment="Right"
+                                                Background="{ThemeResource ControlFillColorDefaultBrush}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="{x:Bind StatusGlyph, Mode=OneWay}" FontSize="12" />
+                                                <TextBlock Text="{x:Bind StatusLabel, Mode=OneWay}"
+                                                           FontSize="12" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{x:Bind ChapterProgressText, Mode=OneWay}"
+                                                       FontSize="12" Opacity="0.75" />
+                                            <TextBlock Grid.Column="1" Text="{x:Bind ProgressText, Mode=OneWay}"
+                                                       FontSize="12" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <ProgressBar Minimum="0" Maximum="100" Height="4"
+                                                     Value="{x:Bind Progress, Mode=OneWay}" />
+                                        <TextBlock Text="{x:Bind FinishedAtDisplay, Mode=OneWay}"
+                                                   FontSize="11" Opacity="0.58"
+                                                   TextAlignment="Right" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                            <Button Padding="9,4"
+                                                    Tag="{x:Bind RootDir, Mode=OneWay}"
+                                                    Click="OnHistoryOpenDirectoryClick"
+                                                    Visibility="{x:Bind RootDir, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <FontIcon Glyph="&#xE8B7;" FontSize="12" />
+                                                    <TextBlock Text="打开目录" FontSize="12" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Padding="9,4"
+                                                    Tag="{x:Bind Url, Mode=OneWay}"
+                                                    Click="OnHistoryOpenSourceClick"
+                                                    Visibility="{x:Bind Url, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <FontIcon Glyph="&#xE774;" FontSize="12" />
+                                                    <TextBlock Text="源链接" FontSize="12" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                <StackPanel Grid.Row="0"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10"
+                            Visibility="{x:Bind ViewModel.HasHistoryItems, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <FontIcon Glyph="&#xE81C;" FontSize="42" Opacity="0.35" HorizontalAlignment="Center" />
+                    <TextBlock Text="暂无下载历史" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    <TextBlock Text="任务完成、停止或失败后会显示在这里"
+                               FontSize="12" Opacity="0.62" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Grid.Row="1"
+                            Margin="0,8,0,0"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Center">
                     <Button Content="上一页" Click="OnHistoryPrevClick"
                             IsEnabled="{x:Bind ViewModel.HistoryPage, Mode=OneWay, Converter={StaticResource HistoryPrevEnabledConverter}}" />
                     <TextBlock VerticalAlignment="Center" Opacity="0.8">
@@ -150,7 +462,6 @@
                     </TextBlock>
                     <Button Content="下一页" Click="OnHistoryNextClick"
                             IsEnabled="{x:Bind ViewModel.HasNextHistoryPage, Mode=OneWay}" />
-                    <Button Content="清除历史" Click="OnClearHistoryClick" Margin="24,0,0,0" />
                 </StackPanel>
             </Grid>
         </Grid>

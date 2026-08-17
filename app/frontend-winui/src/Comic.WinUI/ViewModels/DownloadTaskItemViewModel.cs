@@ -29,6 +29,9 @@ public partial class DownloadTaskItemViewModel : ObservableObject
     public partial double Progress { get; set; }
 
     [ObservableProperty]
+    public partial double DownloadSpeedBytesPerSecond { get; set; }
+
+    [ObservableProperty]
     public partial ApiError? TaskError { get; set; }
 
     [ObservableProperty]
@@ -38,6 +41,9 @@ public partial class DownloadTaskItemViewModel : ObservableObject
     public partial bool IsBatchMode { get; set; }
 
     public string ProgressText => $"{Progress:0}%";
+
+    public string DownloadSpeedText =>
+        $"{Math.Max(DownloadSpeedBytesPerSecond, 0) / 1024d / 1024d:0.00} MB/s";
 
     public string DisplayName => string.IsNullOrWhiteSpace(MangaTitle) ? Url : MangaTitle;
 
@@ -65,6 +71,14 @@ public partial class DownloadTaskItemViewModel : ObservableObject
 
     public ObservableCollection<DownloadLogEntry> Logs { get; } = [];
 
+    public ObservableCollection<DownloadChapterProgressItemViewModel> Chapters { get; } = [];
+
+    public bool HasChapters => Chapters.Count > 0;
+
+    public int SelectedChapterCount => Chapters.Count(chapter => chapter.IsSelected);
+
+    public bool HasSelectedChapters => SelectedChapterCount > 0;
+
     public static DownloadTaskItemViewModel FromDto(DownloadTaskDto dto)
     {
         var vm = new DownloadTaskItemViewModel();
@@ -81,6 +95,7 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         Status = dto.Status;
         StatusText = dto.StatusText;
         Progress = dto.Progress;
+        DownloadSpeedBytesPerSecond = dto.DownloadSpeedBytesPerSecond;
         TaskError = dto.TaskError;
 
         Logs.Clear();
@@ -92,12 +107,144 @@ public partial class DownloadTaskItemViewModel : ObservableObject
             }
         }
 
+        var chapterDtos = dto.Chapters ?? [];
+        var liveChapterIds = chapterDtos.Select(chapter => chapter.Id).ToHashSet(StringComparer.Ordinal);
+        for (var index = Chapters.Count - 1; index >= 0; index--)
+        {
+            if (!liveChapterIds.Contains(Chapters[index].Id))
+            {
+                Chapters[index].PropertyChanged -= OnChapterPropertyChanged;
+                Chapters.RemoveAt(index);
+            }
+        }
+        foreach (var chapter in chapterDtos)
+        {
+            var existing = Chapters.FirstOrDefault(item => item.Id == chapter.Id);
+            if (existing is null)
+            {
+                var item = DownloadChapterProgressItemViewModel.FromDto(chapter);
+                item.IsBatchMode = IsBatchMode;
+                item.PropertyChanged += OnChapterPropertyChanged;
+                Chapters.Add(item);
+            }
+            else
+            {
+                existing.UpdateFrom(chapter);
+            }
+        }
+
         OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(DownloadSpeedText));
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(StatusLabel));
         OnPropertyChanged(nameof(HasTaskError));
         OnPropertyChanged(nameof(ErrorSummary));
         OnPropertyChanged(nameof(SiteLabel));
         OnPropertyChanged(nameof(LatestLogMessage));
+        OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(SelectedChapterCount));
+        OnPropertyChanged(nameof(HasSelectedChapters));
+    }
+
+    partial void OnIsBatchModeChanged(bool value)
+    {
+        foreach (var chapter in Chapters)
+        {
+            chapter.IsBatchMode = value;
+            if (!value)
+            {
+                chapter.IsSelected = false;
+            }
+        }
+    }
+
+    private void OnChapterPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DownloadChapterProgressItemViewModel.IsSelected))
+        {
+            OnPropertyChanged(nameof(SelectedChapterCount));
+            OnPropertyChanged(nameof(HasSelectedChapters));
+        }
+    }
+}
+
+public partial class DownloadChapterProgressItemViewModel : ObservableObject
+{
+    [ObservableProperty]
+    public partial string Id { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string Title { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string Status { get; set; } = "pending";
+
+    [ObservableProperty]
+    public partial int CompletedImages { get; set; }
+
+    [ObservableProperty]
+    public partial int TotalImages { get; set; }
+
+    [ObservableProperty]
+    public partial double Progress { get; set; }
+
+    [ObservableProperty]
+    public partial string Error { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string DirectoryName { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsBatchMode { get; set; }
+
+    public string StatusLabel => Status switch
+    {
+        "pending" => "等待",
+        "running" => "下载中",
+        "completed" => "已完成",
+        "failed" => "失败",
+        "stopped" => "已停止",
+        _ => Status,
+    };
+
+    public string ImageProgressText => TotalImages > 0
+        ? $"{CompletedImages}/{TotalImages} 页"
+        : Status switch
+        {
+            "pending" => "等待下载",
+            "failed" => "下载失败",
+            "stopped" => "已停止",
+            _ => "正在获取页数",
+        };
+
+    public string ProgressText => $"{Progress:0}%";
+
+    public bool HasError => !string.IsNullOrWhiteSpace(Error);
+
+    public static DownloadChapterProgressItemViewModel FromDto(DownloadChapterProgressDto dto)
+    {
+        var vm = new DownloadChapterProgressItemViewModel();
+        vm.UpdateFrom(dto);
+        return vm;
+    }
+
+    public void UpdateFrom(DownloadChapterProgressDto dto)
+    {
+        Id = dto.Id;
+        Title = dto.Title;
+        Status = dto.Status;
+        CompletedImages = dto.CompletedImages;
+        TotalImages = dto.TotalImages;
+        Progress = dto.Progress;
+        Error = dto.Error;
+        DirectoryName = dto.DirectoryName;
+
+        OnPropertyChanged(nameof(StatusLabel));
+        OnPropertyChanged(nameof(ImageProgressText));
+        OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(HasError));
     }
 }

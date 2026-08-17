@@ -16,21 +16,35 @@ namespace Comic.WinUI.ViewModels;
 
 public partial class ReaderPageViewModel : ObservableObject
 {
+    private const int StripZoomMinimum = 50;
+    private const int StripZoomMaximum = 200;
+
     private readonly BackendClient _backendClient;
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly ReadingProgressService _readingProgressService;
 
     private CancellationTokenSource? _imageCts;
     private string _rootDir = string.Empty;
     private List<string> _currentImagePaths = [];
     private int _pendingImageIndex = -1;
 
-    public ReaderPageViewModel(BackendClient backendClient)
+    public ReaderPageViewModel(
+        BackendClient backendClient,
+        ApplicationSettingsService applicationSettings,
+        ReadingProgressService readingProgressService)
     {
         _backendClient = backendClient;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _readingProgressService = readingProgressService;
+        IsStripMode = applicationSettings.DefaultReaderMode == ApplicationSettingsService.ReaderStrip;
+        StripZoomPercent = applicationSettings.DefaultStripZoomPercent;
     }
 
+    public event Action<int>? StripPositionRestoreRequested;
+
     public ObservableCollection<ReaderChapterDto> Chapters { get; } = [];
+
+    public ObservableCollection<ReaderStripImageItemViewModel> StripImages { get; } = [];
 
     [ObservableProperty]
     public partial string MangaTitle { get; set; } = string.Empty;
@@ -52,6 +66,18 @@ public partial class ReaderPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string PageError { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsStripMode { get; set; }
+
+    [ObservableProperty]
+    public partial int StripZoomPercent { get; set; } = 100;
+
+    public string StripZoomText => $"{StripZoomPercent}%";
+
+    public bool CanZoomStripOut => StripZoomPercent > StripZoomMinimum;
+
+    public bool CanZoomStripIn => StripZoomPercent < StripZoomMaximum;
 
     public bool HasPreviousImage => CurrentImageIndex > 0;
 
@@ -113,7 +139,27 @@ public partial class ReaderPageViewModel : ObservableObject
 
             if (Chapters.Count > 0)
             {
-                SelectedChapter = Chapters[0];
+                var selectedChapter = Chapters[0];
+                var progress = _readingProgressService.Get(rootDir);
+                if (progress is not null)
+                {
+                    foreach (var chapter in Chapters)
+                    {
+                        if (!string.Equals(
+                                chapter.DirName,
+                                progress.ChapterDirectoryName,
+                                StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        selectedChapter = chapter;
+                        _pendingImageIndex = progress.PageIndex;
+                        break;
+                    }
+                }
+
+                SelectedChapter = selectedChapter;
             }
         }
         catch (OperationCanceledException)
@@ -125,7 +171,7 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (HttpRequestException)
         {
-            PageError = "无法连接后端服务。";
+            PageError = "内置服务调用失败。";
         }
         catch (Exception ex)
         {
@@ -150,6 +196,42 @@ public partial class ReaderPageViewModel : ObservableObject
         }
     }
 
+    partial void OnIsStripModeChanged(bool value)
+    {
+        if (_currentImagePaths.Count == 0) return;
+
+        if (value)
+        {
+            CurrentImage = null;
+            RebuildStripImages();
+            StripPositionRestoreRequested?.Invoke(CurrentImageIndex);
+        }
+        else
+        {
+            ClearStripImages();
+            _ = ShowImageAsync(
+                Math.Clamp(CurrentImageIndex, 0, _currentImagePaths.Count - 1),
+                _imageCts?.Token ?? CancellationToken.None);
+        }
+    }
+
+    partial void OnStripZoomPercentChanged(int value)
+    {
+        OnPropertyChanged(nameof(StripZoomText));
+        OnPropertyChanged(nameof(CanZoomStripOut));
+        OnPropertyChanged(nameof(CanZoomStripIn));
+    }
+
+    public void ChangeStripZoom(int delta)
+    {
+        StripZoomPercent = Math.Clamp(
+            StripZoomPercent + delta,
+            StripZoomMinimum,
+            StripZoomMaximum);
+    }
+
+    public void ResetStripZoom() => StripZoomPercent = 100;
+
     private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default)
     {
         _imageCts?.Cancel();
@@ -159,6 +241,7 @@ public partial class ReaderPageViewModel : ObservableObject
         IsLoading = true;
         PageError = string.Empty;
         _currentImagePaths = [];
+        ClearStripImages();
         TotalImages = 0;
         CurrentImageIndex = 0;
         CurrentImage = null;
@@ -175,7 +258,18 @@ public partial class ReaderPageViewModel : ObservableObject
                 var startIndex = _pendingImageIndex >= 0 && _pendingImageIndex < _currentImagePaths.Count
                     ? _pendingImageIndex : 0;
                 _pendingImageIndex = -1;
-                await ShowImageAsync(startIndex, token);
+                CurrentImageIndex = startIndex;
+                if (IsStripMode)
+                {
+                    RebuildStripImages();
+                    NotifyImageNavigationChanged();
+                    SaveReadingProgress(startIndex);
+                    StripPositionRestoreRequested?.Invoke(startIndex);
+                }
+                else
+                {
+                    await ShowImageAsync(startIndex, token);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -187,7 +281,7 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (HttpRequestException)
         {
-            PageError = "无法连接后端服务。";
+            PageError = "内置服务调用失败。";
         }
         catch (Exception ex)
         {
@@ -298,17 +392,12 @@ public partial class ReaderPageViewModel : ObservableObject
                 var bitmap = new BitmapImage();
                 CurrentImage = bitmap;
                 CurrentImageIndex = index;
-                OnPropertyChanged(nameof(PageIndicator));
-                OnPropertyChanged(nameof(HasPreviousImage));
-                OnPropertyChanged(nameof(HasNextImage));
-                OnPropertyChanged(nameof(HasPreviousImageOrChapter));
-                OnPropertyChanged(nameof(HasNextImageOrChapter));
-                PreviousImageCommand.NotifyCanExecuteChanged();
-                NextImageCommand.NotifyCanExecuteChanged();
+                NotifyImageNavigationChanged();
 
                 using var stream = new MemoryStream(bytes);
                 stream.Position = 0;
                 bitmap.SetSource(stream.AsRandomAccessStream());
+                SaveReadingProgress(index);
             });
         }
         catch (OperationCanceledException)
@@ -322,5 +411,164 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             _dispatcherQueue.TryEnqueue(() => IsLoading = false);
         }
+    }
+
+    public async Task LoadStripImageAsync(ReaderStripImageItemViewModel item)
+    {
+        var token = item.BeginLoad(_imageCts?.Token ?? CancellationToken.None);
+        if (token is null) return;
+
+        try
+        {
+            var bytes = await _backendClient.GetImageBytesAsync(item.Path, token.Value);
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                if (!item.CanComplete(token.Value)) return;
+                try
+                {
+                    var bitmap = new BitmapImage { DecodePixelWidth = 1200 };
+                    using var stream = new MemoryStream(bytes);
+                    stream.Position = 0;
+                    bitmap.SetSource(stream.AsRandomAccessStream());
+                    item.Complete(token.Value, bitmap);
+                }
+                catch (Exception ex)
+                {
+                    item.Fail(token.Value, ex.Message);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _dispatcherQueue.TryEnqueue(() => item.Fail(token.Value, ex.Message));
+        }
+    }
+
+    public void UnloadStripImage(ReaderStripImageItemViewModel item) => item.Unload();
+
+    public void SaveReadingProgress(int? pageIndex = null)
+    {
+        if (SelectedChapter is null ||
+            string.IsNullOrWhiteSpace(_rootDir) ||
+            TotalImages <= 0)
+        {
+            return;
+        }
+
+        var normalizedIndex = Math.Clamp(pageIndex ?? CurrentImageIndex, 0, TotalImages - 1);
+        if (CurrentImageIndex != normalizedIndex)
+        {
+            CurrentImageIndex = normalizedIndex;
+            NotifyImageNavigationChanged();
+        }
+
+        _readingProgressService.Save(_rootDir, SelectedChapter.DirName, normalizedIndex);
+    }
+
+    private void RebuildStripImages()
+    {
+        ClearStripImages();
+        for (var index = 0; index < _currentImagePaths.Count; index++)
+        {
+            StripImages.Add(new ReaderStripImageItemViewModel(index, _currentImagePaths[index]));
+        }
+    }
+
+    private void ClearStripImages()
+    {
+        foreach (var item in StripImages)
+        {
+            item.Unload();
+        }
+        StripImages.Clear();
+    }
+
+    private void NotifyImageNavigationChanged()
+    {
+        OnPropertyChanged(nameof(PageIndicator));
+        OnPropertyChanged(nameof(HasPreviousImage));
+        OnPropertyChanged(nameof(HasNextImage));
+        OnPropertyChanged(nameof(HasPreviousImageOrChapter));
+        OnPropertyChanged(nameof(HasNextImageOrChapter));
+        PreviousImageCommand.NotifyCanExecuteChanged();
+        NextImageCommand.NotifyCanExecuteChanged();
+    }
+}
+
+public partial class ReaderStripImageItemViewModel : ObservableObject
+{
+    private CancellationTokenSource? _loadCts;
+
+    public ReaderStripImageItemViewModel(int index, string path)
+    {
+        Index = index;
+        Path = path;
+    }
+
+    public int Index { get; }
+
+    public string Path { get; }
+
+    public string PageLabel => $"第 {Index + 1} 页";
+
+    [ObservableProperty]
+    public partial BitmapImage? Image { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsLoading { get; set; }
+
+    [ObservableProperty]
+    public partial string Error { get; set; } = string.Empty;
+
+    public bool HasError => !string.IsNullOrWhiteSpace(Error);
+
+    internal CancellationToken? BeginLoad(CancellationToken chapterToken)
+    {
+        if (Image is not null || IsLoading) return null;
+
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(chapterToken);
+        IsLoading = true;
+        Error = string.Empty;
+        OnPropertyChanged(nameof(HasError));
+        return _loadCts.Token;
+    }
+
+    internal bool CanComplete(CancellationToken token) =>
+        _loadCts is not null && _loadCts.Token == token && !token.IsCancellationRequested;
+
+    internal void Complete(CancellationToken token, BitmapImage bitmap)
+    {
+        if (!CanComplete(token)) return;
+        Image = bitmap;
+        IsLoading = false;
+        ReleaseLoadSource();
+    }
+
+    internal void Fail(CancellationToken token, string error)
+    {
+        if (!CanComplete(token)) return;
+        Error = $"第 {Index + 1} 页加载失败：{error}";
+        IsLoading = false;
+        OnPropertyChanged(nameof(HasError));
+        ReleaseLoadSource();
+    }
+
+    internal void Unload()
+    {
+        _loadCts?.Cancel();
+        ReleaseLoadSource();
+        Image = null;
+        IsLoading = false;
+    }
+
+    private void ReleaseLoadSource()
+    {
+        _loadCts?.Dispose();
+        _loadCts = null;
     }
 }

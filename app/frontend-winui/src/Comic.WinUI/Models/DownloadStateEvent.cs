@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Comic.WinUI.Models;
 
-public sealed class SseDownloadEvent
+public sealed class DownloadStateEvent
 {
     [JsonPropertyName("event_id")]
     public int EventId { get; set; }

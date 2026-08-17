@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -126,6 +129,12 @@ public sealed class StringToImageSourceConverter : IValueConverter
         {
             try
             {
+                if (File.Exists(url))
+                {
+                    var localImage = new BitmapImage();
+                    _ = LoadLocalImageAsync(localImage, url);
+                    return localImage;
+                }
                 return new BitmapImage(new Uri(url, UriKind.Absolute));
             }
             catch
@@ -134,6 +143,20 @@ public sealed class StringToImageSourceConverter : IValueConverter
             }
         }
         return null;
+    }
+
+    private static async Task LoadLocalImageAsync(BitmapImage image, string path)
+    {
+        try
+        {
+            await using var fileStream = File.OpenRead(path);
+            using var randomAccessStream = fileStream.AsRandomAccessStream();
+            await image.SetSourceAsync(randomAccessStream);
+        }
+        catch
+        {
+            // The existing placeholder remains visible when a local image is unreadable.
+        }
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language)

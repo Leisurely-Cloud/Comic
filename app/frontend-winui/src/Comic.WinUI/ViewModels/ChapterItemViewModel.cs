@@ -8,5 +8,8 @@ public partial class ChapterItemViewModel : ObservableObject
     public partial string Title { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial string Url { get; set; } = string.Empty;
+
+    [ObservableProperty]
     public partial bool IsSelected { get; set; }
 }

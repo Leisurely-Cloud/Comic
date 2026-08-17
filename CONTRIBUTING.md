@@ -1,57 +1,37 @@
 # 贡献指南
 
-感谢你对本项目的关注！
+感谢你对本项目的关注。
 
 ## 开始参与
 
-1. Fork 本仓库
-2. 克隆你的 Fork：`git clone https://github.com/your-username/Comic.git`
-3. 创建分支：`git checkout -b feature/your-feature`
-4. 进行修改
-5. 推送并发起 Pull Request
+1. Fork 本仓库。
+2. 克隆你的 Fork：`git clone https://github.com/your-username/Comic.git`。
+3. 创建分支：`git checkout -b feature/your-feature`。
+4. 修改并运行测试。
+5. 推送分支并发起 Pull Request。
 
-## 报告 Bug
+## 报告问题
 
-请在 Issue 中包含：
-
-- 问题的清晰描述
-- 复现步骤
-- 期望行为与实际行为
-- 你的环境信息（Windows 版本、Python 版本、.NET 版本）
+请提供问题描述、复现步骤、期望与实际行为，以及 Windows 和 .NET 版本。
 
 ## 提交要求
 
-- 每个 commit 聚焦单一变更，附清晰描述
-- 遵循现有代码风格（见下方）
-- 新功能尽量附带测试
-- 行为变更时同步更新文档
+- 每个提交聚焦单一变更并使用清晰描述。
+- 新功能尽量附带测试。
+- 行为变化时同步更新文档。
+- 面向用户的提示使用中文。
 
-## 代码规范
+## C# / WinUI 3 规范
 
-### 后端 (Python)
+- 使用 CommunityToolkit.Mvvm 源生成器。
+- XAML 优先使用 `x:Bind`。
+- 尽量缩小 code-behind，把交互逻辑放入 ViewModel 或服务。
+- 类默认使用 `sealed`，MVVM 需要时使用 `partial`。
+- 异步方法传递 `CancellationToken`，网络和文件操作应提供明确错误信息。
 
-- 所有函数签名添加类型注解
-- 每个模块顶部添加 `from __future__ import annotations`
-- 文档字符串混用中文（面向用户）和英文（基础设施）
-- 测试使用 `unittest.TestCase`（不使用 pytest）
-- 面向用户的错误信息使用中文
+## 修改禁漫天堂服务
 
-### 前端 (C# / WinUI 3)
-
-- 使用 CommunityToolkit.Mvvm 源生成器（`[ObservableProperty]`、`[RelayCommand]`）
-- XAML 中仅使用 `x:Bind`（不使用 `{Binding}`）
-- 最小化 code-behind — 逻辑放在 ViewModel 中
-- 类默认 `sealed`，MVVM 需要时使用 `partial`
-- 面向用户的字符串使用中文
-
-## 添加新站点适配器
-
-1. 创建 `app/backend/support/{站点名}.py`
-2. 继承 `support/base.py` 中的 `BaseSiteAdapter` 并实现接口
-3. 在 `app/backend/support/site_adapters.py` 的 `SITE_ADAPTERS` 字典中注册
-4. 在 `app/backend/tests/` 中添加测试
-
-参考现有适配器（`baozimh.py`、`mangacopy.py`、`manhuagui.py`）。
+协议解析、章节下载和图片还原位于 `app/frontend-winui/src/Comic.WinUI/Services/Native/JmComicService.cs`。修改后请同步更新 `app/frontend-winui/src/Comic.WinUI.Tests/Services/JmComicServiceTests.cs`，并运行完整测试。
 
 ## 许可证
 

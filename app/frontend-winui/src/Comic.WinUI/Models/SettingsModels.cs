@@ -17,3 +17,11 @@ public sealed class SettingsResponse
     [JsonPropertyName("supported_sites")]
     public List<string> SupportedSites { get; set; } = [];
 }
+
+public sealed class SettingsUpdateRequest
+{
+    [JsonPropertyName("storage_root")]
+    public string StorageRoot { get; set; } = string.Empty;
+}
+
+public sealed record SettingOption(string Key, string DisplayName);

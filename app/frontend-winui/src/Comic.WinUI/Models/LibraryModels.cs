@@ -11,11 +11,17 @@ public sealed class LibraryItemDto
     [JsonPropertyName("site_name")]
     public string SiteName { get; set; } = string.Empty;
 
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = string.Empty;
+
     [JsonPropertyName("root_dir")]
     public string RootDir { get; set; } = string.Empty;
 
     [JsonPropertyName("manga_url")]
     public string MangaUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("cover_url")]
+    public string CoverUrl { get; set; } = string.Empty;
 
     [JsonPropertyName("downloaded_chapter_count")]
     public int DownloadedChapterCount { get; set; }

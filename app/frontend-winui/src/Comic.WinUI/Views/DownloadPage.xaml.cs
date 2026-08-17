@@ -1,3 +1,4 @@
+using System;
 using Comic.WinUI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -50,5 +51,23 @@ public sealed partial class DownloadPage : Page
         {
             // Initialization failure is already handled by ViewModel
         }
+    }
+
+    private void OnWorkspaceTabClick(object sender, RoutedEventArgs e)
+    {
+        SetWorkspace(ReferenceEquals(sender, TasksWorkspaceTab));
+    }
+
+    private void SetWorkspace(bool showTasks)
+    {
+        DiscoveryWorkspaceTab.IsChecked = !showTasks;
+        TasksWorkspaceTab.IsChecked = showTasks;
+        DiscoveryWorkspace.Visibility = showTasks ? Visibility.Collapsed : Visibility.Visible;
+        TaskWorkspace.Visibility = showTasks ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnDownloadStarted(object? sender, EventArgs e)
+    {
+        SetWorkspace(showTasks: true);
     }
 }

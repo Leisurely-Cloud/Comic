@@ -8,45 +8,37 @@
     mc:Ignorable="d"
     NavigationCacheMode="Required">
 
-    <Grid Padding="20" RowSpacing="16">
+    <Grid Padding="24,20,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Header -->
-        <StackPanel Grid.Row="0" Spacing="8">
-            <TextBlock Text="排行榜"
-                       Style="{StaticResource TitleTextBlockStyle}"
-                       FontSize="28" />
-            <TextBlock Text="浏览各站点热门漫画排行榜"
-                       Style="{StaticResource BodyTextBlockStyle}"
-                       Opacity="0.7" />
-        </StackPanel>
-
-        <!-- Filters -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
-            <TextBlock Text="站点:"
-                       VerticalAlignment="Center"
-                       Style="{StaticResource BodyTextBlockStyle}" />
-            <ComboBox ItemsSource="{x:Bind ViewModel.SiteOptions, Mode=OneWay}"
-                      SelectedItem="{x:Bind ViewModel.SelectedSite, Mode=TwoWay}"
-                      MinWidth="120" />
-
-            <TextBlock Text="分区:"
-                       VerticalAlignment="Center"
-                       Margin="8,0,0,0"
-                       Style="{StaticResource BodyTextBlockStyle}" />
-            <ComboBox x:Name="SectionComboBox"
-                      ItemsSource="{x:Bind ViewModel.Sections, Mode=OneWay}"
-                      SelectedItem="{x:Bind ViewModel.SelectedSectionItem, Mode=TwoWay}"
-                      DisplayMemberPath="DisplayName"
-                      MinWidth="150" />
-        </StackPanel>
+        <Border Grid.Row="0" Style="{StaticResource HeaderCardBorderStyle}">
+            <Grid ColumnSpacing="20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Text="排行榜" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock Text="浏览禁漫天堂热门内容，点击漫画即可进入章节选择。"
+                               Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="榜单分类" FontSize="12" Opacity="0.65" />
+                    <ComboBox x:Name="SectionComboBox"
+                              ItemsSource="{x:Bind ViewModel.Sections, Mode=OneWay}"
+                              SelectedItem="{x:Bind ViewModel.SelectedSectionItem, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName"
+                              MinWidth="170" />
+                </StackPanel>
+            </Grid>
+        </Border>
 
         <!-- Content -->
-        <Grid Grid.Row="2">
+        <Border Grid.Row="1" Style="{StaticResource CardBorderStyle}">
+        <Grid>
             <!-- Loading -->
             <StackPanel HorizontalAlignment="Center"
                         VerticalAlignment="Center"
@@ -95,8 +87,9 @@
 
                 <ListView Grid.Row="0"
                           ItemsSource="{x:Bind ViewModel.RankingItems, Mode=OneWay}"
-                          SelectionMode="Single"
-                          SelectionChanged="OnRankingItemSelectionChanged"
+                          SelectionMode="None"
+                          IsItemClickEnabled="True"
+                          ItemClick="OnRankingItemClick"
                           Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="vm:RankingItemViewModel"
@@ -115,18 +108,27 @@
                                     <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                                TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{x:Bind DetailSectionLabel, Mode=OneWay}"
-                                               Opacity="0.7" FontSize="12" />
                                     <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}"
                                                Opacity="0.6" FontSize="12" />
                                     <TextBlock Text="{x:Bind DetailHint, Mode=OneWay}"
                                                Opacity="0.6" FontSize="11"
                                                TextTrimming="CharacterEllipsis" MaxLines="1" />
                                 </StackPanel>
-                                <TextBlock Grid.Column="2"
-                                           Text="{x:Bind UpdateTime, Mode=OneWay}"
-                                           Opacity="0.6" FontSize="12"
-                                           VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="2" Spacing="8"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Right">
+                                    <TextBlock Text="{x:Bind UpdateTime, Mode=OneWay}"
+                                               Opacity="0.6" FontSize="12"
+                                               HorizontalAlignment="Right" />
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <TextBlock Text="选择章节"
+                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   FontWeight="SemiBold" FontSize="12" />
+                                        <FontIcon Glyph="&#xE76C;" FontSize="11"
+                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                  VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -141,5 +143,6 @@
                         Visibility="{x:Bind ViewModel.CanLoadMore, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
             </Grid>
         </Grid>
+        </Border>
     </Grid>
 </Page>

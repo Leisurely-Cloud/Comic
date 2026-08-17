@@ -1,5 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -17,13 +19,17 @@ public partial class LibraryPageViewModel : ObservableObject
     private readonly DownloadEventStream _eventStream;
     private int _currentPage = 1;
     private int _totalItems;
-    private readonly int _pageSize = 20;
+    private readonly int _pageSize;
     private CancellationTokenSource? _exportCts;
 
-    public LibraryPageViewModel(BackendClient backendClient, DownloadEventStream eventStream)
+    public LibraryPageViewModel(
+        BackendClient backendClient,
+        DownloadEventStream eventStream,
+        ApplicationSettingsService applicationSettings)
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
+        _pageSize = applicationSettings.LibraryPageSize;
         Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
@@ -56,13 +62,23 @@ public partial class LibraryPageViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ShowExportResult { get; set; }
 
+    [ObservableProperty]
+    public partial string ExportStatusTitle { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string ExportOutputDirectory { get; set; } = string.Empty;
+
     public bool HasItems => Items.Count > 0;
 
     public string PageSummary => $"第 {_currentPage} 页 / 共 {_totalItems} 部";
 
     public string SelectedTitle => SelectedItem?.Title ?? string.Empty;
 
+    public string SelectedAuthor => string.IsNullOrWhiteSpace(SelectedItem?.Author) ? "未识别" : SelectedItem.Author;
+
     public string SelectedSiteName => SelectedItem?.SiteName ?? string.Empty;
+
+    public string SelectedCoverUrl => SelectedItem?.CoverUrl ?? string.Empty;
 
     public string SelectedChapterSummary => SelectedItem is null ? string.Empty : $"{SelectedItem.DownloadedChapterCount} 章";
 
@@ -96,7 +112,7 @@ public partial class LibraryPageViewModel : ObservableObject
         }
         catch (HttpRequestException)
         {
-            PageError = "无法连接后端服务，请确认后端已启动。";
+            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -144,7 +160,7 @@ public partial class LibraryPageViewModel : ObservableObject
         }
         catch (HttpRequestException)
         {
-            UpdateCheckStatus = "无法连接后端服务，请确认后端已启动。";
+            UpdateCheckStatus = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -197,7 +213,9 @@ public partial class LibraryPageViewModel : ObservableObject
     partial void OnSelectedItemChanged(LibraryItemViewModel? value)
     {
         OnPropertyChanged(nameof(SelectedTitle));
+        OnPropertyChanged(nameof(SelectedAuthor));
         OnPropertyChanged(nameof(SelectedSiteName));
+        OnPropertyChanged(nameof(SelectedCoverUrl));
         OnPropertyChanged(nameof(SelectedChapterSummary));
         OnPropertyChanged(nameof(SelectedLastChapter));
     }
@@ -224,27 +242,36 @@ public partial class LibraryPageViewModel : ObservableObject
         {
             IsExporting = true;
             ShowExportResult = true;
+            ExportStatusTitle = "CBZ 导出中";
             ExportStatusText = "正在启动导出...";
+            ExportOutputDirectory = string.Empty;
             ExportProgress = 0;
             PageError = string.Empty;
 
             var response = await _backendClient.ExportCbzAsync(SelectedItem.RootDir, token);
             if (string.IsNullOrEmpty(response.TaskId))
             {
-                PageError = "导出任务创建失败";
+                ExportStatusTitle = "CBZ 导出失败";
+                ExportStatusText = "导出任务创建失败。";
+                PageError = ExportStatusText;
                 IsExporting = false;
                 return;
             }
 
-            await foreach (var sseEvent in _eventStream.SubscribeExportAsync(response.TaskId, token))
+            await foreach (var stateEvent in _eventStream.SubscribeExportAsync(response.TaskId, token))
             {
-                if (sseEvent.JsonPayload is null) continue;
+                if (stateEvent.JsonPayload is null) continue;
 
-                var progress = JsonSerializer.Deserialize<ExportCbzProgress>(sseEvent.JsonPayload);
+                var progress = JsonSerializer.Deserialize<ExportCbzProgress>(stateEvent.JsonPayload);
                 if (progress is null) continue;
 
+                if (!string.IsNullOrWhiteSpace(progress.ExportDir))
+                {
+                    ExportOutputDirectory = progress.ExportDir;
+                }
+
                 ExportStatusText = progress.TotalChapters > 0
-                    ? $"正在导出 {progress.CurrentIndex}/{progress.TotalChapters} 章: {progress.CurrentChapter}"
+                    ? $"正在导出 {progress.CurrentIndex}/{progress.TotalChapters} 章：{progress.CurrentChapter}"
                     : progress.Status == "completed" ? "导出完成" : progress.Status == "failed" ? $"导出失败: {progress.Error}" : "准备中...";
 
                 ExportProgress = progress.TotalChapters > 0
@@ -253,29 +280,39 @@ public partial class LibraryPageViewModel : ObservableObject
 
                 if (progress.Status == "completed")
                 {
-                    ExportStatusText = $"已导出 {progress.ExportedCount} 个 CBZ 到 {progress.ExportDir}";
+                    ExportStatusTitle = "CBZ 导出完成";
+                    ExportStatusText = progress.SkippedChapters.Count > 0
+                        ? $"已生成 {progress.ExportedCount} 个文件，跳过 {progress.SkippedChapters.Count} 个空章节。"
+                        : $"已生成 {progress.ExportedCount} 个 CBZ 文件。";
                     ExportProgress = 100;
                     break;
                 }
 
                 if (progress.Status == "failed")
                 {
-                    PageError = $"导出失败: {progress.Error}";
+                    ExportStatusTitle = "CBZ 导出失败";
+                    ExportStatusText = $"导出失败：{progress.Error}";
+                    PageError = ExportStatusText;
                     break;
                 }
             }
         }
         catch (OperationCanceledException)
         {
+            ExportStatusTitle = "CBZ 导出已取消";
             ExportStatusText = "导出已取消";
         }
         catch (BackendApiException ex)
         {
-            PageError = ex.Error.Message;
+            ExportStatusTitle = "CBZ 导出失败";
+            ExportStatusText = ex.Error.Message;
+            PageError = ExportStatusText;
         }
         catch (Exception ex)
         {
-            PageError = $"导出异常: {ex.Message}";
+            ExportStatusTitle = "CBZ 导出失败";
+            ExportStatusText = $"导出异常：{ex.Message}";
+            PageError = ExportStatusText;
         }
         finally
         {
@@ -287,8 +324,33 @@ public partial class LibraryPageViewModel : ObservableObject
     private void DismissExportResult()
     {
         ShowExportResult = false;
+        ExportStatusTitle = string.Empty;
         ExportStatusText = string.Empty;
+        ExportOutputDirectory = string.Empty;
         ExportProgress = 0;
+    }
+
+    [RelayCommand]
+    private void OpenExportDirectory()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(ExportOutputDirectory) || !Directory.Exists(ExportOutputDirectory))
+            {
+                PageError = "导出目录不存在。";
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = ExportOutputDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            PageError = $"打开导出目录失败：{ex.Message}";
+        }
     }
 }
 
@@ -301,10 +363,18 @@ public partial class LibraryItemViewModel : ObservableObject
     public partial string SiteName { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial string Author { get; set; } = string.Empty;
+
+    public string AuthorDisplay => string.IsNullOrWhiteSpace(Author) ? string.Empty : $"作者：{Author}";
+
+    [ObservableProperty]
     public partial string RootDir { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string MangaUrl { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string CoverUrl { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial int DownloadedChapterCount { get; set; }
@@ -321,8 +391,10 @@ public partial class LibraryItemViewModel : ObservableObject
         {
             Title = dto.Title,
             SiteName = dto.SiteName,
+            Author = dto.Author,
             RootDir = dto.RootDir,
             MangaUrl = dto.MangaUrl,
+            CoverUrl = dto.CoverUrl,
             DownloadedChapterCount = dto.DownloadedChapterCount,
             LastDownloadedChapterTitle = dto.LastDownloadedChapterTitle,
         };

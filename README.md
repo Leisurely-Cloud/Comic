@@ -1,93 +1,75 @@
 # 漫画下载器
 
-> **v2.2.0 已发布！** [下载安装包](https://github.com/Leisurely-Cloud/Comic/releases/latest) — 单文件安装，无需额外依赖。
+面向 Windows 10/11 的禁漫天堂下载与本地阅读工具。应用现已迁移为单进程 C# 架构，无需单独启动后端服务。
 
 ![screenshot](./docs/screenshot.png)
 
-## 功能特性
+## 功能
 
-- **多站点支持** — 包子漫画、MangaCopy、漫画柜等
-- **排行榜浏览** — 按站点和分类浏览热门漫画排行榜
-- **批量下载** — 选择多个章节一键下载
-- **CBZ 导出** — 将下载的漫画导出为 CBZ 格式，实时显示导出进度
-- **本地书库** — 浏览和管理已下载的漫画
-- **内置阅读器** — 直接在应用内阅读已下载的漫画
-- **下载控制** — 支持暂停、继续、停止，实时显示下载进度
-- **搜索历史** — 快速访问之前的搜索记录
-- **代理支持** — 可配置 HTTP 代理访问受限站点
-- **现代化界面** — 原生 WinUI 3 桌面应用，支持明暗主题
+- 禁漫天堂站内搜索、排行榜、章节解析与图片自动还原
+- 批量下载，以及暂停、继续和停止任务
+- 本地书库浏览和内置阅读器
+- CBZ 导出与进度显示
+- 搜索历史和明暗主题
 
-## 项目结构
+## 架构
 
-```
-app/
-├── frontend-winui/    # WinUI 3 桌面客户端 (C#, .NET 9, MVVM)
-└── backend/           # 本地 HTTP API (Python)
-```
+核心代码位于 `app/frontend-winui/`：
 
-- WinUI 客户端通过 REST API 与后端通信，地址 `http://127.0.0.1:18765/`
-- 客户端可自动启动/停止后端进程
-- 下载进度通过 SSE (Server-Sent Events) 实时推送
+- `src/Comic.WinUI/`：WinUI 3 桌面应用
+- `src/Comic.WinUI/Services/Native/`：站点访问、下载调度、书库、持久化和 CBZ 导出
+- `src/Comic.WinUI.Tests/`：协议解析、模型与应用服务测试
 
-## 快速开始
+界面和核心服务运行在同一个进程中，不再依赖本地 HTTP 服务。发布版本采用框架依赖部署，由系统共享 .NET 和 Windows App Runtime。
 
-### 方式一：下载安装包（推荐）
+## 源码运行
 
-从 [Releases](https://github.com/Leisurely-Cloud/Comic/releases/latest) 下载 `ComicDownloader-2.2.0-Setup.exe`，双击安装即可，无需额外依赖。
+开发环境要求：
 
-### 方式二：源码运行
-
-**环境要求：**
-- Windows 10/11
+- Windows 10/11 x64
 - .NET 9 SDK
-- Python 3.10+
-
-**一键启动：**
+- Windows App Runtime 1.8 x64
 
 ```bat
 start-winui.cmd
 ```
 
-**手动运行：**
+也可以手动构建：
 
 ```powershell
-# 后端
-.\.venv\Scripts\python.exe .\app\backend\run_backend.py
-
-# 前端
-dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj
+dotnet build .\app\frontend-winui\src\Comic.WinUI\Comic.WinUI.csproj -c Debug -r win-x64
 ```
 
-**下载存储位置：** `%USERPROFILE%\Downloads\ComicDownloads`（可通过环境变量 `COMIC_DOWNLOAD_DIR` 自定义）
+默认下载目录为 `%USERPROFILE%\Downloads\ComicDownloads`，可通过环境变量 `COMIC_DOWNLOAD_DIR` 自定义。
 
 ## 测试
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s .\app\backend\tests -v
+dotnet test .\app\frontend-winui\src\Comic.WinUI.Tests\Comic.WinUI.Tests.csproj -c Release -r win-x64
 ```
 
 ## 构建安装包
 
-**环境要求：**
-- .NET 9 SDK
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-
-**构建：**
+安装 .NET 9 SDK 和 [Inno Setup 6](https://jrsoftware.org/isinfo.php) 后执行：
 
 ```bat
 build-installer.bat
 ```
 
-输出：`installer-output/ComicDownloader-2.2.0-Setup.exe`
+输出位于 `installer-output/`。安装包不包含系统运行时，目标电脑必须先安装：
+
+- [.NET 9 x64 Runtime](https://dotnet.microsoft.com/download/dotnet/9.0/runtime)
+- [Windows App Runtime 1.8 x64](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads-archive#windows-app-sdk-18)
+
+安装器会检查这两个前置条件；缺少时停止安装并提供微软官方下载页面。
 
 ## 技术栈
 
 | 组件 | 技术 |
-|------|------|
-| 前端 | WinUI 3, C# 12, .NET 9, CommunityToolkit.Mvvm |
-| 后端 | Python 3.10+, 标准库 http.server |
-| 通信 | REST API + SSE |
-| 打包 | 自包含，非打包部署（无 MSIX） |
+| --- | --- |
+| 界面 | WinUI 3、C#、.NET 9、CommunityToolkit.Mvvm |
+| 核心服务 | C#、HttpClient、System.Security.Cryptography、System.IO.Compression |
+| 打包 | .NET/Windows App SDK 框架依赖发布、Inno Setup |
 
 ## 许可证
 
