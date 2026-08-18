@@ -270,6 +270,46 @@
                                       DisplayMemberPath="DisplayName" />
                         </Grid>
                     </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE896;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="图片下载并发数" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="单章内同时下载的图片数量，数值越大下载越快，也越消耗带宽。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.ConcurrencyOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedConcurrency, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE777;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="章节失败重试次数" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="单个章节下载失败后的自动重试次数。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.ChapterRetryOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedChapterRetryCount, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel x:Name="MaintenanceSection" Spacing="8">

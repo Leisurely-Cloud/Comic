@@ -1,4 +1,5 @@
 using Comic.WinUI.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -8,17 +9,31 @@ namespace Comic.WinUI.Views;
 public sealed partial class RankingPage : Page
 {
     public RankingPageViewModel ViewModel { get; }
+    private bool _eventsSubscribed;
 
     public RankingPage()
     {
-        ViewModel = App.GetService<RankingPageViewModel>();
-        ViewModel.DownloadMangaRequested += OnDownloadMangaRequested;
+        // 单例 ViewModel:切走再切回时榜单与选择保持,不重新创建。
+        ViewModel = ((App)Application.Current).Services.GetRequiredService<RankingPageViewModel>();
+        SubscribeEvents();
         InitializeComponent();
         Loaded += OnLoaded;
     }
 
+    private void SubscribeEvents()
+    {
+        if (_eventsSubscribed) return;
+        _eventsSubscribed = true;
+        ViewModel.DownloadMangaRequested += OnDownloadMangaRequested;
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 单例 ViewModel 已加载过数据(切走再切回)时直接复用,避免榜单和选择丢失。
+        if (ViewModel.HasData)
+        {
+            return;
+        }
         await ViewModel.InitializeAsync();
     }
 

@@ -57,7 +57,7 @@
                                Style="{StaticResource BodyTextBlockStyle}"
                                Opacity="0.7"
                                HorizontalAlignment="Center" />
-                    <TextBlock Text="先在上方输入漫画名称"
+                    <TextBlock Text="先在上方输入 JM 编号、链接或漫画名称"
                                FontSize="12" Opacity="0.55"
                                HorizontalAlignment="Center" />
                 </StackPanel>
@@ -90,7 +90,9 @@
                                                TextTrimming="CharacterEllipsis"
                                                MaxLines="2" />
                                     <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Text="{x:Bind LatestChapter, Mode=OneWay}" Opacity="0.7" FontSize="12"
+                                        <TextBlock Text="{x:Bind Author, Mode=OneWay}"
+                                                   Visibility="{x:Bind Author, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
+                                                   Opacity="0.7" FontSize="12"
                                                    TextTrimming="CharacterEllipsis" MaxWidth="140" />
                                         <TextBlock Text="{x:Bind UpdateTime, Mode=OneWay}" Opacity="0.6" FontSize="12" />
                                     </StackPanel>

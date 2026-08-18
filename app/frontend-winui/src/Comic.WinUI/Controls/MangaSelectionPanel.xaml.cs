@@ -26,6 +26,9 @@ public sealed partial class MangaSelectionPanel : UserControl
 
     public event EventHandler? DownloadStarted;
 
+    /// <summary>用户点击「在线阅读」时触发,参数为漫画链接。</summary>
+    public event EventHandler<string>? OnlineReadRequested;
+
     public MangaSelectionPanel()
     {
         InitializeComponent();
@@ -95,6 +98,15 @@ public sealed partial class MangaSelectionPanel : UserControl
             && !string.Equals(previousTaskId, ViewModel.CurrentTaskId, StringComparison.Ordinal))
         {
             DownloadStarted?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void OnOnlineReadClick(object sender, RoutedEventArgs e)
+    {
+        var url = ViewModel?.CurrentManga?.MangaUrl;
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            OnlineReadRequested?.Invoke(this, url);
         }
     }
 }

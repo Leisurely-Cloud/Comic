@@ -59,6 +59,26 @@ public partial class SettingsPageViewModel : ObservableObject
         new("50", "每页 50 部"),
     ];
 
+    public IReadOnlyList<SettingOption> ConcurrencyOptions { get; } =
+    [
+        new("1", "1 张"),
+        new("2", "2 张"),
+        new("3", "3 张"),
+        new("4", "4 张"),
+        new("5", "5 张"),
+        new("6", "6 张"),
+        new("8", "8 张"),
+    ];
+
+    public IReadOnlyList<SettingOption> ChapterRetryOptions { get; } =
+    [
+        new("1", "1 次"),
+        new("2", "2 次"),
+        new("3", "3 次"),
+        new("4", "4 次"),
+        new("5", "5 次"),
+    ];
+
     [ObservableProperty]
     public partial string StorageRoot { get; set; } = string.Empty;
 
@@ -100,6 +120,12 @@ public partial class SettingsPageViewModel : ObservableObject
     [ObservableProperty]
     public partial SettingOption? SelectedLibraryPageSize { get; set; }
 
+    [ObservableProperty]
+    public partial SettingOption? SelectedConcurrency { get; set; }
+
+    [ObservableProperty]
+    public partial SettingOption? SelectedChapterRetryCount { get; set; }
+
     public string DefaultStripZoomText => $"{DefaultStripZoomPercent:0}%";
 
     partial void OnDefaultStripZoomPercentChanged(double value) =>
@@ -121,6 +147,12 @@ public partial class SettingsPageViewModel : ObservableObject
             DefaultStripZoomPercent = _applicationSettings.DefaultStripZoomPercent;
             SelectedLibraryPageSize = LibraryPageSizeOptions.First(
                 option => option.Key == _applicationSettings.LibraryPageSize.ToString());
+            SelectedConcurrency = ConcurrencyOptions.FirstOrDefault(
+                option => option.Key == _applicationSettings.DownloadConcurrency.ToString())
+                ?? ConcurrencyOptions.First(option => option.Key == "3");
+            SelectedChapterRetryCount = ChapterRetryOptions.FirstOrDefault(
+                option => option.Key == _applicationSettings.ChapterRetryCount.ToString())
+                ?? ChapterRetryOptions.First(option => option.Key == "3");
             SettingsError = string.Empty;
             SaveStatus = string.Empty;
         }
@@ -141,18 +173,36 @@ public partial class SettingsPageViewModel : ObservableObject
         SaveStatus = string.Empty;
         try
         {
-            var settings = await _backendClient.UpdateSettingsAsync(
-                new SettingsUpdateRequest { StorageRoot = StorageRoot },
-                cancellationToken);
-            StorageRoot = settings.StorageRoot;
+            // 1. 保存所有常规设置(主题/分页/阅读器/下载参数),不受下载任务状态影响。
             _applicationSettings.UpdatePreferences(
                 SelectedTheme?.Key ?? ApplicationSettingsService.SystemTheme,
                 SelectedChapterSelection?.Key ?? ApplicationSettingsService.SelectNone,
                 ExpandNavigationPane,
                 SelectedReaderMode?.Key ?? ApplicationSettingsService.ReaderPaged,
                 (int)Math.Round(DefaultStripZoomPercent),
-                int.TryParse(SelectedLibraryPageSize?.Key, out var pageSize) ? pageSize : 20);
-            _shellViewModel.StorageRoot = StorageRoot;
+                int.TryParse(SelectedLibraryPageSize?.Key, out var pageSize) ? pageSize : 20,
+                int.TryParse(SelectedConcurrency?.Key, out var concurrency) ? concurrency : 3,
+                int.TryParse(SelectedChapterRetryCount?.Key, out var retryCount) ? retryCount : 3);
+
+            // 2. 尝试更新下载目录。存在未结束的下载任务时会被拒绝,
+            //    单独提示即可,不能因为目录更新失败而丢失其他设置。
+            try
+            {
+                var settings = await _backendClient.UpdateSettingsAsync(
+                    new SettingsUpdateRequest { StorageRoot = StorageRoot },
+                    cancellationToken);
+                StorageRoot = settings.StorageRoot;
+                _shellViewModel.StorageRoot = StorageRoot;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SettingsError = $"下载目录未更新: {ex.Message}";
+            }
+
             _shellViewModel.IsNavigationPaneOpen = ExpandNavigationPane;
             SaveStatus = "设置已保存并立即生效。";
         }
@@ -179,6 +229,8 @@ public partial class SettingsPageViewModel : ObservableObject
         SelectedReaderMode = ReaderModeOptions.First();
         DefaultStripZoomPercent = 100;
         SelectedLibraryPageSize = LibraryPageSizeOptions.First(option => option.Key == "20");
+        SelectedConcurrency = ConcurrencyOptions.First(option => option.Key == "3");
+        SelectedChapterRetryCount = ChapterRetryOptions.First(option => option.Key == "3");
         SettingsError = string.Empty;
         SaveStatus = "已恢复默认值，点击“保存设置”后生效。";
     }

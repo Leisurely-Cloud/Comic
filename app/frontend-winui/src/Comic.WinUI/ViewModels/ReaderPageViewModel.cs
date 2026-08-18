@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
 using Comic.WinUI.Services;
+using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
@@ -18,14 +19,21 @@ public partial class ReaderPageViewModel : ObservableObject
 {
     private const int StripZoomMinimum = 50;
     private const int StripZoomMaximum = 200;
+    private const int PagedZoomMinimum = 50;
+    private const int PagedZoomMaximum = 300;
 
     private readonly BackendClient _backendClient;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly ReadingProgressService _readingProgressService;
 
     private CancellationTokenSource? _imageCts;
+    private CancellationTokenSource? _preloadCts;
+    private byte[]? _nextImageCache;
+    private int _nextImageCacheIndex = -1;
     private string _rootDir = string.Empty;
+    private bool _isOnlineMode;
     private List<string> _currentImagePaths = [];
+    private List<JmImageSource> _currentImageSources = [];
     private int _pendingImageIndex = -1;
 
     public ReaderPageViewModel(
@@ -73,17 +81,29 @@ public partial class ReaderPageViewModel : ObservableObject
     [ObservableProperty]
     public partial int StripZoomPercent { get; set; } = 100;
 
+    [ObservableProperty]
+    public partial int PagedZoomPercent { get; set; } = 100;
+
     public string StripZoomText => $"{StripZoomPercent}%";
+
+    public string PagedZoomText => $"{PagedZoomPercent}%";
 
     public bool CanZoomStripOut => StripZoomPercent > StripZoomMinimum;
 
     public bool CanZoomStripIn => StripZoomPercent < StripZoomMaximum;
+
+    public bool CanZoomPagedOut => PagedZoomPercent > PagedZoomMinimum;
+
+    public bool CanZoomPagedIn => PagedZoomPercent < PagedZoomMaximum;
 
     public bool HasPreviousImage => CurrentImageIndex > 0;
 
     public bool HasNextImage => CurrentImageIndex < TotalImages - 1;
 
     public string PageIndicator => TotalImages > 0 ? $"{CurrentImageIndex + 1} / {TotalImages}" : "";
+
+    /// <summary>在线模式第一版仅支持分页,条漫开关禁用。</summary>
+    public bool CanToggleReaderMode => !_isOnlineMode;
 
     public bool HasChapters => Chapters.Count > 0;
 
@@ -122,6 +142,8 @@ public partial class ReaderPageViewModel : ObservableObject
     public async Task LoadAsync(string rootDir, CancellationToken cancellationToken = default)
     {
         _rootDir = rootDir;
+        _isOnlineMode = false;
+        OnPropertyChanged(nameof(CanToggleReaderMode));
         IsLoading = true;
         PageError = string.Empty;
 
@@ -183,6 +205,95 @@ public partial class ReaderPageViewModel : ObservableObject
         }
     }
 
+    /// <summary>在线模式:按漫画链接加载章节列表,不依赖本地书库。</summary>
+    [RelayCommand]
+    public async Task LoadOnlineAsync(string mangaUrl, CancellationToken cancellationToken = default)
+    {
+        _rootDir = mangaUrl;
+        _isOnlineMode = true;
+        OnPropertyChanged(nameof(CanToggleReaderMode));
+        IsStripMode = false; // 在线模式第一版仅支持分页
+        IsLoading = true;
+        PageError = string.Empty;
+
+        try
+        {
+            var detail = await _backendClient.ResolveMangaAsync(
+                new MangaResolveRequest
+                {
+                    Url = mangaUrl,
+                    SiteKey = SiteCatalog.Key,
+                },
+                cancellationToken);
+            MangaTitle = detail.Title;
+
+            Chapters.Clear();
+            var order = 0;
+            foreach (var chapter in detail.Chapters)
+            {
+                order++;
+                Chapters.Add(new ReaderChapterDto
+                {
+                    DirName = ExtractChapterId(chapter.Url),
+                    Title = chapter.Title,
+                    Order = order,
+                    ImageCount = 0,
+                });
+            }
+            OnPropertyChanged(nameof(HasChapters));
+
+            if (Chapters.Count > 0)
+            {
+                var selectedChapter = Chapters[0];
+                var progress = _readingProgressService.Get(mangaUrl);
+                if (progress is not null)
+                {
+                    foreach (var chapter in Chapters)
+                    {
+                        if (!string.Equals(
+                                chapter.DirName,
+                                progress.ChapterDirectoryName,
+                                StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        selectedChapter = chapter;
+                        _pendingImageIndex = progress.PageIndex;
+                        break;
+                    }
+                }
+
+                SelectedChapter = selectedChapter;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = ex.Error.Message;
+        }
+        catch (HttpRequestException)
+        {
+            PageError = "内置服务调用失败。";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"加载在线章节异常: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private static string ExtractChapterId(string url)
+    {
+        var parsed = JmComicService.ParseMangaId(url);
+        return parsed.StartChapterId ?? parsed.MangaId ?? string.Empty;
+    }
+
     partial void OnSelectedChapterChanged(ReaderChapterDto? value)
     {
         OnPropertyChanged(nameof(HasPreviousChapter));
@@ -198,6 +309,13 @@ public partial class ReaderPageViewModel : ObservableObject
 
     partial void OnIsStripModeChanged(bool value)
     {
+        // 在线模式第一版仅支持分页,禁止切换条漫。
+        if (_isOnlineMode)
+        {
+            IsStripMode = false;
+            return;
+        }
+
         if (_currentImagePaths.Count == 0) return;
 
         if (value)
@@ -222,6 +340,13 @@ public partial class ReaderPageViewModel : ObservableObject
         OnPropertyChanged(nameof(CanZoomStripIn));
     }
 
+    partial void OnPagedZoomPercentChanged(int value)
+    {
+        OnPropertyChanged(nameof(PagedZoomText));
+        OnPropertyChanged(nameof(CanZoomPagedOut));
+        OnPropertyChanged(nameof(CanZoomPagedIn));
+    }
+
     public void ChangeStripZoom(int delta)
     {
         StripZoomPercent = Math.Clamp(
@@ -232,15 +357,28 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public void ResetStripZoom() => StripZoomPercent = 100;
 
+    /// <summary>分页模式缩放(50%–300%),100% 表示图片适应阅读区。</summary>
+    public void ChangePagedZoom(int delta)
+    {
+        PagedZoomPercent = Math.Clamp(
+            PagedZoomPercent + delta,
+            PagedZoomMinimum,
+            PagedZoomMaximum);
+    }
+
+    public void ResetPagedZoom() => PagedZoomPercent = 100;
+
     private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default)
     {
         _imageCts?.Cancel();
         _imageCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _imageCts.Token;
+        ClearImageCache();
 
         IsLoading = true;
         PageError = string.Empty;
         _currentImagePaths = [];
+        _currentImageSources = [];
         ClearStripImages();
         TotalImages = 0;
         CurrentImageIndex = 0;
@@ -248,14 +386,24 @@ public partial class ReaderPageViewModel : ObservableObject
 
         try
         {
-            var result = await _backendClient.GetChapterImagesAsync(_rootDir, chapter.DirName, token);
-            _currentImagePaths = result.Images;
-            TotalImages = _currentImagePaths.Count;
+            if (_isOnlineMode)
+            {
+                var sources = await _backendClient.GetOnlineChapterImageSourcesAsync(chapter.DirName, token);
+                _currentImageSources = sources.ToList();
+            }
+            else
+            {
+                var result = await _backendClient.GetChapterImagesAsync(_rootDir, chapter.DirName, token);
+                _currentImagePaths = result.Images;
+            }
+
+            var totalCount = _isOnlineMode ? _currentImageSources.Count : _currentImagePaths.Count;
+            TotalImages = totalCount;
             OnPropertyChanged(nameof(PageIndicator));
 
-            if (_currentImagePaths.Count > 0)
+            if (totalCount > 0)
             {
-                var startIndex = _pendingImageIndex >= 0 && _pendingImageIndex < _currentImagePaths.Count
+                var startIndex = _pendingImageIndex >= 0 && _pendingImageIndex < totalCount
                     ? _pendingImageIndex : 0;
                 _pendingImageIndex = -1;
                 CurrentImageIndex = startIndex;
@@ -380,12 +528,24 @@ public partial class ReaderPageViewModel : ObservableObject
 
     private async Task ShowImageAsync(int index, CancellationToken cancellationToken)
     {
-        if (index < 0 || index >= _currentImagePaths.Count) return;
+        var totalCount = _isOnlineMode ? _currentImageSources.Count : _currentImagePaths.Count;
+        if (index < 0 || index >= totalCount) return;
 
         IsLoading = true;
         try
         {
-            var bytes = await _backendClient.GetImageBytesAsync(_currentImagePaths[index], cancellationToken);
+            // 优先使用预加载缓存,否则实时拉取。
+            byte[] bytes;
+            if (index == _nextImageCacheIndex && _nextImageCache is not null)
+            {
+                bytes = _nextImageCache;
+                _nextImageCache = null;
+                _nextImageCacheIndex = -1;
+            }
+            else
+            {
+                bytes = await GetImageBytesAtAsync(index, cancellationToken);
+            }
 
             _dispatcherQueue.TryEnqueue(() =>
             {
@@ -399,6 +559,12 @@ public partial class ReaderPageViewModel : ObservableObject
                 bitmap.SetSource(stream.AsRandomAccessStream());
                 SaveReadingProgress(index);
             });
+
+            // 后台预取下一张,让连续翻页不等待。
+            if (index + 1 < totalCount)
+            {
+                _ = PreloadImageAsync(index + 1);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -411,6 +577,47 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             _dispatcherQueue.TryEnqueue(() => IsLoading = false);
         }
+    }
+
+    /// <summary>按当前模式(在线/本地)读取指定索引的图片字节。</summary>
+    private async Task<byte[]> GetImageBytesAtAsync(int index, CancellationToken cancellationToken)
+    {
+        if (_isOnlineMode)
+        {
+            return await _backendClient.GetOnlineImageBytesAsync(_currentImageSources[index], cancellationToken);
+        }
+        return await _backendClient.GetImageBytesAsync(_currentImagePaths[index], cancellationToken);
+    }
+
+    /// <summary>预取指定图片到内存缓存;新的预载会取消上一次,避免快速翻页时的竞态。</summary>
+    private async Task PreloadImageAsync(int index)
+    {
+        _preloadCts?.Cancel();
+        _preloadCts = new CancellationTokenSource();
+        var token = _preloadCts.Token;
+        try
+        {
+            var bytes = await GetImageBytesAtAsync(index, token);
+            if (token.IsCancellationRequested) return;
+            _nextImageCache = bytes;
+            _nextImageCacheIndex = index;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            _nextImageCache = null;
+            _nextImageCacheIndex = -1;
+        }
+    }
+
+    private void ClearImageCache()
+    {
+        _preloadCts?.Cancel();
+        _preloadCts = null;
+        _nextImageCache = null;
+        _nextImageCacheIndex = -1;
     }
 
     public async Task LoadStripImageAsync(ReaderStripImageItemViewModel item)
@@ -572,3 +779,6 @@ public partial class ReaderStripImageItemViewModel : ObservableObject
         _loadCts = null;
     }
 }
+
+/// <summary>阅读器导航参数:本地书库目录与在线漫画链接二选一。</summary>
+public sealed record ReaderNavigationArgs(string? LocalRootDir, string? OnlineMangaUrl);

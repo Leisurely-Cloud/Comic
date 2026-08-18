@@ -35,7 +35,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Width="250" Spacing="2" VerticalAlignment="Center">
                 <TextBlock Text="找漫画" Style="{StaticResource TitleTextBlockStyle}" />
-                <TextBlock Text="按“搜索 → 选择漫画 → 勾选章节 → 创建任务”的顺序完成下载。"
+                <TextBlock Text="输入 JM 编号、链接或关键词找到漫画，勾选章节后创建下载任务。"
                            Style="{StaticResource PageDescriptionTextBlockStyle}" />
             </StackPanel>
             <Border Grid.Column="1"
@@ -93,7 +93,8 @@
                                                 ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
                     <controls:MangaSelectionPanel Grid.Column="1"
                                                   ViewModel="{x:Bind ViewModel, Mode=OneWay}"
-                                                  DownloadStarted="OnDownloadStarted" />
+                                                  DownloadStarted="OnDownloadStarted"
+                                                  OnlineReadRequested="OnOnlineReadRequested" />
                 </Grid>
             </Grid>
 

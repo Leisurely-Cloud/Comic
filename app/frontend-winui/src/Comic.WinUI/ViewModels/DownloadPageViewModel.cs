@@ -9,8 +9,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
 using Comic.WinUI.Services;
+using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Dispatching;
 
 namespace Comic.WinUI.ViewModels;
@@ -22,6 +24,7 @@ public partial class DownloadPageViewModel : ObservableObject
     private readonly ShellViewModel _shellViewModel;
     private readonly SearchHistoryService _searchHistoryService;
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly ILogger<DownloadPageViewModel> _logger;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -41,13 +44,15 @@ public partial class DownloadPageViewModel : ObservableObject
         DownloadEventStream eventStream,
         ShellViewModel shellViewModel,
         SearchHistoryService searchHistoryService,
-        ApplicationSettingsService applicationSettings)
+        ApplicationSettingsService applicationSettings,
+        ILogger<DownloadPageViewModel> logger)
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
         _shellViewModel = shellViewModel;
         _searchHistoryService = searchHistoryService;
         _applicationSettings = applicationSettings;
+        _logger = logger;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         HistoryItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistoryItems));
         LoadSearchHistory();
@@ -224,6 +229,13 @@ public partial class DownloadPageViewModel : ObservableObject
 
         keyword = keyword.Trim();
 
+        // 输入是 JM 编号或禁漫天堂链接时,直接精确解析,不走站点关键词搜索。
+        if (JmComicService.ParseMangaId(keyword).MangaId is not null)
+        {
+            await SearchByJmIdAsync(keyword, cancellationToken);
+            return;
+        }
+
         _searchCts?.Cancel();
         _searchCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _searchCts.Token;
@@ -264,23 +276,84 @@ public partial class DownloadPageViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            System.Diagnostics.Debug.WriteLine("[SearchAsync] cancelled");
+            _logger.LogInformation("[SearchAsync] cancelled");
         }
         catch (BackendApiException ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] BackendApiException: {ex.Error.Message}");
+            _logger.LogWarning("[SearchAsync] BackendApiException: {Message}", ex.Error.Message);
             PageError = $"搜索出错: {ex.Error.Message}";
             SearchStatusText = "搜索失败";
         }
         catch (HttpRequestException ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] HttpRequestException: {ex.Message}");
+            _logger.LogWarning(ex, "[SearchAsync] HttpRequestException");
             PageError = "内置服务调用失败，请重试。";
             SearchStatusText = "搜索失败";
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[SearchAsync] Exception: {ex.GetType().Name}: {ex.Message}");
+            _logger.LogWarning(ex, "[SearchAsync] Exception: {Type}", ex.GetType().Name);
+            PageError = $"搜索异常: {ex.Message}";
+            SearchStatusText = "搜索失败";
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    /// <summary>按 JM 编号或链接精确解析漫画,结果同时进入搜索结果列表与选章面板。</summary>
+    private async Task SearchByJmIdAsync(string input, CancellationToken cancellationToken = default)
+    {
+        _searchCts?.Cancel();
+        _searchCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = _searchCts.Token;
+
+        IsSearching = true;
+        PageError = string.Empty;
+        SearchResults.Clear();
+        HasSearchResults = false;
+        SearchStatusText = "正在解析 JM 编号...";
+        SelectedSearchResult = null;
+        CurrentManga = null;
+
+        try
+        {
+            var detail = await _backendClient.ResolveMangaAsync(
+                new MangaResolveRequest
+                {
+                    Url = input,
+                    SiteKey = SiteCatalog.Key,
+                },
+                token);
+
+            CurrentManga = detail;
+            SearchResults.Add(SearchResultItemViewModel.FromResolved(detail));
+            HasSearchResults = true;
+            SearchStatusText = $"已定位漫画: {detail.Title}";
+            _searchHistoryService.Add(input, SiteCatalog.Key, SiteCatalog.DisplayName, 1);
+            LoadSearchHistory();
+            OnPropertyChanged(nameof(CanLoadMoreSearchResults));
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("[SearchByJmIdAsync] cancelled");
+        }
+        catch (BackendApiException ex)
+        {
+            _logger.LogWarning("[SearchByJmIdAsync] BackendApiException: {Message}", ex.Error.Message);
+            PageError = $"搜索出错: {ex.Error.Message}";
+            SearchStatusText = "搜索失败";
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[SearchByJmIdAsync] HttpRequestException");
+            PageError = "内置服务调用失败，请重试。";
+            SearchStatusText = "搜索失败";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SearchByJmIdAsync] Exception: {Type}", ex.GetType().Name);
             PageError = $"搜索异常: {ex.Message}";
             SearchStatusText = "搜索失败";
         }

@@ -42,6 +42,7 @@
                               OffContent="单页"
                               OnContent="条漫"
                               IsOn="{x:Bind ViewModel.IsStripMode, Mode=TwoWay}"
+                              IsEnabled="{x:Bind ViewModel.CanToggleReaderMode, Mode=OneWay}"
                               Toggled="OnReaderModeToggled"
                               VerticalAlignment="Center" />
             </Grid>
@@ -90,6 +91,25 @@
                             IsEnabled="{x:Bind ViewModel.CanZoomStripIn, Mode=OneWay}"
                             ToolTipService.ToolTip="放大（Ctrl + 滚轮向上）" />
                 </StackPanel>
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                    <Button Width="34" Padding="0"
+                            Content="−"
+                            Click="OnPagedZoomOutClick"
+                            IsEnabled="{x:Bind ViewModel.CanZoomPagedOut, Mode=OneWay}"
+                            ToolTipService.ToolTip="缩小（Ctrl + 滚轮向下）" />
+                    <Button MinWidth="62" Padding="8,4"
+                            Content="{x:Bind ViewModel.PagedZoomText, Mode=OneWay}"
+                            Click="OnPagedZoomResetClick"
+                            ToolTipService.ToolTip="适应阅读区（100%）" />
+                    <Button Width="34" Padding="0"
+                            Content="+"
+                            Click="OnPagedZoomInClick"
+                            IsEnabled="{x:Bind ViewModel.CanZoomPagedIn, Mode=OneWay}"
+                            ToolTipService.ToolTip="放大（Ctrl + 滚轮向上）" />
+                </StackPanel>
                 <Button Grid.Column="3" Content="上一章"
                         Click="OnPreviousChapterClick"
                         IsEnabled="{x:Bind ViewModel.HasPreviousChapter, Mode=OneWay}" />
@@ -117,11 +137,22 @@
                 <FontIcon Glyph="&#xE76B;" FontSize="24" />
             </Button>
 
-            <Image Grid.Column="1"
-                   Source="{x:Bind ViewModel.CurrentImage, Mode=OneWay}"
-                   Stretch="Uniform"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center" />
+            <ScrollViewer x:Name="PagedScrollViewer" Grid.Column="1"
+                          HorizontalScrollMode="Auto"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollMode="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          ZoomMode="Disabled"
+                          SizeChanged="OnPagedViewportSizeChanged">
+                <Grid Tapped="OnImageAreaTapped" Background="Transparent">
+                    <Image x:Name="PagedImage"
+                           Source="{x:Bind ViewModel.CurrentImage, Mode=OneWay}"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           ImageOpened="OnPagedImageOpened" />
+                </Grid>
+            </ScrollViewer>
 
             <Button Grid.Column="2" VerticalAlignment="Center" Margin="0,0,8,0"
                     Click="OnNextImageClick"

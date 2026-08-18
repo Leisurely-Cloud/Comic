@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
 using Comic.WinUI.Services;
+using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -17,6 +18,8 @@ public partial class LibraryPageViewModel : ObservableObject
 {
     private readonly BackendClient _backendClient;
     private readonly DownloadEventStream _eventStream;
+    private readonly ApplicationSettingsService _applicationSettings;
+    private readonly ReadingProgressService _readingProgressService;
     private int _currentPage = 1;
     private int _totalItems;
     private readonly int _pageSize;
@@ -25,10 +28,13 @@ public partial class LibraryPageViewModel : ObservableObject
     public LibraryPageViewModel(
         BackendClient backendClient,
         DownloadEventStream eventStream,
-        ApplicationSettingsService applicationSettings)
+        ApplicationSettingsService applicationSettings,
+        ReadingProgressService readingProgressService)
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
+        _applicationSettings = applicationSettings;
+        _readingProgressService = readingProgressService;
         _pageSize = applicationSettings.LibraryPageSize;
         Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
@@ -84,6 +90,10 @@ public partial class LibraryPageViewModel : ObservableObject
 
     public string SelectedLastChapter => SelectedItem?.LastDownloadedChapterTitle ?? string.Empty;
 
+    public string SelectedContinueReading => SelectedItem?.ContinueReadingText ?? string.Empty;
+
+    public string SelectedFavoriteButtonText => SelectedItem?.FavoriteButtonText ?? "收藏";
+
     [RelayCommand]
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -95,7 +105,9 @@ public partial class LibraryPageViewModel : ObservableObject
             Items.Clear();
             foreach (var item in result.Items)
             {
-                Items.Add(LibraryItemViewModel.FromDto(item));
+                var viewModel = LibraryItemViewModel.FromDto(item);
+                viewModel.ContinueReadingText = BuildContinueReadingText(item.RootDir);
+                Items.Add(viewModel);
             }
 
             _totalItems = result.Total;
@@ -122,6 +134,35 @@ public partial class LibraryPageViewModel : ObservableObject
         {
             IsLoading = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task ToggleFavoriteAsync(CancellationToken cancellationToken = default)
+    {
+        if (SelectedItem is null || string.IsNullOrWhiteSpace(SelectedItem.RootDir)) return;
+        var selectedRoot = SelectedItem.RootDir;
+        try
+        {
+            var isFavorite = await _backendClient.ToggleFavoriteAsync(selectedRoot, cancellationToken);
+            SelectedItem.IsFavorite = isFavorite;
+            await LoadAsync(cancellationToken);
+            SelectedItem = Items.FirstOrDefault(item => item.RootDir == selectedRoot) ?? Items.FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            PageError = $"收藏操作失败: {ex.Message}";
+        }
+    }
+
+    private string BuildContinueReadingText(string rootDir)
+    {
+        var progress = _readingProgressService.Get(rootDir);
+        if (progress is null || string.IsNullOrWhiteSpace(progress.ChapterDirectoryName)) return string.Empty;
+        var chapterTitle = LibraryStorageService.ChapterTitle(progress.ChapterDirectoryName);
+        return $"上次读到 {chapterTitle} · 第 {progress.PageIndex + 1} 页";
     }
 
     [RelayCommand]
@@ -218,6 +259,8 @@ public partial class LibraryPageViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedCoverUrl));
         OnPropertyChanged(nameof(SelectedChapterSummary));
         OnPropertyChanged(nameof(SelectedLastChapter));
+        OnPropertyChanged(nameof(SelectedContinueReading));
+        OnPropertyChanged(nameof(SelectedFavoriteButtonText));
     }
 
     [RelayCommand]
@@ -385,6 +428,16 @@ public partial class LibraryItemViewModel : ObservableObject
     [ObservableProperty]
     public partial string UpdateCheckStatus { get; set; } = string.Empty;
 
+    [ObservableProperty]
+    public partial bool IsFavorite { get; set; }
+
+    [ObservableProperty]
+    public partial string ContinueReadingText { get; set; } = string.Empty;
+
+    public string FavoriteButtonText => IsFavorite ? "取消收藏" : "收藏";
+
+    partial void OnIsFavoriteChanged(bool value) => OnPropertyChanged(nameof(FavoriteButtonText));
+
     public static LibraryItemViewModel FromDto(LibraryItemDto dto)
     {
         return new LibraryItemViewModel
@@ -397,6 +450,7 @@ public partial class LibraryItemViewModel : ObservableObject
             CoverUrl = dto.CoverUrl,
             DownloadedChapterCount = dto.DownloadedChapterCount,
             LastDownloadedChapterTitle = dto.LastDownloadedChapterTitle,
+            IsFavorite = dto.IsFavorite,
         };
     }
 }

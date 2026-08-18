@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 
 namespace Comic.WinUI.Views;
@@ -19,10 +20,9 @@ public sealed partial class ReaderPage : Page
     public ReaderPage()
     {
         InitializeComponent();
-        StripScrollViewer.AddHandler(
-            UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler(OnStripPointerWheelChanged),
-            true);
+        var wheelHandler = new PointerEventHandler(OnPointerWheelChanged);
+        StripScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, wheelHandler, true);
+        PagedScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, wheelHandler, true);
         Loaded += OnLoaded;
     }
 
@@ -30,9 +30,17 @@ public sealed partial class ReaderPage : Page
     {
         ViewModel = ((App)Application.Current).Services.GetRequiredService<ReaderPageViewModel>();
         ViewModel.StripPositionRestoreRequested += OnStripPositionRestoreRequested;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Bindings.Update();
 
-        if (e.Parameter is string rootDir)
+        _rootDir = null;
+        _onlineMangaUrl = null;
+        if (e.Parameter is ReaderNavigationArgs args)
+        {
+            _rootDir = args.LocalRootDir;
+            _onlineMangaUrl = args.OnlineMangaUrl;
+        }
+        else if (e.Parameter is string rootDir)
         {
             _rootDir = rootDir;
         }
@@ -44,14 +52,20 @@ public sealed partial class ReaderPage : Page
     {
         SaveCurrentReadingPosition();
         ViewModel.StripPositionRestoreRequested -= OnStripPositionRestoreRequested;
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         base.OnNavigatedFrom(e);
     }
 
-    private string _rootDir = string.Empty;
+    private string? _rootDir;
+    private string? _onlineMangaUrl;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrEmpty(_rootDir))
+        if (!string.IsNullOrEmpty(_onlineMangaUrl))
+        {
+            await ViewModel.LoadOnlineCommand.ExecuteAsync(_onlineMangaUrl);
+        }
+        else if (!string.IsNullOrEmpty(_rootDir))
         {
             await ViewModel.LoadCommand.ExecuteAsync(_rootDir);
         }
@@ -85,6 +99,26 @@ public sealed partial class ReaderPage : Page
         ViewModel.NextChapterCommand.Execute(null);
     }
 
+    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
+        {
+            return;
+        }
+
+        var pointer = e.GetCurrentPoint(StripScrollViewer);
+        var wheelDelta = pointer.Properties.MouseWheelDelta;
+        if (ViewModel.IsStripMode)
+        {
+            ChangeStripZoom(wheelDelta > 0 ? 10 : -10, pointer.Position);
+        }
+        else
+        {
+            ViewModel.ChangePagedZoom(wheelDelta > 0 ? 10 : -10);
+        }
+        e.Handled = true;
+    }
+
     private void OnStripZoomOutClick(object sender, RoutedEventArgs e) =>
         ChangeStripZoom(-10, StripViewportCenter());
 
@@ -94,21 +128,67 @@ public sealed partial class ReaderPage : Page
     private void OnStripZoomResetClick(object sender, RoutedEventArgs e) =>
         ChangeStripZoom(100 - ViewModel.StripZoomPercent, StripViewportCenter());
 
-    private void OnStripPointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        if (!ViewModel.IsStripMode ||
-            !e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
-        {
-            return;
-        }
+    // ---- 分页模式缩放 ----
 
-        var pointer = e.GetCurrentPoint(StripScrollViewer);
-        var wheelDelta = pointer.Properties.MouseWheelDelta;
-        if (wheelDelta != 0)
+    private double _pagedBaseWidth;
+    private double _pagedBaseHeight;
+    private bool _pagedImageReady;
+
+    private void OnPagedZoomOutClick(object sender, RoutedEventArgs e) =>
+        ViewModel.ChangePagedZoom(-10);
+
+    private void OnPagedZoomInClick(object sender, RoutedEventArgs e) =>
+        ViewModel.ChangePagedZoom(10);
+
+    private void OnPagedZoomResetClick(object sender, RoutedEventArgs e) =>
+        ViewModel.ResetPagedZoom();
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ReaderPageViewModel.PagedZoomPercent))
         {
-            ChangeStripZoom(wheelDelta > 0 ? 10 : -10, pointer.Position);
+            DispatcherQueue.TryEnqueue(ApplyPagedZoom);
         }
-        e.Handled = true;
+    }
+
+    private void OnPagedImageOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Image { Source: BitmapImage bitmap }) return;
+        UpdatePagedBaseSize(bitmap);
+        ApplyPagedZoom();
+    }
+
+    private void OnPagedViewportSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (PagedImage.Source is BitmapImage bitmap)
+        {
+            UpdatePagedBaseSize(bitmap);
+            ApplyPagedZoom();
+        }
+    }
+
+    /// <summary>按视口计算 100% 缩放对应的图片基准尺寸(恰好适应阅读区)。</summary>
+    private void UpdatePagedBaseSize(BitmapImage bitmap)
+    {
+        if (bitmap.PixelWidth <= 0 || bitmap.PixelHeight <= 0) return;
+        var viewportWidth = Math.Max(1, PagedScrollViewer.ViewportWidth > 0
+            ? PagedScrollViewer.ViewportWidth
+            : PagedScrollViewer.ActualWidth);
+        var viewportHeight = Math.Max(1, PagedScrollViewer.ViewportHeight > 0
+            ? PagedScrollViewer.ViewportHeight
+            : PagedScrollViewer.ActualHeight);
+        var fitScale = Math.Min(viewportWidth / bitmap.PixelWidth, viewportHeight / bitmap.PixelHeight);
+        _pagedBaseWidth = bitmap.PixelWidth * fitScale;
+        _pagedBaseHeight = bitmap.PixelHeight * fitScale;
+        _pagedImageReady = true;
+    }
+
+    private void ApplyPagedZoom()
+    {
+        if (!_pagedImageReady || ViewModel is null) return;
+        var zoom = ViewModel.PagedZoomPercent / 100d;
+        PagedImage.Width = Math.Max(1, _pagedBaseWidth * zoom);
+        PagedImage.Height = Math.Max(1, _pagedBaseHeight * zoom);
     }
 
     private Windows.Foundation.Point StripViewportCenter() => new(
@@ -323,6 +403,12 @@ public sealed partial class ReaderPage : Page
 
     private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // 章节下拉框聚焦时,Home/End 等按键应留给控件自身,避免误翻页。
+        if (FocusManager.GetFocusedElement() is ComboBox)
+        {
+            return;
+        }
+
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Left:
@@ -347,6 +433,34 @@ public sealed partial class ReaderPage : Page
                 }
                 e.Handled = true;
                 break;
+            case Windows.System.VirtualKey.PageDown:
+                if (!ViewModel.IsStripMode)
+                {
+                    await ViewModel.NextImageCommand.ExecuteAsync(null);
+                    e.Handled = true;
+                }
+                break;
+            case Windows.System.VirtualKey.PageUp:
+                if (!ViewModel.IsStripMode)
+                {
+                    await ViewModel.PreviousImageCommand.ExecuteAsync(null);
+                    e.Handled = true;
+                }
+                break;
+            case Windows.System.VirtualKey.Home:
+                if (!ViewModel.IsStripMode)
+                {
+                    await ViewModel.GoToImageCommand.ExecuteAsync(0);
+                    e.Handled = true;
+                }
+                break;
+            case Windows.System.VirtualKey.End:
+                if (!ViewModel.IsStripMode)
+                {
+                    await ViewModel.GoToImageCommand.ExecuteAsync(ViewModel.TotalImages - 1);
+                    e.Handled = true;
+                }
+                break;
             case Windows.System.VirtualKey.Escape:
                 if (Frame.CanGoBack)
                 {
@@ -355,5 +469,23 @@ public sealed partial class ReaderPage : Page
                 e.Handled = true;
                 break;
         }
+    }
+
+    /// <summary>分页模式点击图片:右半区域翻下一页,左半区域翻上一页。</summary>
+    private async void OnImageAreaTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (ViewModel.IsStripMode || sender is not FrameworkElement element) return;
+
+        var point = e.GetPosition(element);
+        var goNext = point.X >= element.ActualWidth / 2;
+        if (goNext)
+        {
+            await ViewModel.NextImageCommand.ExecuteAsync(null);
+        }
+        else
+        {
+            await ViewModel.PreviousImageCommand.ExecuteAsync(null);
+        }
+        e.Handled = true;
     }
 }

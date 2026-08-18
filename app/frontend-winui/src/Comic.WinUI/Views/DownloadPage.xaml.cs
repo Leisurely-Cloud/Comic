@@ -70,4 +70,12 @@ public sealed partial class DownloadPage : Page
     {
         SetWorkspace(showTasks: true);
     }
+
+    private void OnOnlineReadRequested(object? sender, string mangaUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(mangaUrl))
+        {
+            Frame.Navigate(typeof(ReaderPage), new ReaderNavigationArgs(null, mangaUrl));
+        }
+    }
 }

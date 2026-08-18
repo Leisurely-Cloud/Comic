@@ -48,12 +48,15 @@ public partial class RankingPageViewModel : ObservableObject
 
     public bool HasItems => RankingItems.Count > 0;
 
+    /// <summary>是否已有加载过的榜单数据(用于页面重入时避免重复刷新)。</summary>
+    public bool HasData => RankingItems.Count > 0 || Sections.Count > 0;
+
     public event EventHandler<string>? NavigateToDetailRequested;
     public event EventHandler<string>? DownloadMangaRequested;
 
-    public RankingPageViewModel()
+    public RankingPageViewModel(BackendClient client)
     {
-        _client = App.GetService<BackendClient>();
+        _client = client;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         RankingItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
@@ -104,7 +107,11 @@ public partial class RankingPageViewModel : ObservableObject
             {
                 foreach (var item in result.Items ?? Enumerable.Empty<RankingItem>())
                 {
-                    RankingItems.Add(new RankingItemViewModel(item, NavigateToDetailCommand, DownloadMangaCommand));
+                    RankingItems.Add(new RankingItemViewModel(
+                        item,
+                        NavigateToDetailCommand,
+                        DownloadMangaCommand,
+                        RankingItems.Count + 1));
                 }
             });
         }
@@ -208,9 +215,14 @@ public partial class RankingPageViewModel : ObservableObject
             _dispatcher.TryEnqueue(() =>
             {
                 RankingItems.Clear();
+                var index = 0;
                 foreach (var item in result.Items ?? Enumerable.Empty<RankingItem>())
                 {
-                    RankingItems.Add(new RankingItemViewModel(item, NavigateToDetailCommand, DownloadMangaCommand));
+                    RankingItems.Add(new RankingItemViewModel(
+                        item,
+                        NavigateToDetailCommand,
+                        DownloadMangaCommand,
+                        ++index));
                 }
             });
         }
@@ -241,18 +253,30 @@ public partial class RankingItemViewModel : ObservableObject
     public string Title => _item.Title ?? "";
     public string Url => _item.Url ?? "";
     public string CoverUrl => _item.CoverUrl ?? "";
+    public string Author => _item.Author ?? "";
     public string LatestChapter => _item.LatestChapter ?? "";
     public string UpdateTime => _item.UpdateTime ?? "";
     public string Section => _item.Section ?? "";
     public string DetailHint => _item.DetailHint ?? "";
     public string DetailSectionLabel => _item.DetailSectionLabel ?? "";
 
+    public int Index { get; }
+
+    public string RankText => $"{Index}";
+
+    public string AuthorDisplay => string.IsNullOrWhiteSpace(Author) ? string.Empty : $"作者：{Author}";
+
     public ICommand NavigateCommand { get; }
     public ICommand DownloadCommand { get; }
 
-    public RankingItemViewModel(RankingItem item, ICommand navigateCommand, ICommand downloadCommand)
+    public RankingItemViewModel(
+        RankingItem item,
+        ICommand navigateCommand,
+        ICommand downloadCommand,
+        int index)
     {
         _item = item;
+        Index = index;
         NavigateCommand = navigateCommand;
         DownloadCommand = downloadCommand;
     }

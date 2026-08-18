@@ -18,6 +18,9 @@ public partial class SearchResultItemViewModel : ObservableObject
     public partial string LatestChapter { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial string Author { get; set; } = string.Empty;
+
+    [ObservableProperty]
     public partial string UpdateTime { get; set; } = string.Empty;
 
     public static SearchResultItemViewModel FromSearch(SearchResultItem item)
@@ -28,7 +31,21 @@ public partial class SearchResultItemViewModel : ObservableObject
             MangaUrl = item.Url,
             CoverUrl = item.CoverUrl,
             LatestChapter = item.LatestChapter,
+            Author = item.Author,
             UpdateTime = item.UpdateTime,
+        };
+    }
+
+    /// <summary>从精确解析结果(JM 编号/链接)构建列表项。</summary>
+    public static SearchResultItemViewModel FromResolved(MangaResolveResponse detail)
+    {
+        return new SearchResultItemViewModel
+        {
+            Title = detail.Title,
+            MangaUrl = detail.MangaUrl,
+            CoverUrl = detail.CoverUrl,
+            LatestChapter = detail.LatestChapter,
+            UpdateTime = string.Empty,
         };
     }
 }

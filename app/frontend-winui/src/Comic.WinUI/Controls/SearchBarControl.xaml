@@ -19,12 +19,12 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
                     <TextBlock Text="搜索漫画" Style="{StaticResource SectionHeaderTextBlockStyle}" />
-                    <TextBlock Text="从禁漫天堂查找内容"
+                    <TextBlock Text="支持 JM 编号、链接与关键词"
                                Style="{StaticResource PageDescriptionTextBlockStyle}" />
                 </StackPanel>
                 <AutoSuggestBox Grid.Column="1"
                          x:Name="SearchSuggestBox"
-                         PlaceholderText="输入漫画名称，按 Enter 搜索"
+                         PlaceholderText="输入 JM 编号、链接或名称，按 Enter 搜索"
                          Text="{x:Bind ViewModel.SearchKeyword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          ItemsSource="{x:Bind ViewModel.SearchHistory, Mode=OneWay}"
                          TextChanged="OnSearchTextChanged"
