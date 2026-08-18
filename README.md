@@ -17,7 +17,7 @@
 核心代码位于 `app/frontend-winui/`：
 
 - `src/Comic.WinUI/`：WinUI 3 桌面应用
-- `src/Comic.WinUI/Services/Native/`：站点访问、下载调度、书库、持久化和 CBZ 导出
+- `src/Comic.WinUI/Services/Native/`：职责化的站点协议、下载调度、书库、CBZ 导出与阅读访问服务
 - `src/Comic.WinUI.Tests/`：协议解析、模型与应用服务测试
 
 界面和核心服务运行在同一个进程中，不再依赖本地 HTTP 服务。发布版本采用框架依赖部署，由系统共享 .NET 和 Windows App Runtime。
