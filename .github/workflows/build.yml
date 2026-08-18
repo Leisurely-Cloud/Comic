@@ -28,8 +28,8 @@ jobs:
         Invoke-WebRequest -Uri "https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe" -OutFile $installer
         Start-Process -FilePath $installer -ArgumentList "--quiet" -Wait
     - name: Run WinUI tests
-      # 历史上该测试在 CI runner 上会使 testhost 挂起,先排除;同时验证预装运行时是否解决挂起。
-      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --blame-hang-timeout 2m --blame-hang-dump-type none --filter "FullyQualifiedName!~DownloadTaskItemViewModelTests"
+      # 预装 Windows App Runtime 后 testhost 不再挂起,运行全量测试。
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --blame-hang-timeout 2m --blame-hang-dump-type none
 
   package:
     name: Build installer
