@@ -17,13 +17,11 @@ if (Test-Path -LiteralPath $publishRoot) {
 }
 
 $versionArgs = @()
-if (-not [string]::IsNullOrWhiteSpace($Version)) {
-    # 打 tag 发布时用 tag 版本覆盖 csproj 里的硬编码版本(程序集/文件版本)。
-    $versionArgs = @(
-        "-p:Version=$Version",
-        "-p:AssemblyVersion=$Version",
-        "-p:FileVersion=$Version"
-    )
+if ($Version) {
+    # Override hardcoded version from csproj when releasing via a tag.
+    $versionArgs += "-p:Version=$Version"
+    $versionArgs += "-p:AssemblyVersion=$Version"
+    $versionArgs += "-p:FileVersion=$Version"
     Write-Host "Using release version: $Version"
 }
 
