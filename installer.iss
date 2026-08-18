@@ -3,7 +3,9 @@
 
 #define MyAppName "Comic Downloader"
 #define MyAppNameCN "漫画下载器"
+#ifndef MyAppVersion
 #define MyAppVersion "2.2.0"
+#endif
 #define MyAppPublisher "Leisurely Cloud"
 #define MyAppURL "https://github.com/Leisurely-Cloud/Comic"
 #define MyAppExeName "Comic.WinUI.exe"

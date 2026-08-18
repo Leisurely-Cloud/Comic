@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64"
+    [string]$Runtime = "win-x64",
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +16,18 @@ if (Test-Path -LiteralPath $publishRoot) {
     Remove-Item -LiteralPath $publishRoot -Recurse -Force
 }
 
-dotnet publish $projectPath -c $Configuration -r $Runtime --self-contained false -p:WindowsAppSDKSelfContained=false -o $frontendOutput
+$versionArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    # 打 tag 发布时用 tag 版本覆盖 csproj 里的硬编码版本(程序集/文件版本)。
+    $versionArgs = @(
+        "-p:Version=$Version",
+        "-p:AssemblyVersion=$Version",
+        "-p:FileVersion=$Version"
+    )
+    Write-Host "Using release version: $Version"
+}
+
+dotnet publish $projectPath -c $Configuration -r $Runtime --self-contained false -p:WindowsAppSDKSelfContained=false -o $frontendOutput @versionArgs
 if ($LASTEXITCODE -ne 0) {
     throw "WinUI publish failed with exit code $LASTEXITCODE"
 }

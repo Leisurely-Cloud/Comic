@@ -43,11 +43,22 @@ jobs:
         dotnet-version: '9.0.x'
     - name: Publish framework-dependent C# app
       shell: pwsh
-      run: ./scripts/build-and-package.ps1
+      run: |
+        # 打 tag 发布时用 tag 版本(如 v2.3.0 → 2.3.0)覆盖硬编码版本号。
+        $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { '' }
+        ./scripts/build-and-package.ps1 -Version $version
     - name: Install Inno Setup
       run: choco install innosetup -y
     - name: Build installer
-      run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+      shell: pwsh
+      run: |
+        $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        if ($env:GITHUB_REF_TYPE -eq 'tag') {
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          & $iscc installer.iss "/DMyAppVersion=$version"
+        } else {
+          & $iscc installer.iss
+        }
     - name: Upload installer artifact
       uses: actions/upload-artifact@v4
       with:
