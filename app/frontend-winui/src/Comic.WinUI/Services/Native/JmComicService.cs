@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
+using Microsoft.Extensions.Logging;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
@@ -17,24 +18,7 @@ namespace Comic.WinUI.Services.Native;
 
 public sealed class JmComicService : IDisposable
 {
-    private const string AppTokenSecret = "18comicAPP";
-    private const string AppTokenSecretContent = "18comicAPPContent";
-    private const string AppDataSecret = "185Hcomic3PAPP7R";
-    private const string AppVersion = "2.0.13";
-    private const string PublicSiteDomain = "18comic.vip";
-    private const string CoverDomain = "cdn-msp3.18comic.vip";
-    private const string ImageDomain = "cdn-msp2.jmapiproxy2.cc";
-    private const int DefaultScrambleId = 220_980;
     private const string TempChapterPrefix = ".下载中_";
-
-    private static readonly string[] ApiDomains =
-    [
-        "www.cdnhth.cc",
-        "www.cdnhth.net",
-        "www.cdnbea.net",
-        "www.cdnzack.cc",
-        "www.cdn-mspjmapiproxy.xyz",
-    ];
 
     private static readonly IReadOnlyDictionary<string, string> RankingSections =
         new Dictionary<string, string>
@@ -49,20 +33,23 @@ public sealed class JmComicService : IDisposable
         @"var\s+scramble_id\s*=\s*(\d+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private readonly JmSiteOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly ILogger<JmComicService> _logger;
     private readonly object _stateLock = new();
     private readonly Dictionary<string, (DateTimeOffset SavedAt, JsonElement Payload)> _albumCache = [];
-    private string _preferredApiDomain = ApiDomains[0];
+    private string _preferredApiDomain;
 
-    public JmComicService(HttpClient httpClient)
+    public JmComicService(HttpClient httpClient, JmSiteOptions? options = null, ILogger<JmComicService>? logger = null)
     {
+        _options = options ?? JmSiteOptions.Default;
+        _preferredApiDomain = _options.ApiDomains[0];
         _httpClient = httpClient;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<JmComicService>.Instance;
         _httpClient.Timeout = TimeSpan.FromSeconds(40);
         if (!_httpClient.DefaultRequestHeaders.UserAgent.Any())
         {
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(_options.UserAgent);
         }
         _httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
     }
@@ -132,6 +119,7 @@ public sealed class JmComicService : IDisposable
                 Url = item.Url,
                 CoverUrl = item.CoverUrl,
                 LatestChapter = item.LatestChapter,
+                Author = item.Author,
                 UpdateTime = item.UpdateTime,
                 Section = selectedSection,
                 DetailSectionLabel = "站点: 禁漫天堂",
@@ -165,7 +153,7 @@ public sealed class JmComicService : IDisposable
             Chapters = info.Chapters.Select(chapter => new MangaChapterDto
             {
                 Title = chapter.Title,
-                Url = $"https://{PublicSiteDomain}/photo/{chapter.Id}",
+                Url = $"https://{_options.PublicSiteDomain}/photo/{chapter.Id}",
             }).ToList(),
         };
     }
@@ -288,6 +276,101 @@ public sealed class JmComicService : IDisposable
         _ = await SearchAsync(string.Empty, 1, "mr", cancellationToken);
     }
 
+    /// <summary>
+    /// 获取章节的全部图片源(URL + 乱序还原规则),不写盘,供在线阅读使用。
+    /// </summary>
+    public async Task<IReadOnlyList<JmImageSource>> GetChapterImageSourcesAsync(
+        int chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = await RequestApiAsync(
+            "/chapter",
+            new Dictionary<string, string> { ["id"] = chapterId.ToString() },
+            cancellationToken);
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("禁漫天堂章节结构无效");
+        }
+
+        var imageNames = GetStringArray(payload, "images")
+            .Where(IsSupportedImageName)
+            .ToList();
+        if (imageNames.Count == 0)
+        {
+            throw new InvalidDataException($"禁漫天堂章节 {chapterId} 没有可读取图片");
+        }
+
+        var scrambleId = await GetScrambleIdAsync(chapterId, cancellationToken);
+        var sources = new List<JmImageSource>(imageNames.Count);
+        foreach (var imageName in imageNames)
+        {
+            var extension = Path.GetExtension(imageName).TrimStart('.').ToLowerInvariant();
+            var blockCount = extension == "webp"
+                ? CalculateBlockCount(scrambleId, chapterId, Path.GetFileNameWithoutExtension(imageName))
+                : 0;
+            sources.Add(new JmImageSource(
+                $"https://{_options.ImageDomain}/media/photos/{chapterId}/{imageName}",
+                blockCount));
+        }
+        return sources;
+    }
+
+    /// <summary>
+    /// 下载并还原单张图片,返回内存字节,不写盘。带 3 次重试,供在线阅读使用。
+    /// </summary>
+    public async Task<byte[]> FetchChapterImageAsync(
+        JmImageSource source,
+        CancellationToken cancellationToken = default)
+    {
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var uri = attempt == 0
+                    ? source.Url
+                    : source.Url + "?ts=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/*,*/*;q=0.8");
+                using var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                response.EnsureSuccessStatusCode();
+                using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var buffer = new MemoryStream();
+                var chunk = new byte[64 * 1024];
+                while (true)
+                {
+                    var read = await input.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken);
+                    if (read == 0) break;
+                    await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+                }
+                var imageData = buffer.ToArray();
+                if (imageData.Length == 0) throw new InvalidDataException("图片内容为空");
+
+                return source.BlockCount > 0
+                    ? await RestoreScrambledImageAsync(imageData, source.BlockCount)
+                    : imageData;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (attempt < 2)
+                {
+                    _logger.LogWarning("在线图片下载失败，准备重试（{Attempt}/2）：{Url}", attempt + 1, source.Url);
+                    await Task.Delay(TimeSpan.FromMilliseconds(500 * (attempt + 1)), cancellationToken);
+                }
+            }
+        }
+        throw new HttpRequestException($"图片下载失败: {lastError?.Message}");
+    }
+
     public static (string? MangaId, string? StartChapterId) ParseMangaId(string input)
     {
         var normalized = (input ?? string.Empty).Trim();
@@ -348,7 +431,7 @@ public sealed class JmComicService : IDisposable
             throw new InvalidDataException("JM API 返回的密文长度无效");
         }
 
-        var key = Encoding.ASCII.GetBytes(Md5Hex($"{timestamp}{AppDataSecret}"));
+        var key = Encoding.ASCII.GetBytes(Md5Hex($"{timestamp}{JmSiteOptions.Default.AppDataSecret}"));
         using var aes = Aes.Create();
         aes.Key = key;
         aes.Mode = CipherMode.ECB;
@@ -481,6 +564,7 @@ public sealed class JmComicService : IDisposable
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "禁漫天堂 API 域名 {Domain} 请求失败", domain);
                 errors.Add($"{domain}: {ex.Message}");
             }
         }
@@ -516,7 +600,7 @@ public sealed class JmComicService : IDisposable
                 PromoteDomain(domain);
                 return match.Success && int.TryParse(match.Groups[1].Value, out var value)
                     ? value
-                    : DefaultScrambleId;
+                    : _options.DefaultScrambleId;
             }
             catch (OperationCanceledException)
             {
@@ -524,6 +608,7 @@ public sealed class JmComicService : IDisposable
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "禁漫天堂 API 域名 {Domain} 请求失败", domain);
                 errors.Add($"{domain}: {ex.Message}");
             }
         }
@@ -580,6 +665,7 @@ public sealed class JmComicService : IDisposable
                 }
                 catch when (attempt < 2)
                 {
+                    _logger.LogWarning("图片下载失败，准备重试（{Attempt}/2）：{Url}", attempt + 1, item.Url);
                     await Task.Delay(TimeSpan.FromMilliseconds(500 * (attempt + 1)), cancellationToken);
                 }
             }
@@ -637,7 +723,7 @@ public sealed class JmComicService : IDisposable
         return result;
     }
 
-    private static SearchResultItem BuildSearchResult(JsonElement item)
+    private SearchResultItem BuildSearchResult(JsonElement item)
     {
         var id = GetString(item, "id");
         return new SearchResultItem
@@ -645,7 +731,7 @@ public sealed class JmComicService : IDisposable
             Title = GetString(item, "name") is { Length: > 0 } title ? title : id,
             Url = AlbumUrl(id),
             CoverUrl = CoverUrl(id),
-            LatestChapter = string.Join(", ", GetAuthors(item)),
+            Author = string.Join("、", GetAuthors(item)),
             UpdateTime = FormatTimestamp(GetString(item, "update_at") is { Length: > 0 } updated
                 ? updated
                 : GetString(item, "addtime")),
@@ -692,7 +778,7 @@ public sealed class JmComicService : IDisposable
         return fallback.Title;
     }
 
-    private static List<ImageDownload> BuildImageTasks(
+    private List<ImageDownload> BuildImageTasks(
         IReadOnlyList<string> imageNames,
         int chapterId,
         int scrambleId,
@@ -708,7 +794,7 @@ public sealed class JmComicService : IDisposable
                 : 0;
             var outputExtension = blockCount > 0 ? "jpg" : extension;
             tasks.Add(new ImageDownload(
-                $"https://{ImageDomain}/media/photos/{chapterId}/{imageName}",
+                $"https://{_options.ImageDomain}/media/photos/{chapterId}/{imageName}",
                 Path.Combine(directory, $"{index + 1:000}.{outputExtension}"),
                 blockCount));
         }
@@ -719,7 +805,7 @@ public sealed class JmComicService : IDisposable
     {
         lock (_stateLock)
         {
-            return [_preferredApiDomain, .. ApiDomains.Where(domain => domain != _preferredApiDomain)];
+            return [_preferredApiDomain, .. _options.ApiDomains.Where(domain => domain != _preferredApiDomain)];
         }
     }
 
@@ -728,11 +814,11 @@ public sealed class JmComicService : IDisposable
         lock (_stateLock) _preferredApiDomain = domain;
     }
 
-    private static void AddTokenHeaders(HttpRequestMessage request, long timestamp, bool contentToken)
+    private void AddTokenHeaders(HttpRequestMessage request, long timestamp, bool contentToken)
     {
-        var secret = contentToken ? AppTokenSecretContent : AppTokenSecret;
+        var secret = contentToken ? _options.AppTokenSecretContent : _options.AppTokenSecret;
         request.Headers.TryAddWithoutValidation("token", Md5Hex($"{timestamp}{secret}"));
-        request.Headers.TryAddWithoutValidation("tokenparam", $"{timestamp},{AppVersion}");
+        request.Headers.TryAddWithoutValidation("tokenparam", $"{timestamp},{_options.AppVersion}");
     }
 
     private static string BuildUri(string baseUrl, IReadOnlyDictionary<string, string> parameters)
@@ -815,8 +901,8 @@ public sealed class JmComicService : IDisposable
     private static string Md5Hex(string value) =>
         Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
-    private static string AlbumUrl(string id) => $"https://{PublicSiteDomain}/album/{id}";
-    private static string CoverUrl(string id) => $"https://{CoverDomain}/media/albums/{id}.jpg";
+    private string AlbumUrl(string id) => $"https://{_options.PublicSiteDomain}/album/{id}";
+    private string CoverUrl(string id) => $"https://{_options.CoverDomain}/media/albums/{id}.jpg";
 
     private sealed record ImageDownload(string Url, string Destination, int BlockCount);
 }
@@ -834,3 +920,6 @@ public sealed record JmMangaInfo(
 
 public sealed record JmChapterDownloadResult(int ImageCount, string DirectoryName, string ChapterTitle);
 public sealed record JmImageProgress(int CompletedImages, int TotalImages, long DownloadedBytes);
+
+/// <summary>在线阅读的单张图片来源:URL 与乱序还原所需的分块数。</summary>
+public sealed record JmImageSource(string Url, int BlockCount);

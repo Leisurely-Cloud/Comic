@@ -28,6 +28,9 @@ public sealed class LibraryItemDto
 
     [JsonPropertyName("last_downloaded_chapter_title")]
     public string LastDownloadedChapterTitle { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_favorite")]
+    public bool IsFavorite { get; set; }
 }
 
 public sealed class LibraryListResponse

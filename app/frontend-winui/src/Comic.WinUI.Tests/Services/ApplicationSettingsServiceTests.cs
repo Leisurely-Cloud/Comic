@@ -45,4 +45,47 @@ public sealed class ApplicationSettingsServiceTests
         Assert.AreEqual(140, reloaded.DefaultStripZoomPercent);
         Assert.AreEqual(30, reloaded.LibraryPageSize);
     }
+
+    [TestMethod]
+    public void DownloadConcurrencyAndRetry_ArePersistedAndClamped()
+    {
+        var settings = new ApplicationSettingsService(_container);
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderPaged,
+            100,
+            20,
+            8,
+            5);
+
+        Assert.AreEqual(8, settings.DownloadConcurrency);
+        Assert.AreEqual(5, settings.ChapterRetryCount);
+
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderPaged,
+            100,
+            20,
+            99,
+            0);
+
+        Assert.AreEqual(8, settings.DownloadConcurrency);
+        Assert.AreEqual(1, settings.ChapterRetryCount);
+
+        var reloaded = new ApplicationSettingsService(_container);
+        Assert.AreEqual(8, reloaded.DownloadConcurrency);
+        Assert.AreEqual(1, reloaded.ChapterRetryCount);
+    }
+
+    [TestMethod]
+    public void DownloadConcurrencyAndRetry_DefaultToThree()
+    {
+        var settings = new ApplicationSettingsService(_container);
+        Assert.AreEqual(3, settings.DownloadConcurrency);
+        Assert.AreEqual(3, settings.ChapterRetryCount);
+    }
 }

@@ -44,7 +44,7 @@ public sealed class DownloadEventStream
                     JsonPayload = payload,
                 };
             }
-            if (NativeBackendService.IsTerminal(task.Status)) yield break;
+            if (DownloadSchedulerService.IsTerminal(task.Status)) yield break;
             await Task.Delay(150, cancellationToken);
         }
     }

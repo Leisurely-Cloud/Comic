@@ -1,0 +1,28 @@
+using Comic.WinUI.Services;
+using Comic.WinUI.Services.Native;
+
+namespace Comic.WinUI.Tests.Services;
+
+/// <summary>按职责构造被测服务的测试工厂,保持测试与产品代码的依赖关系同步。</summary>
+internal static class TestServiceFactory
+{
+    public static LibraryStorageService CreateLibrary(string storageRoot) => new(storageRoot);
+
+    public static DownloadSchedulerService CreateScheduler(JmComicService jmComic, LibraryStorageService library) =>
+        new(jmComic, library);
+
+    public static ReaderService CreateReader(LibraryStorageService library) => new(library);
+
+    public static CbzExportService CreateExporter(LibraryStorageService library) => new(library);
+
+    public static BackendClient CreateClient(
+        JmComicService jmComic,
+        DownloadSchedulerService scheduler,
+        LibraryStorageService library,
+        CbzExportService exporter,
+        ReaderService reader,
+        ApplicationSettingsService settings) =>
+        new(jmComic, scheduler, library, exporter, reader, settings);
+
+    public static ApplicationSettingsService CreateSettings(string directory) => new(directory);
+}

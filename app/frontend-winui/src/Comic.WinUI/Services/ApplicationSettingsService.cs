@@ -58,6 +58,10 @@ public sealed class ApplicationSettingsService
 
     public int LibraryPageSize => NormalizeLibraryPageSize(_preferences.LibraryPageSize);
 
+    public int DownloadConcurrency => NormalizeConcurrency(_preferences.DownloadConcurrency);
+
+    public int ChapterRetryCount => NormalizeRetryCount(_preferences.ChapterRetryCount);
+
     public string SettingsDirectory => Path.GetDirectoryName(_filePath) ?? string.Empty;
 
     public void UpdatePreferences(string theme, string chapterSelectionMode)
@@ -68,7 +72,9 @@ public sealed class ApplicationSettingsService
             ExpandNavigationPane,
             DefaultReaderMode,
             DefaultStripZoomPercent,
-            LibraryPageSize);
+            LibraryPageSize,
+            DownloadConcurrency,
+            ChapterRetryCount);
     }
 
     public void UpdatePreferences(
@@ -79,6 +85,27 @@ public sealed class ApplicationSettingsService
         int defaultStripZoomPercent,
         int libraryPageSize)
     {
+        UpdatePreferences(
+            theme,
+            chapterSelectionMode,
+            expandNavigationPane,
+            defaultReaderMode,
+            defaultStripZoomPercent,
+            libraryPageSize,
+            DownloadConcurrency,
+            ChapterRetryCount);
+    }
+
+    public void UpdatePreferences(
+        string theme,
+        string chapterSelectionMode,
+        bool expandNavigationPane,
+        string defaultReaderMode,
+        int defaultStripZoomPercent,
+        int libraryPageSize,
+        int downloadConcurrency,
+        int chapterRetryCount)
+    {
         var normalizedTheme = NormalizeTheme(theme);
         var themeChanged = !string.Equals(Theme, normalizedTheme, StringComparison.Ordinal);
         _preferences.Theme = normalizedTheme;
@@ -87,6 +114,8 @@ public sealed class ApplicationSettingsService
         _preferences.DefaultReaderMode = NormalizeReaderMode(defaultReaderMode);
         _preferences.DefaultStripZoomPercent = NormalizeStripZoom(defaultStripZoomPercent);
         _preferences.LibraryPageSize = NormalizeLibraryPageSize(libraryPageSize);
+        _preferences.DownloadConcurrency = NormalizeConcurrency(downloadConcurrency);
+        _preferences.ChapterRetryCount = NormalizeRetryCount(chapterRetryCount);
         Save();
         if (themeChanged) ThemeChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -161,6 +190,10 @@ public sealed class ApplicationSettingsService
         _ => 20,
     };
 
+    private static int NormalizeConcurrency(int value) => Math.Clamp(value, 1, 8);
+
+    private static int NormalizeRetryCount(int value) => Math.Clamp(value, 1, 5);
+
     private sealed class UserPreferences
     {
         public string StorageRoot { get; set; } = string.Empty;
@@ -170,5 +203,7 @@ public sealed class ApplicationSettingsService
         public string DefaultReaderMode { get; set; } = ReaderPaged;
         public int DefaultStripZoomPercent { get; set; } = 100;
         public int LibraryPageSize { get; set; } = 20;
+        public int DownloadConcurrency { get; set; } = 3;
+        public int ChapterRetryCount { get; set; } = 3;
     }
 }

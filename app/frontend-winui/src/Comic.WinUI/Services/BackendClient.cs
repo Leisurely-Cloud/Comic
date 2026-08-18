@@ -8,40 +8,55 @@ using Comic.WinUI.Services.Native;
 namespace Comic.WinUI.Services;
 
 /// <summary>
-/// 保留界面层调用契约，内部直接调用同进程的 C# 服务。
+/// 界面层调用契约。内部把请求编排到同进程的职责化服务:
+/// 站点协议(<see cref="JmComicService"/>)、下载调度(<see cref="DownloadSchedulerService"/>)、
+/// 书库(<see cref="LibraryStorageService"/>)、CBZ 导出(<see cref="CbzExportService"/>)与阅读(<see cref="ReaderService"/>)。
 /// </summary>
 public sealed class BackendClient
 {
-    private readonly NativeBackendService _backend;
+    private readonly JmComicService _jmComic;
+    private readonly DownloadSchedulerService _downloads;
+    private readonly LibraryStorageService _library;
+    private readonly CbzExportService _export;
+    private readonly ReaderService _reader;
+    private readonly ApplicationSettingsService _applicationSettings;
 
-    public BackendClient(NativeBackendService backend)
+    public BackendClient(
+        JmComicService jmComic,
+        DownloadSchedulerService downloads,
+        LibraryStorageService library,
+        CbzExportService export,
+        ReaderService reader,
+        ApplicationSettingsService applicationSettings)
     {
-        _backend = backend;
+        _jmComic = jmComic;
+        _downloads = downloads;
+        _library = library;
+        _export = export;
+        _reader = reader;
+        _applicationSettings = applicationSettings;
     }
 
-    public Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetHealthAsync(cancellationToken), "health_failed");
-
     public Task<MangaResolveResponse> ResolveMangaAsync(MangaResolveRequest request, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.ResolveMangaAsync(request, cancellationToken), "resolve_failed");
+        InvokeAsync(() => _jmComic.ResolveAsync(request.Url, cancellationToken), "resolve_failed");
 
     public Task<DownloadTaskDto> CreateDownloadAsync(DownloadCreateRequest request, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.CreateDownloadAsync(request, cancellationToken), "download_create_failed");
+        InvokeAsync(() => _downloads.CreateDownloadAsync(request, cancellationToken), "download_create_failed");
 
     public Task<DownloadListResponse> GetDownloadsAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetDownloadsAsync(cancellationToken), "download_list_failed");
+        InvokeAsync(() => _downloads.GetDownloadsAsync(cancellationToken), "download_list_failed");
 
     public Task<DownloadTaskDto> GetDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetDownloadAsync(taskId, cancellationToken), "download_not_found");
+        InvokeAsync(() => _downloads.GetDownloadAsync(taskId, cancellationToken), "download_not_found");
 
     public Task<DownloadActionResponse> PauseDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.PauseDownloadAsync(taskId, cancellationToken), "download_pause_failed");
+        InvokeAsync(() => _downloads.PauseDownloadAsync(taskId, cancellationToken), "download_pause_failed");
 
     public Task<DownloadActionResponse> ResumeDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.ResumeDownloadAsync(taskId, cancellationToken), "download_resume_failed");
+        InvokeAsync(() => _downloads.ResumeDownloadAsync(taskId, cancellationToken), "download_resume_failed");
 
     public Task<DownloadActionResponse> StopDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.StopDownloadAsync(taskId, cancellationToken), "download_stop_failed");
+        InvokeAsync(() => _downloads.StopDownloadAsync(taskId, cancellationToken), "download_stop_failed");
 
     public Task<LibraryListResponse> GetLibraryAsync(
         string siteKey = "",
@@ -49,70 +64,169 @@ public sealed class BackendClient
         int page = 1,
         int pageSize = 20,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetLibraryAsync(keyword, page, pageSize, cancellationToken), "library_failed");
+        InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entries = _library.EnumerateLibraryEntries()
+                .Where(entry => string.IsNullOrWhiteSpace(keyword) ||
+                    entry.Title.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                    entry.Author.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(entry => entry.IsFavorite)
+                .ThenByDescending(entry => entry.SavedAt)
+                .ToList();
+            var safePageSize = Math.Clamp(pageSize, 1, 100);
+            var totalPages = Math.Max((int)Math.Ceiling(entries.Count / (double)safePageSize), 1);
+            var safePage = Math.Clamp(page, 1, totalPages);
+            return Task.FromResult(new LibraryListResponse
+            {
+                Items = entries.Skip((safePage - 1) * safePageSize).Take(safePageSize).Select(entry => new LibraryItemDto
+                {
+                    Title = entry.Title,
+                    SiteName = entry.SiteName,
+                    Author = entry.Author,
+                    RootDir = entry.RootDirectory,
+                    MangaUrl = entry.MangaUrl,
+                    CoverUrl = entry.CoverUrl,
+                    DownloadedChapterCount = entry.DownloadedChapterCount,
+                    LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
+                    IsFavorite = entry.IsFavorite,
+                }).ToList(),
+                Total = entries.Count,
+                Page = safePage,
+                PageSize = safePageSize,
+            });
+        }, "library_failed");
+
+    public Task<bool> ToggleFavoriteAsync(string rootDir, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(_library.ToggleFavorite(rootDir));
+        }, "favorite_toggle_failed");
 
     public Task<SettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetSettingsAsync(cancellationToken), "settings_failed");
+        InvokeAsync(() => _library.GetSettingsAsync(cancellationToken), "settings_failed");
 
     public Task<SettingsResponse> UpdateSettingsAsync(SettingsUpdateRequest settings, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.UpdateSettingsAsync(settings, cancellationToken), "settings_update_failed");
+        InvokeAsync(async () =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(settings.StorageRoot))
+                throw new ArgumentException("下载目录不能为空。");
+            if (_downloads.HasActiveTasks())
+                throw new InvalidOperationException("存在未结束的下载任务，请停止或等待任务完成后再更改目录。");
 
-    public Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.CheckLibraryUpdatesAsync(cancellationToken), "library_update_check_failed");
+            var previousRoot = _library.StorageRoot;
+            var resolvedRoot = _library.SwitchStorageRoot(settings.StorageRoot);
+            if (!LibraryStorageService.SamePath(previousRoot, resolvedRoot))
+            {
+                _downloads.ReloadHistoryForStorageChange();
+            }
+            _applicationSettings.UpdateStorageRoot(resolvedRoot);
+            return await _library.GetSettingsAsync(cancellationToken);
+        }, "settings_update_failed");
+
+    public async Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default)
+    {
+        var response = new LibraryCheckUpdatesResponse();
+        foreach (var entry in _library.EnumerateLibraryEntries().Where(entry => !string.IsNullOrWhiteSpace(entry.MangaUrl)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var detail = await _jmComic.ResolveAsync(entry.MangaUrl, cancellationToken);
+                response.Items.Add(new LibraryUpdateItem
+                {
+                    Title = entry.Title,
+                    LocalChapterCount = entry.DownloadedChapterCount,
+                    RemoteChapterCount = detail.Chapters.Count,
+                    HasUpdate = detail.Chapters.Count > entry.DownloadedChapterCount,
+                });
+            }
+            catch
+            {
+                response.Items.Add(new LibraryUpdateItem { Title = entry.Title, LocalChapterCount = entry.DownloadedChapterCount });
+            }
+        }
+        return response;
+    }
 
     public Task<ExportCbzResponse> ExportCbzAsync(string rootDir, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.ExportCbzAsync(rootDir, cancellationToken), "export_failed");
+        InvokeAsync(() => _export.ExportCbzAsync(rootDir, cancellationToken), "export_failed");
 
     public Task<ExportCbzProgress> GetExportProgressAsync(string taskId, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetExportProgressAsync(taskId, cancellationToken), "export_not_found");
+        InvokeAsync(() => _export.GetExportProgressAsync(taskId, cancellationToken), "export_not_found");
 
     public Task<RankingResponse> GetRankingAsync(
         string site = "jmcomic",
         string section = "",
         int page = 1,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetRankingAsync(section, page, cancellationToken), "ranking_failed");
+        InvokeAsync(() => _jmComic.GetRankingAsync(section, page, cancellationToken), "ranking_failed");
 
-    public Task<RankingSectionsResponse> GetRankingSectionsAsync(string site = "jmcomic", CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetRankingSectionsAsync(cancellationToken), "ranking_sections_failed");
+    public Task<RankingSectionsResponse> GetRankingSectionsAsync(string site = "jmcomic", CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new RankingSectionsResponse
+        {
+            Site = SiteCatalog.Key,
+            SiteName = SiteCatalog.DisplayName,
+            Sections = new Dictionary<string, string>(_jmComic.GetRankingSections()),
+        });
+    }
 
     public Task<ReaderChaptersResponse> GetReaderChaptersAsync(string rootDir, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetReaderChaptersAsync(rootDir, cancellationToken), "reader_failed");
+        InvokeAsync(() => _reader.GetReaderChaptersAsync(rootDir, cancellationToken), "reader_failed");
 
     public Task<ReaderImagesResponse> GetChapterImagesAsync(
         string rootDir,
         string chapterDirName,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetChapterImagesAsync(rootDir, chapterDirName, cancellationToken), "reader_failed");
+        InvokeAsync(() => _reader.GetChapterImagesAsync(rootDir, chapterDirName, cancellationToken), "reader_failed");
 
     public Task<byte[]> GetImageBytesAsync(string imagePath, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetImageBytesAsync(imagePath, cancellationToken), "reader_image_failed");
+        InvokeAsync(() => _reader.GetImageBytesAsync(imagePath, cancellationToken), "reader_image_failed");
+
+    public Task<IReadOnlyList<JmImageSource>> GetOnlineChapterImageSourcesAsync(
+        string chapterId,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() =>
+        {
+            if (!int.TryParse(chapterId, out var id) || id <= 0)
+                throw new ArgumentException("章节编号无效");
+            return _jmComic.GetChapterImageSourcesAsync(id, cancellationToken);
+        }, "online_chapter_images_failed");
+
+    public Task<byte[]> GetOnlineImageBytesAsync(
+        JmImageSource source,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.FetchChapterImageAsync(source, cancellationToken), "online_image_failed");
 
     public Task<SearchResponse> SearchAsync(
         string query,
         string site = "jmcomic",
         int page = 1,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.SearchAsync(query, page, cancellationToken), "search_failed");
+        InvokeAsync(() => _jmComic.SearchAsync(query, page, cancellationToken: cancellationToken), "search_failed");
 
     public Task<DownloadHistoryResponse> GetDownloadHistoryAsync(
         int page = 1,
         int pageSize = 20,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.GetDownloadHistoryAsync(page, pageSize, cancellationToken), "history_failed");
+        InvokeAsync(() => _downloads.GetDownloadHistoryAsync(page, pageSize, cancellationToken), "history_failed");
 
     public Task<BatchActionResponse> BatchStopDownloadsAsync(List<string> taskIds, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.BatchStopDownloadsAsync(taskIds, cancellationToken), "batch_stop_failed");
+        InvokeAsync(() => _downloads.BatchStopDownloadsAsync(taskIds, cancellationToken), "batch_stop_failed");
 
     public Task<BatchActionResponse> BatchDeleteDownloadsAsync(List<string> taskIds, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => _backend.BatchDeleteDownloadsAsync(taskIds, cancellationToken), "batch_delete_failed");
+        InvokeAsync(() => _downloads.BatchDeleteDownloadsAsync(taskIds, cancellationToken), "batch_delete_failed");
 
     public Task<BatchActionResponse> BatchStopChaptersAsync(
         string taskId,
         List<string> chapterIds,
         CancellationToken cancellationToken = default) =>
         InvokeAsync(
-            () => _backend.BatchStopChaptersAsync(taskId, chapterIds, cancellationToken),
+            () => _downloads.BatchStopChaptersAsync(taskId, chapterIds, cancellationToken),
             "batch_chapter_stop_failed");
 
     public Task<BatchActionResponse> BatchDeleteChaptersAsync(
@@ -120,14 +234,14 @@ public sealed class BackendClient
         List<string> chapterIds,
         CancellationToken cancellationToken = default) =>
         InvokeAsync(
-            () => _backend.BatchDeleteChaptersAsync(taskId, chapterIds, cancellationToken),
+            () => _downloads.BatchDeleteChaptersAsync(taskId, chapterIds, cancellationToken),
             "batch_chapter_delete_failed");
 
     public async Task<object> ClearDownloadHistoryAsync(CancellationToken cancellationToken = default)
     {
         await InvokeAsync(async () =>
         {
-            await _backend.ClearDownloadHistoryAsync(cancellationToken);
+            await _downloads.ClearDownloadHistoryAsync(cancellationToken);
             return true;
         }, "history_clear_failed");
         return new { status = "ok" };
@@ -137,7 +251,7 @@ public sealed class BackendClient
         IReadOnlyCollection<string> historyIds,
         CancellationToken cancellationToken = default) =>
         InvokeAsync(
-            () => _backend.DeleteDownloadHistoryAsync(historyIds, cancellationToken),
+            () => _downloads.DeleteDownloadHistoryAsync(historyIds, cancellationToken),
             "history_delete_failed");
 
     private static async Task<T> InvokeAsync<T>(Func<Task<T>> operation, string code)

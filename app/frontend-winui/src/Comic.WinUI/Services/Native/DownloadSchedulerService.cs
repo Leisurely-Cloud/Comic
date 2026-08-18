@@ -1,26 +1,19 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.IO.Compression;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Xml.Linq;
-using Microsoft.VisualBasic;
 using Comic.WinUI.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Comic.WinUI.Services.Native;
 
-public sealed class NativeBackendService : IDisposable
+/// <summary>
+/// 下载调度服务:管理下载任务的生命周期(创建/暂停/继续/停止/删除)、
+/// 章节下载执行、进度统计与下载历史持久化。
+/// </summary>
+public sealed class DownloadSchedulerService : IDisposable
 {
     private const string TemporaryChapterPrefix = ".下载中_";
-    private static readonly string[] ImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -29,109 +22,51 @@ public sealed class NativeBackendService : IDisposable
     };
 
     private readonly JmComicService _jmComic;
+    private readonly LibraryStorageService _library;
+    private readonly ApplicationSettingsService? _applicationSettings;
+    private readonly ILogger<DownloadSchedulerService> _logger;
     private readonly ConcurrentDictionary<string, NativeDownloadTask> _downloads = [];
-    private readonly ConcurrentDictionary<string, ExportTaskState> _exports = [];
     private readonly object _historyLock = new();
     private readonly List<DownloadHistoryItem> _history;
-    private readonly ApplicationSettingsService? _applicationSettings;
-    private string _stateDirectory;
-    private string _historyFile;
 
-    public NativeBackendService(JmComicService jmComic, ApplicationSettingsService applicationSettings)
-        : this(jmComic, applicationSettings.StorageRoot)
-    {
-        _applicationSettings = applicationSettings;
-    }
-
-    internal NativeBackendService(JmComicService jmComic, string storageRoot)
+    public DownloadSchedulerService(
+        JmComicService jmComic,
+        LibraryStorageService library,
+        ApplicationSettingsService? applicationSettings = null,
+        ILogger<DownloadSchedulerService>? logger = null)
     {
         _jmComic = jmComic;
-        var requestedStorageRoot = Path.GetFullPath(storageRoot);
-        Directory.CreateDirectory(requestedStorageRoot);
-        StorageRoot = ResolveExistingDirectoryPath(requestedStorageRoot);
-        _stateDirectory = Path.Combine(StorageRoot, ".comic_state");
-        Directory.CreateDirectory(_stateDirectory);
-        _historyFile = Path.Combine(_stateDirectory, "task_history.json");
+        _library = library;
+        _applicationSettings = applicationSettings;
+        _logger = logger ?? NullLogger<DownloadSchedulerService>.Instance;
         _history = LoadHistory();
     }
 
-    public string StorageRoot { get; private set; }
+    private string StateDirectory => Path.Combine(_library.StorageRoot, ".comic_state");
+    private string HistoryFile => Path.Combine(StateDirectory, "task_history.json");
 
-    public Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken = default)
+    public static bool IsTerminal(string status) => status is "completed" or "failed" or "partial" or "stopped";
+
+    public bool HasActiveTasks() => _downloads.Values.Any(state => !IsTerminal(CloneTask(state).Status));
+
+    /// <summary>存储根目录切换后,把历史归档到旧位置并从新位置重新加载。</summary>
+    public void ReloadHistoryForStorageChange()
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new HealthResponse
+        SaveHistory();
+        Directory.CreateDirectory(StateDirectory);
+        lock (_historyLock)
         {
-            Status = "native",
-            StorageRoot = StorageRoot,
-            Pid = Environment.ProcessId,
-        });
-    }
-
-    public Task<SettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new SettingsResponse
-        {
-            StorageRoot = StorageRoot,
-            LegacyRoot = string.Empty,
-            DownloadRunnerConfigured = true,
-            SupportedSites = [SiteCatalog.Key],
-        });
-    }
-
-    public Task<SettingsResponse> UpdateSettingsAsync(SettingsUpdateRequest settings, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (string.IsNullOrWhiteSpace(settings.StorageRoot))
-            throw new ArgumentException("下载目录不能为空。");
-        if (_downloads.Values.Any(state => !IsTerminal(CloneTask(state).Status)))
-            throw new InvalidOperationException("存在未结束的下载任务，请停止或等待任务完成后再更改目录。");
-
-        var requestedRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(settings.StorageRoot.Trim()));
-        Directory.CreateDirectory(requestedRoot);
-        var resolvedRoot = ResolveExistingDirectoryPath(requestedRoot);
-
-        if (!SamePath(StorageRoot, resolvedRoot))
-        {
-            SaveHistory();
-            var nextStateDirectory = Path.Combine(resolvedRoot, ".comic_state");
-            Directory.CreateDirectory(nextStateDirectory);
-            var nextHistoryFile = Path.Combine(nextStateDirectory, "task_history.json");
-
-            lock (_historyLock)
-            {
-                StorageRoot = resolvedRoot;
-                _stateDirectory = nextStateDirectory;
-                _historyFile = nextHistoryFile;
-                _history.Clear();
-                _history.AddRange(LoadHistory());
-            }
+            _history.Clear();
+            _history.AddRange(LoadHistory());
         }
-
-        _applicationSettings?.UpdateStorageRoot(StorageRoot);
-        return GetSettingsAsync(cancellationToken);
     }
 
-    public Task<SearchResponse> SearchAsync(string query, int page, CancellationToken cancellationToken = default) =>
-        _jmComic.SearchAsync(query, page, cancellationToken: cancellationToken);
-
-    public Task<MangaResolveResponse> ResolveMangaAsync(MangaResolveRequest request, CancellationToken cancellationToken = default) =>
-        _jmComic.ResolveAsync(request.Url, cancellationToken);
-
-    public Task<RankingResponse> GetRankingAsync(string section, int page, CancellationToken cancellationToken = default) =>
-        _jmComic.GetRankingAsync(section, page, cancellationToken);
-
-    public Task<RankingSectionsResponse> GetRankingSectionsAsync(CancellationToken cancellationToken = default)
+    public void Dispose()
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new RankingSectionsResponse
-        {
-            Site = SiteCatalog.Key,
-            SiteName = SiteCatalog.DisplayName,
-            Sections = new Dictionary<string, string>(_jmComic.GetRankingSections()),
-        });
+        foreach (var state in _downloads.Values) state.Dispose();
     }
+
+    // ---- 任务控制 ----
 
     public Task<DownloadTaskDto> CreateDownloadAsync(DownloadCreateRequest request, CancellationToken cancellationToken = default)
     {
@@ -377,6 +312,8 @@ public sealed class NativeBackendService : IDisposable
         return result;
     }
 
+    // ---- 下载历史 ----
+
     public Task<DownloadHistoryResponse> GetDownloadHistoryAsync(int page, int pageSize, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -427,124 +364,7 @@ public sealed class NativeBackendService : IDisposable
         return Task.FromResult(removed);
     }
 
-    public Task<LibraryListResponse> GetLibraryAsync(string keyword, int page, int pageSize, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var entries = EnumerateLibraryEntries()
-            .Where(entry => string.IsNullOrWhiteSpace(keyword) ||
-                entry.Title.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                entry.Author.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(entry => entry.SavedAt)
-            .ToList();
-        var safePageSize = Math.Clamp(pageSize, 1, 100);
-        var totalPages = Math.Max((int)Math.Ceiling(entries.Count / (double)safePageSize), 1);
-        var safePage = Math.Clamp(page, 1, totalPages);
-        return Task.FromResult(new LibraryListResponse
-        {
-            Items = entries.Skip((safePage - 1) * safePageSize).Take(safePageSize).Select(entry => new LibraryItemDto
-            {
-                Title = entry.Title,
-                SiteName = entry.SiteName,
-                Author = entry.Author,
-                RootDir = entry.RootDirectory,
-                MangaUrl = entry.MangaUrl,
-                CoverUrl = entry.CoverUrl,
-                DownloadedChapterCount = entry.DownloadedChapterCount,
-                LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
-            }).ToList(),
-            Total = entries.Count,
-            Page = safePage,
-            PageSize = safePageSize,
-        });
-    }
-
-    public async Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default)
-    {
-        var response = new LibraryCheckUpdatesResponse();
-        foreach (var entry in EnumerateLibraryEntries().Where(entry => !string.IsNullOrWhiteSpace(entry.MangaUrl)))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                var detail = await _jmComic.ResolveAsync(entry.MangaUrl, cancellationToken);
-                response.Items.Add(new LibraryUpdateItem
-                {
-                    Title = entry.Title,
-                    LocalChapterCount = entry.DownloadedChapterCount,
-                    RemoteChapterCount = detail.Chapters.Count,
-                    HasUpdate = detail.Chapters.Count > entry.DownloadedChapterCount,
-                });
-            }
-            catch
-            {
-                response.Items.Add(new LibraryUpdateItem { Title = entry.Title, LocalChapterCount = entry.DownloadedChapterCount });
-            }
-        }
-        return response;
-    }
-
-    public Task<ExportCbzResponse> ExportCbzAsync(string rootDir, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var resolvedRoot = ResolveLibraryRoot(rootDir);
-        var metadata = LoadLibraryMetadata(resolvedRoot);
-        var taskId = Guid.NewGuid().ToString("N")[..8];
-        var state = new ExportTaskState
-        {
-            Progress = new ExportCbzProgress
-            {
-                Id = taskId,
-                Status = "running",
-                MangaTitle = metadata?.MangaTitle is { Length: > 0 } metadataTitle ? metadataTitle : Path.GetFileName(resolvedRoot),
-            },
-        };
-        _exports[taskId] = state;
-        state.Worker = Task.Run(() => ProcessExportAsync(state, resolvedRoot, metadata?.MangaUrl ?? string.Empty), CancellationToken.None);
-        return Task.FromResult(new ExportCbzResponse { Status = "ok", TaskId = taskId, Message = "导出任务已创建" });
-    }
-
-    public Task<ExportCbzProgress> GetExportProgressAsync(string taskId, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!_exports.TryGetValue(taskId, out var state)) throw new KeyNotFoundException("导出任务不存在");
-        lock (state.Gate) return Task.FromResult(CloneExportProgress(state.Progress));
-    }
-
-    public Task<ReaderChaptersResponse> GetReaderChaptersAsync(string rootDir, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var resolvedRoot = ResolveLibraryRoot(rootDir);
-        var metadata = LoadLibraryMetadata(resolvedRoot);
-        var chapters = OrderChapterDirectories(EnumerateChapterDirectories(resolvedRoot)).Select(item => new ReaderChapterDto
-        {
-            DirName = item.Name,
-            Title = ChapterTitle(item.Name),
-            Order = ChapterOrder(item.Name),
-            ImageCount = EnumerateImages(item.FullName).Count,
-        }).ToList();
-        return Task.FromResult(new ReaderChaptersResponse
-        {
-            MangaTitle = metadata?.MangaTitle is { Length: > 0 } metadataTitle ? metadataTitle : Path.GetFileName(resolvedRoot),
-            Chapters = chapters,
-        });
-    }
-
-    public Task<ReaderImagesResponse> GetChapterImagesAsync(string rootDir, string chapterDirectoryName, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var chapterDirectory = ResolveChapterDirectory(rootDir, chapterDirectoryName);
-        return Task.FromResult(new ReaderImagesResponse { Images = EnumerateImages(chapterDirectory) });
-    }
-
-    public Task<byte[]> GetImageBytesAsync(string imagePath, CancellationToken cancellationToken = default) =>
-        File.ReadAllBytesAsync(ResolveReaderImage(imagePath), cancellationToken);
-
-    public void Dispose()
-    {
-        foreach (var state in _downloads.Values) state.Dispose();
-    }
-
-    public static bool IsTerminal(string status) => status is "completed" or "failed" or "partial" or "stopped";
+    // ---- 下载执行 ----
 
     private async Task ProcessDownloadAsync(NativeDownloadTask state)
     {
@@ -561,7 +381,7 @@ public sealed class NativeBackendService : IDisposable
                 state.Dto.MangaTitle = manga.Title;
                 state.Dto.SiteKey = SiteCatalog.Key;
             }
-            var rootDirectory = Path.Combine(StorageRoot, JmComicService.SanitizeFileName(manga.Title));
+            var rootDirectory = Path.Combine(_library.StorageRoot, JmComicService.SanitizeFileName(manga.Title));
             Directory.CreateDirectory(rootDirectory);
             var selected = SelectChapters(manga, state.Request.Chapters);
             if (selected.Count == 0) throw new InvalidOperationException("没有匹配到可下载章节");
@@ -580,9 +400,11 @@ public sealed class NativeBackendService : IDisposable
                 }).ToList();
             }
             AppendLog(state, "info", $"保存目录: {rootDirectory}");
-            AppendLog(state, "info", "图片并发: 3");
+            var concurrency = _applicationSettings?.DownloadConcurrency ?? 3;
+            AppendLog(state, "info", $"图片并发: {concurrency}");
 
             var completed = 0;
+            var chapterMaxAttempts = Math.Max(1, _applicationSettings?.ChapterRetryCount ?? 3);
             for (var chapterIndex = 0; chapterIndex < selected.Count; chapterIndex++)
             {
                 var chapter = selected[chapterIndex];
@@ -610,14 +432,14 @@ public sealed class NativeBackendService : IDisposable
 
                     Exception? lastError = null;
                     JmChapterDownloadResult? result = null;
-                    for (var attempt = 0; attempt < 3; attempt++)
+                    for (var attempt = 0; attempt < chapterMaxAttempts; attempt++)
                     {
                         try
                         {
                             result = await _jmComic.DownloadChapterAsync(
                                 chapter,
                                 rootDirectory,
-                                3,
+                                concurrency,
                                 chapterStopSource.Token,
                                 imageProgress => ReportImageProgress(
                                     state,
@@ -632,9 +454,9 @@ public sealed class NativeBackendService : IDisposable
                         catch (Exception ex)
                         {
                             lastError = ex;
-                            if (attempt < 2)
+                            if (attempt < chapterMaxAttempts - 1)
                             {
-                                AppendLog(state, "warn", $"章节失败，准备重试 ({attempt + 1}/2)：{chapter.Title} - {ex.Message}");
+                                AppendLog(state, "warn", $"章节失败，准备重试 ({attempt + 1}/{chapterMaxAttempts - 1})：{chapter.Title} - {ex.Message}");
                                 await Task.Delay(
                                     TimeSpan.FromSeconds(Math.Min(1.5 * (attempt + 1), 5)),
                                     chapterStopSource.Token);
@@ -774,6 +596,7 @@ public sealed class NativeBackendService : IDisposable
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "下载任务 {TaskId} 执行失败", state.Dto.Id);
             lock (state.Gate)
             {
                 foreach (var chapter in state.Dto.Chapters.Where(item => item.Status == "running"))
@@ -965,7 +788,7 @@ public sealed class NativeBackendService : IDisposable
         }
     }
 
-    internal static void DeleteChapterDirectories(
+    public static void DeleteChapterDirectories(
         string rootDirectory,
         JmChapter chapter,
         string directoryName)
@@ -1032,7 +855,7 @@ public sealed class NativeBackendService : IDisposable
         if (logged) AppendLog(state, "info", "下载已继续");
     }
 
-    internal static List<JmChapter> SelectChapters(JmMangaInfo manga, IReadOnlyCollection<string>? requested)
+    public static List<JmChapter> SelectChapters(JmMangaInfo manga, IReadOnlyCollection<string>? requested)
     {
         if (requested is { Count: > 0 })
         {
@@ -1057,383 +880,15 @@ public sealed class NativeBackendService : IDisposable
     private void SaveLibraryMetadata(NativeDownloadTask state, bool completed, IReadOnlyCollection<FailedChapterRecord> failures)
     {
         if (state.Manga is null || string.IsNullOrWhiteSpace(state.RootDirectory)) return;
-        var downloaded = EnumerateChapterDirectories(state.RootDirectory).Select(directory => new DownloadedChapterRecord
-        {
-            Order = ChapterOrder(directory.Name),
-            DirName = directory.Name,
-            Title = ChapterTitle(directory.Name),
-            ImageCount = EnumerateImages(directory.FullName).Count,
-        }).OrderBy(record => record.Order).ToList();
-        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        var existing = LoadLibraryMetadata(state.RootDirectory);
-        var metadata = new LibraryMetadata
-        {
-            SchemaVersion = 1,
-            SiteKey = SiteCatalog.Key,
-            SiteName = SiteCatalog.DisplayName,
-            MangaTitle = state.Manga.Title,
-            Authors = state.Manga.Authors
-                .Where(author => !string.IsNullOrWhiteSpace(author))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList(),
-            MangaUrl = state.Request.Url,
-            RootDirectory = state.RootDirectory,
-            CoverUrl = state.Manga.CoverUrl,
-            TotalChapters = state.Manga.Chapters.Count,
-            DownloadedChapterCount = downloaded.Count,
-            LastDownloadedChapterTitle = downloaded.LastOrDefault()?.Title ?? string.Empty,
-            LastDownloadedChapterOrder = downloaded.LastOrDefault()?.Order,
-            DownloadedChapters = downloaded,
-            Completed = completed && failures.Count == 0,
-            CreatedAt = existing?.CreatedAt is { Length: > 0 } created ? created : now,
-            SavedAt = now,
-            LastFailedChapterRecords = failures.ToList(),
-            LastFailedChapterCount = failures.Count,
-        };
-        WriteJsonAtomically(Path.Combine(state.RootDirectory, "元数据.json"), metadata);
-    }
-
-    private List<LibraryEntry> EnumerateLibraryEntries()
-    {
-        var entries = new List<LibraryEntry>();
-        foreach (var directory in new DirectoryInfo(StorageRoot).EnumerateDirectories())
-        {
-            if (directory.Name.StartsWith('.') || directory.Name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase)) continue;
-            var chapters = EnumerateChapterDirectories(directory.FullName);
-            if (chapters.Count == 0) continue;
-            var metadata = LoadLibraryMetadata(directory.FullName);
-            var ordered = OrderChapterDirectories(chapters).ToList();
-            var fallbackCover = EnumerateImages(directory.FullName).FirstOrDefault()
-                ?? EnumerateImages(ordered[0].FullName).FirstOrDefault()
-                ?? string.Empty;
-            entries.Add(new LibraryEntry(
-                metadata?.MangaTitle is { Length: > 0 } metadataTitle ? metadataTitle : directory.Name,
-                metadata is null ? string.Empty : string.Join("、", metadata.Authors
-                    .Where(author => !string.IsNullOrWhiteSpace(author))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)),
-                metadata?.SiteName is { Length: > 0 } siteName ? siteName : "本地漫画",
-                directory.FullName,
-                metadata?.MangaUrl ?? string.Empty,
-                metadata?.CoverUrl is { Length: > 0 } coverUrl ? coverUrl : fallbackCover,
-                ordered.Count,
-                metadata?.LastDownloadedChapterTitle is { Length: > 0 } lastTitle ? lastTitle : ChapterTitle(ordered[^1].Name),
-                ParseDate(metadata?.SavedAt) ?? directory.LastWriteTime));
-        }
-        return entries;
-    }
-
-    private async Task ProcessExportAsync(ExportTaskState state, string rootDirectory, string mangaUrl)
-    {
-        try
-        {
-            var chapters = OrderChapterDirectories(EnumerateChapterDirectories(rootDirectory)).ToList();
-            if (chapters.Count == 0) throw new InvalidOperationException("当前漫画目录里没有可导出的已完成章节");
-            var simplifiedMangaTitle = ToSimplifiedChinese(state.Progress.MangaTitle);
-            var exportDirectory = Path.Combine(Directory.GetParent(rootDirectory)!.FullName, simplifiedMangaTitle + "_CBZ");
-            Directory.CreateDirectory(exportDirectory);
-            var exported = 0;
-            var skipped = new List<string>();
-
-            lock (state.Gate)
-            {
-                state.Progress.TotalChapters = chapters.Count;
-                state.Progress.ExportDir = exportDirectory;
-                state.Progress.CurrentChapter = ChapterTitle(chapters[0].Name);
-            }
-
-            for (var index = 0; index < chapters.Count; index++)
-            {
-                var chapter = chapters[index];
-                var images = EnumerateImages(chapter.FullName);
-                lock (state.Gate) state.Progress.CurrentChapter = ChapterTitle(chapter.Name);
-                if (images.Count == 0) skipped.Add(chapter.Name);
-                else
-                {
-                    await CreateCbzAsync(
-                        Path.Combine(exportDirectory, chapter.Name + ".cbz"),
-                        images,
-                        simplifiedMangaTitle,
-                        ChapterTitle(chapter.Name),
-                        index + 1,
-                        chapters.Count,
-                        mangaUrl);
-                    exported++;
-                }
-                lock (state.Gate)
-                {
-                    state.Progress.CurrentChapter = ChapterTitle(chapter.Name);
-                    state.Progress.CurrentIndex = index + 1;
-                    state.Progress.TotalChapters = chapters.Count;
-                    state.Progress.ExportedCount = exported;
-                    state.Progress.ExportDir = exportDirectory;
-                    state.Progress.SkippedChapters = skipped.ToList();
-                }
-            }
-            if (exported == 0) throw new InvalidOperationException("没有找到可写入 CBZ 的图片文件");
-            lock (state.Gate) state.Progress.Status = "completed";
-        }
-        catch (Exception ex)
-        {
-            lock (state.Gate)
-            {
-                state.Progress.Status = "failed";
-                state.Progress.Error = ex.Message;
-            }
-        }
-    }
-
-    private static string ToSimplifiedChinese(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return value;
-        try
-        {
-            return Strings.StrConv(value, VbStrConv.SimplifiedChinese, 0x804) ?? value;
-        }
-        catch (ArgumentException)
-        {
-            return value;
-        }
-    }
-
-    private static async Task CreateCbzAsync(
-        string archivePath,
-        IReadOnlyCollection<string> images,
-        string mangaTitle,
-        string chapterTitle,
-        int chapterNumber,
-        int chapterCount,
-        string mangaUrl)
-    {
-        var temporaryPath = archivePath + ".tmp";
-        if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        try
-        {
-            await using (var output = File.Create(temporaryPath))
-            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, false, Encoding.UTF8))
-            {
-                foreach (var imagePath in images)
-                {
-                    var entry = archive.CreateEntry(Path.GetFileName(imagePath), CompressionLevel.Optimal);
-                    await using var target = entry.Open();
-                    await using var source = File.OpenRead(imagePath);
-                    await source.CopyToAsync(target);
-                }
-                var comicInfo = new XDocument(
-                    new XDeclaration("1.0", "utf-8", null),
-                    new XElement("ComicInfo",
-                        new XElement("Series", mangaTitle),
-                        new XElement("Title", chapterTitle),
-                        new XElement("Number", chapterNumber),
-                        new XElement("Count", chapterCount),
-                        new XElement("PageCount", images.Count),
-                        new XElement("Manga", "YesAndRightToLeft"),
-                        string.IsNullOrWhiteSpace(mangaUrl) ? null : new XElement("Web", mangaUrl)));
-                var infoEntry = archive.CreateEntry("ComicInfo.xml", CompressionLevel.Optimal);
-                await using var infoStream = infoEntry.Open();
-                await using var writer = new StreamWriter(infoStream, new UTF8Encoding(false));
-                await writer.WriteAsync(comicInfo.ToString(SaveOptions.DisableFormatting));
-            }
-
-            File.Move(temporaryPath, archivePath, true);
-        }
-        catch
-        {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            throw;
-        }
-    }
-
-    private string ResolveLibraryRoot(string rootDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(rootDirectory)) throw new ArgumentException("漫画目录不存在");
-        if (!Directory.Exists(rootDirectory)) throw new DirectoryNotFoundException("漫画目录不存在");
-        var candidate = ResolveExistingDirectoryPath(rootDirectory);
-        if (!SamePath(Directory.GetParent(candidate)?.FullName, StorageRoot) || EnumerateChapterDirectories(candidate).Count == 0)
-            throw new UnauthorizedAccessException("漫画目录不在受管理的书库中");
-        return candidate;
-    }
-
-    private string ResolveChapterDirectory(string rootDirectory, string chapterDirectoryName)
-    {
-        var root = ResolveLibraryRoot(rootDirectory);
-        if (string.IsNullOrWhiteSpace(chapterDirectoryName) ||
-            Path.GetFileName(chapterDirectoryName) != chapterDirectoryName ||
-            !IsPotentialChapterDirectoryName(chapterDirectoryName))
-            throw new ArgumentException("章节目录名称无效");
-        var chapterPath = Path.GetFullPath(Path.Combine(root, chapterDirectoryName));
-        if (!Directory.Exists(chapterPath))
-            throw new DirectoryNotFoundException("章节目录不存在");
-        var chapter = ResolveExistingDirectoryPath(chapterPath);
-        if (!SamePath(Directory.GetParent(chapter)?.FullName, root) || !ContainsImageFile(chapter))
-            throw new UnauthorizedAccessException("章节目录不在当前漫画目录中");
-        return chapter;
-    }
-
-    private string ResolveReaderImage(string imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath)) throw new ArgumentException("图片路径无效");
-        if (!File.Exists(imagePath) || !ImageExtensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase))
-            throw new ArgumentException("图片路径无效");
-        var candidate = ResolveExistingFilePath(imagePath);
-        var imageDirectory = Directory.GetParent(candidate)?.FullName;
-        if (imageDirectory is null)
-            throw new UnauthorizedAccessException("图片不在受管理的书库中");
-
-        var imageDirectoryParent = Directory.GetParent(imageDirectory)?.FullName;
-        var isMangaCover = SamePath(imageDirectoryParent, StorageRoot) &&
-            EnumerateChapterDirectories(imageDirectory).Count > 0;
-        if (isMangaCover) return candidate;
-
-        var mangaDirectory = imageDirectoryParent;
-        var isChapterImage = mangaDirectory is not null &&
-            IsPotentialChapterDirectoryName(Path.GetFileName(imageDirectory)) &&
-            SamePath(Directory.GetParent(mangaDirectory)?.FullName, StorageRoot) &&
-            ContainsImageFile(imageDirectory);
-        if (!isChapterImage)
-            throw new UnauthorizedAccessException("图片不在受管理的书库中");
-        return candidate;
-    }
-
-    private static List<DirectoryInfo> EnumerateChapterDirectories(string rootDirectory)
-    {
-        try
-        {
-            return new DirectoryInfo(rootDirectory).EnumerateDirectories()
-                .Where(directory => IsPotentialChapterDirectoryName(directory.Name) && ContainsImageFile(directory.FullName))
-                .ToList();
-        }
-        catch { return []; }
-    }
-
-    private static List<string> EnumerateImages(string chapterDirectory)
-    {
-        try
-        {
-            return Directory.EnumerateFiles(chapterDirectory)
-                .Where(file => ImageExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-        catch { return []; }
-    }
-
-    private static bool ContainsImageFile(string directory)
-    {
-        try
-        {
-            return Directory.EnumerateFiles(directory)
-                .Any(file => ImageExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase));
-        }
-        catch { return false; }
-    }
-
-    private static bool IsPotentialChapterDirectoryName(string name)
-    {
-        return !string.IsNullOrWhiteSpace(name) &&
-            Path.GetFileName(name) == name &&
-            !name.StartsWith(".", StringComparison.Ordinal) &&
-            !name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static IOrderedEnumerable<DirectoryInfo> OrderChapterDirectories(IEnumerable<DirectoryInfo> directories) =>
-        directories.OrderBy(directory => ChapterOrder(directory.Name))
-            .ThenBy(directory => directory.Name, StringComparer.OrdinalIgnoreCase);
-
-    private static int ChapterOrder(string directoryName)
-    {
-        var match = Regex.Match(directoryName, @"\d+");
-        return match.Success && int.TryParse(match.Value, out var order) ? order : int.MaxValue;
-    }
-
-    private static string ChapterTitle(string directoryName)
-    {
-        var separator = directoryName.IndexOf('_');
-        return separator > 0 &&
-            separator < directoryName.Length - 1 &&
-            directoryName[..separator].All(char.IsDigit)
-                ? directoryName[(separator + 1)..]
-                : directoryName;
-    }
-
-    private LibraryMetadata? LoadLibraryMetadata(string rootDirectory)
-    {
-        try
-        {
-            var path = Path.Combine(rootDirectory, "元数据.json");
-            if (!File.Exists(path)) return null;
-
-            var json = File.ReadAllText(path);
-            var metadata = JsonSerializer.Deserialize<LibraryMetadata>(json, JsonOptions) ?? new LibraryMetadata();
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return metadata;
-
-            if (string.IsNullOrWhiteSpace(metadata.MangaTitle))
-            {
-                metadata.MangaTitle = ReadMetadataString(document.RootElement, "name", "title", "comic_name", "book_name");
-            }
-
-            if (metadata.Authors.Count == 0)
-            {
-                metadata.Authors = ReadMetadataStrings(document.RootElement, "author", "authors", "writer", "writers", "artist", "artists");
-            }
-
-            return metadata;
-        }
-        catch { return null; }
-    }
-
-    private static string ReadMetadataString(JsonElement root, params string[] propertyNames)
-    {
-        foreach (var property in root.EnumerateObject())
-        {
-            if (!propertyNames.Contains(property.Name, StringComparer.OrdinalIgnoreCase) ||
-                property.Value.ValueKind != JsonValueKind.String)
-            {
-                continue;
-            }
-
-            var value = property.Value.GetString()?.Trim();
-            if (!string.IsNullOrWhiteSpace(value)) return value;
-        }
-
-        return string.Empty;
-    }
-
-    private static List<string> ReadMetadataStrings(JsonElement root, params string[] propertyNames)
-    {
-        var values = new List<string>();
-        foreach (var property in root.EnumerateObject())
-        {
-            if (!propertyNames.Contains(property.Name, StringComparer.OrdinalIgnoreCase)) continue;
-
-            if (property.Value.ValueKind == JsonValueKind.String)
-            {
-                AddMetadataString(values, property.Value.GetString());
-            }
-            else if (property.Value.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in property.Value.EnumerateArray())
-                {
-                    if (item.ValueKind == JsonValueKind.String) AddMetadataString(values, item.GetString());
-                }
-            }
-        }
-
-        return values.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    private static void AddMetadataString(List<string> values, string? value)
-    {
-        var trimmed = value?.Trim();
-        if (!string.IsNullOrWhiteSpace(trimmed)) values.Add(trimmed);
+        _library.SaveLibraryMetadata(state.Manga, state.Request.Url, state.RootDirectory, completed, failures);
     }
 
     private List<DownloadHistoryItem> LoadHistory()
     {
         try
         {
-            var items = File.Exists(_historyFile)
-                ? JsonSerializer.Deserialize<List<DownloadHistoryItem>>(File.ReadAllText(_historyFile), JsonOptions) ?? []
+            var items = File.Exists(HistoryFile)
+                ? JsonSerializer.Deserialize<List<DownloadHistoryItem>>(File.ReadAllText(HistoryFile), JsonOptions) ?? []
                 : [];
             var changed = false;
             foreach (var item in items)
@@ -1442,11 +897,15 @@ public sealed class NativeBackendService : IDisposable
             }
             if (changed)
             {
-                WriteJsonAtomically(_historyFile, items);
+                _library.WriteJsonAtomically(HistoryFile, items);
             }
             return items;
         }
-        catch { return []; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "读取下载历史失败: {Path}", HistoryFile);
+            return [];
+        }
     }
 
     private bool EnrichHistoryMetadata(DownloadHistoryItem item)
@@ -1463,7 +922,7 @@ public sealed class NativeBackendService : IDisposable
             return changed;
         }
 
-        var metadata = LoadLibraryMetadata(item.RootDir);
+        var metadata = _library.LoadLibraryMetadata(item.RootDir);
         if (string.IsNullOrWhiteSpace(item.MangaTitle) && !string.IsNullOrWhiteSpace(metadata?.MangaTitle))
         {
             item.MangaTitle = metadata.MangaTitle;
@@ -1488,11 +947,11 @@ public sealed class NativeBackendService : IDisposable
         }
         if (string.IsNullOrWhiteSpace(item.CoverUrl))
         {
-            var chapters = OrderChapterDirectories(EnumerateChapterDirectories(item.RootDir)).ToList();
+            var chapters = _library.OrderChapterDirectories(_library.EnumerateChapterDirectories(item.RootDir)).ToList();
             item.CoverUrl = metadata?.CoverUrl is { Length: > 0 } coverUrl
                 ? coverUrl
-                : EnumerateImages(item.RootDir).FirstOrDefault()
-                    ?? (chapters.Count > 0 ? EnumerateImages(chapters[0].FullName).FirstOrDefault() : null)
+                : _library.EnumerateImages(item.RootDir).FirstOrDefault()
+                    ?? (chapters.Count > 0 ? _library.EnumerateImages(chapters[0].FullName).FirstOrDefault() : null)
                     ?? string.Empty;
             changed = !string.IsNullOrWhiteSpace(item.CoverUrl) || changed;
         }
@@ -1541,37 +1000,7 @@ public sealed class NativeBackendService : IDisposable
     {
         List<DownloadHistoryItem> snapshot;
         lock (_historyLock) snapshot = _history.Select(CloneHistory).ToList();
-        WriteJsonAtomically(_historyFile, snapshot);
-    }
-
-    private static void WriteJsonAtomically<T>(string path, T value)
-    {
-        try
-        {
-            var temporary = path + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value, JsonOptions), new UTF8Encoding(false));
-            File.Move(temporary, path, true);
-        }
-        catch (Exception ex) { Debug.WriteLine($"保存状态失败: {ex.Message}"); }
-    }
-
-    private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var result) ? result : null;
-
-    private static bool SamePath(string? left, string? right) =>
-        !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right) &&
-        string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar),
-            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
-
-    private static string ResolveExistingDirectoryPath(string path)
-    {
-        var directory = new DirectoryInfo(Path.GetFullPath(path));
-        return Path.GetFullPath(directory.ResolveLinkTarget(true)?.FullName ?? directory.FullName);
-    }
-
-    private static string ResolveExistingFilePath(string path)
-    {
-        var file = new FileInfo(Path.GetFullPath(path));
-        return Path.GetFullPath(file.ResolveLinkTarget(true)?.FullName ?? file.FullName);
+        _library.WriteJsonAtomically(HistoryFile, snapshot);
     }
 
     private NativeDownloadTask RequireTask(string id) =>
@@ -1648,20 +1077,6 @@ public sealed class NativeBackendService : IDisposable
         FinishedAt = item.FinishedAt,
     };
 
-    private static ExportCbzProgress CloneExportProgress(ExportCbzProgress value) => new()
-    {
-        Id = value.Id,
-        Status = value.Status,
-        MangaTitle = value.MangaTitle,
-        CurrentChapter = value.CurrentChapter,
-        CurrentIndex = value.CurrentIndex,
-        TotalChapters = value.TotalChapters,
-        ExportedCount = value.ExportedCount,
-        ExportDir = value.ExportDir,
-        SkippedChapters = value.SkippedChapters.ToList(),
-        Error = value.Error,
-    };
-
     private sealed class NativeDownloadTask : IDisposable
     {
         public NativeDownloadTask(DownloadCreateRequest request, DownloadTaskDto dto)
@@ -1696,61 +1111,5 @@ public sealed class NativeBackendService : IDisposable
             StopSource.Cancel();
             StopSource.Dispose();
         }
-    }
-
-    private sealed class ExportTaskState
-    {
-        public object Gate { get; } = new();
-        public required ExportCbzProgress Progress { get; init; }
-        public Task? Worker { get; set; }
-    }
-
-    private sealed record LibraryEntry(
-        string Title,
-        string Author,
-        string SiteName,
-        string RootDirectory,
-        string MangaUrl,
-        string CoverUrl,
-        int DownloadedChapterCount,
-        string LastDownloadedChapterTitle,
-        DateTime SavedAt);
-
-    private sealed class LibraryMetadata
-    {
-        [JsonPropertyName("schema_version")] public int SchemaVersion { get; set; }
-        [JsonPropertyName("site_key")] public string SiteKey { get; set; } = string.Empty;
-        [JsonPropertyName("site_name")] public string SiteName { get; set; } = string.Empty;
-        [JsonPropertyName("manga_title")] public string MangaTitle { get; set; } = string.Empty;
-        [JsonPropertyName("authors")] public List<string> Authors { get; set; } = [];
-        [JsonPropertyName("manga_url")] public string MangaUrl { get; set; } = string.Empty;
-        [JsonPropertyName("root_dir")] public string RootDirectory { get; set; } = string.Empty;
-        [JsonPropertyName("cover_url")] public string CoverUrl { get; set; } = string.Empty;
-        [JsonPropertyName("total_chapters")] public int TotalChapters { get; set; }
-        [JsonPropertyName("downloaded_chapter_count")] public int DownloadedChapterCount { get; set; }
-        [JsonPropertyName("last_downloaded_chapter_title")] public string LastDownloadedChapterTitle { get; set; } = string.Empty;
-        [JsonPropertyName("last_downloaded_chapter_order")] public int? LastDownloadedChapterOrder { get; set; }
-        [JsonPropertyName("downloaded_chapters")] public List<DownloadedChapterRecord> DownloadedChapters { get; set; } = [];
-        [JsonPropertyName("completed")] public bool Completed { get; set; }
-        [JsonPropertyName("saved_at")] public string SavedAt { get; set; } = string.Empty;
-        [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = string.Empty;
-        [JsonPropertyName("last_failed_chapter_records")] public List<FailedChapterRecord> LastFailedChapterRecords { get; set; } = [];
-        [JsonPropertyName("last_failed_chapter_count")] public int LastFailedChapterCount { get; set; }
-    }
-
-    private sealed class DownloadedChapterRecord
-    {
-        [JsonPropertyName("order")] public int Order { get; set; }
-        [JsonPropertyName("dir_name")] public string DirName { get; set; } = string.Empty;
-        [JsonPropertyName("title")] public string Title { get; set; } = string.Empty;
-        [JsonPropertyName("image_count")] public int ImageCount { get; set; }
-    }
-
-    private sealed class FailedChapterRecord
-    {
-        [JsonPropertyName("order")] public int Order { get; set; }
-        [JsonPropertyName("slug")] public string Slug { get; set; } = string.Empty;
-        [JsonPropertyName("title")] public string Title { get; set; } = string.Empty;
-        [JsonPropertyName("reason")] public string Reason { get; set; } = string.Empty;
     }
 }

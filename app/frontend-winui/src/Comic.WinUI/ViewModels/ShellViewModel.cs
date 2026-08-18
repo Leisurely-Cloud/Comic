@@ -9,11 +9,11 @@ namespace Comic.WinUI.ViewModels;
 
 public partial class ShellViewModel : ObservableObject
 {
-    private readonly BackendClient _backendClient;
+    private readonly ApplicationSettingsService _applicationSettings;
 
-    public ShellViewModel(BackendClient backendClient, ApplicationSettingsService applicationSettings)
+    public ShellViewModel(ApplicationSettingsService applicationSettings)
     {
-        _backendClient = backendClient;
+        _applicationSettings = applicationSettings;
         IsNavigationPaneOpen = applicationSettings.ExpandNavigationPane;
     }
 
@@ -33,26 +33,14 @@ public partial class ShellViewModel : ObservableObject
     public partial string ShellErrorSummary { get; set; } = string.Empty;
 
     [RelayCommand]
-    public async Task EnsureBackendRunningAsync(CancellationToken cancellationToken = default)
+    public Task EnsureBackendRunningAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var health = await _backendClient.GetHealthAsync(cancellationToken);
-            BackendStatus = "内置 C# 服务已就绪";
-            StorageRoot = health.StorageRoot;
-            HasShellError = false;
-            ShellErrorSummary = string.Empty;
-        }
-        catch (OperationCanceledException)
-        {
-            BackendStatus = "已取消";
-        }
-        catch (Exception ex)
-        {
-            BackendStatus = "初始化失败";
-            HasShellError = true;
-            ShellErrorSummary = $"内置服务初始化失败: {ex.Message}";
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        BackendStatus = "内置 C# 服务已就绪";
+        StorageRoot = _applicationSettings.StorageRoot;
+        HasShellError = false;
+        ShellErrorSummary = string.Empty;
+        return Task.CompletedTask;
     }
 
     [RelayCommand]

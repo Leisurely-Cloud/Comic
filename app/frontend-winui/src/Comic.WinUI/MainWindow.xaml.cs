@@ -24,7 +24,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         ApplyWindowIcon();
         ApplyInitialWindowBounds();
-        _applicationSettings = App.GetService<ApplicationSettingsService>();
+        _applicationSettings = ((App)Application.Current).Services.GetRequiredService<ApplicationSettingsService>();
         _applicationSettings.ThemeChanged += OnThemeChanged;
         ApplyApplicationTheme();
         Title = "漫画下载器";

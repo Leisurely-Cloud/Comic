@@ -16,12 +16,16 @@ public sealed class SearchHistoryService
     private List<SearchHistoryEntry> _cache = [];
 
     public SearchHistoryService()
-    {
-        var dir = Path.Combine(
+        : this(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Comic.WinUI");
-        Directory.CreateDirectory(dir);
-        _filePath = Path.Combine(dir, "search-history.json");
+            "Comic.WinUI"))
+    {
+    }
+
+    internal SearchHistoryService(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        _filePath = Path.Combine(directory, "search-history.json");
         _cache = LoadFromDisk();
     }
 

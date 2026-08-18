@@ -27,6 +27,9 @@ public sealed class SearchResultItem
     [JsonPropertyName("latest_chapter")]
     public string LatestChapter { get; set; } = string.Empty;
 
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = string.Empty;
+
     [JsonPropertyName("update_time")]
     public string UpdateTime { get; set; } = string.Empty;
 }
@@ -80,6 +83,9 @@ public sealed class RankingItem
 
     [JsonPropertyName("latest_chapter")]
     public string LatestChapter { get; set; } = string.Empty;
+
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = string.Empty;
 
     [JsonPropertyName("update_time")]
     public string UpdateTime { get; set; } = string.Empty;
