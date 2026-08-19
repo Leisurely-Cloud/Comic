@@ -189,6 +189,20 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
 
     public bool ShowChapterSelection => HasChapters && !IsResolving;
 
+    /// <summary>
+    /// 选章面板的空状态是否可见。必须同时排除“解析中”:解析进行中 CurrentManga 还是 null,
+    /// 若只看 HasManga,空状态就会和「正在获取漫画详情和章节」遮罩层同时显示、文字互相重叠
+    /// (遮罩层用的 CardBackgroundFillColorDefaultBrush 是半透明卡片色,挡不住下面的内容)。
+    /// </summary>
+    public bool ShowEmptyState => !HasManga && !IsResolving;
+
+    /// <summary>
+    /// 漫画详情/选章内容是否可见。同样要排除“解析中”:切换到另一部漫画时 CurrentManga
+    /// 仍是上一部(非 null),不排除就会让旧内容和遮罩层文字重叠。
+    /// 加上 <see cref="ShowEmptyState"/> 与 IsResolving,三层任意时刻恰好只有一层可见。
+    /// </summary>
+    public bool ShowMangaContent => HasManga && !IsResolving;
+
     public int SelectedChapterCount => AvailableChapters.Count(c => c.IsSelected);
 
     public string ChapterSelectionSummary => HasChapters
@@ -510,6 +524,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     partial void OnIsResolvingChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowChapterSelection));
+        OnPropertyChanged(nameof(ShowEmptyState));
+        OnPropertyChanged(nameof(ShowMangaContent));
         OnPropertyChanged(nameof(CanStartDownload));
     }
 
@@ -585,6 +601,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         _dispatcherQueue.TryEnqueue(() =>
         {
             OnPropertyChanged(nameof(HasManga));
+            OnPropertyChanged(nameof(ShowEmptyState));
+            OnPropertyChanged(nameof(ShowMangaContent));
             OnPropertyChanged(nameof(CurrentMangaTitle));
             OnPropertyChanged(nameof(CurrentMangaSiteName));
             OnPropertyChanged(nameof(CurrentMangaLatestChapter));
