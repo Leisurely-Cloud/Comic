@@ -84,6 +84,9 @@
                 <Button Grid.Column="2" Content="打开输出目录"
                         Visibility="{x:Bind ViewModel.ExportOutputDirectory, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                         Command="{x:Bind ViewModel.OpenExportDirectoryCommand, Mode=OneWay}" />
+                <Button Grid.Column="3" Content="取消"
+                        Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Command="{x:Bind ViewModel.CancelExportCommand, Mode=OneWay}" />
                 <Button Grid.Column="3" Content="完成"
                         Visibility="{x:Bind ViewModel.IsExporting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}"
                         Command="{x:Bind ViewModel.DismissExportResultCommand, Mode=OneWay}" />

@@ -25,4 +25,8 @@ internal static class TestServiceFactory
         new(jmComic, scheduler, library, exporter, reader, settings);
 
     public static ApplicationSettingsService CreateSettings(string directory) => new(directory);
+
+    /// <summary>用本地替身传输层构造站点服务,确保测试不会访问真实站点。</summary>
+    public static JmComicService CreateOfflineJmComic(HttpMessageHandler handler) =>
+        new(new HttpClient(handler));
 }

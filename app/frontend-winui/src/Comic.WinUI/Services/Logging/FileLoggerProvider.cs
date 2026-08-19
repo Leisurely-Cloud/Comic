@@ -61,7 +61,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+        // 过滤交给 ILoggingBuilder 的规则(默认下限是 Information)。这里再写死一层
+        // >= Information 的下限,会让 SetMinimumLevel(Debug) 之类的配置完全失效,
+        // 想临时开 Debug 排查都开不出来。
+        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
 
         public void Log<TState>(
             LogLevel logLevel,

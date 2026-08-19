@@ -26,6 +26,9 @@ public sealed class DownloadSchedulerService : IDisposable
     private readonly ApplicationSettingsService? _applicationSettings;
     private readonly ILogger<DownloadSchedulerService> _logger;
     private readonly ConcurrentDictionary<string, NativeDownloadTask> _downloads = [];
+    // 任务号是 Guid 前 8 位,没有时间序,不能拿来排序。这里单独记创建次序。
+    private readonly ConcurrentDictionary<string, long> _creationOrder = [];
+    private long _creationSequence;
     private readonly object _historyLock = new();
     private readonly List<DownloadHistoryItem> _history;
 
@@ -63,7 +66,25 @@ public sealed class DownloadSchedulerService : IDisposable
 
     public void Dispose()
     {
-        foreach (var state in _downloads.Values) state.Dispose();
+        // 必须先取消、等 worker 退出,再释放 CTS。直接 Dispose 会在仍在运行的 worker 底下
+        // 释放它正在使用的 token,后台线程随即抛 ObjectDisposedException,并留下 .part 残件。
+        // 这里用完成回调而不是阻塞等待:Dispose 由窗口关闭触发,不能卡住 UI 线程。
+        foreach (var state in _downloads.Values.ToList())
+        {
+            state.RequestStop();
+            var worker = state.Worker;
+            if (worker is null || worker.IsCompleted)
+            {
+                state.Dispose();
+                continue;
+            }
+
+            worker.ContinueWith(
+                _ => state.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 
     // ---- 任务控制 ----
@@ -89,6 +110,7 @@ public sealed class DownloadSchedulerService : IDisposable
                 StatusText = "等待开始",
             });
         _downloads[id] = state;
+        _creationOrder[id] = Interlocked.Increment(ref _creationSequence);
         state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
         return Task.FromResult(CloneTask(state));
     }
@@ -98,7 +120,9 @@ public sealed class DownloadSchedulerService : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(new DownloadListResponse
         {
-            Items = _downloads.Values.Select(CloneTask).OrderByDescending(task => task.Id, StringComparer.Ordinal).ToList(),
+            Items = _downloads.Values.Select(CloneTask)
+                .OrderByDescending(task => _creationOrder.TryGetValue(task.Id, out var order) ? order : 0)
+                .ToList(),
         });
     }
 
@@ -182,6 +206,7 @@ public sealed class DownloadSchedulerService : IDisposable
         {
             if (_downloads.TryGetValue(id, out var state) && IsTerminal(CloneTask(state).Status) && _downloads.TryRemove(id, out _))
             {
+                _creationOrder.TryRemove(id, out _);
                 state.Dispose();
                 result.Deleted.Add(id);
             }
@@ -1106,9 +1131,23 @@ public sealed class DownloadSchedulerService : IDisposable
         public int SpeedLastCompletedImages { get; set; }
         public DateTimeOffset? SpeedLastActivityAt { get; set; }
 
+        /// <summary>只请求停止,不释放。关闭流程需要先取消、等 worker 退出,再 Dispose。</summary>
+        public void RequestStop()
+        {
+            try
+            {
+                StopSource.Cancel();
+                CurrentChapterStopSource?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 已经释放过,无需再取消。
+            }
+        }
+
         public void Dispose()
         {
-            StopSource.Cancel();
+            RequestStop();
             StopSource.Dispose();
         }
     }

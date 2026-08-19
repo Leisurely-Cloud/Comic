@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Comic.WinUI.Models;
 using Comic.WinUI.Services.Native;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -150,5 +151,86 @@ public sealed class DownloadSchedulerServiceTests
         Assert.IsFalse(Directory.Exists(temporaryChapterTwo));
         Assert.IsTrue(Directory.Exists(_chapterRoot));
         Assert.IsTrue(Directory.Exists(chapterTwenty));
+    }
+
+    [TestMethod]
+    public async Task GetDownloads_OrdersTasksByCreationNewestFirst()
+    {
+        // 任务号是 Guid 前 8 位,没有时间序,不能拿它当排序键。
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var createdInOrder = new List<string>();
+        for (var index = 1; index <= 6; index++)
+        {
+            var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+            {
+                Url = $"https://18comic.vip/album/{index}",
+            });
+            createdInOrder.Add(task.Id);
+        }
+
+        var listed = await service.GetDownloadsAsync();
+        var expected = createdInOrder.AsEnumerable().Reverse().ToList();
+
+        CollectionAssert.AreEqual(
+            expected,
+            listed.Items.Select(item => item.Id).ToList(),
+            "任务列表应当按创建时间倒序,最新的在最前。");
+    }
+
+    [TestMethod]
+    public async Task CreateDownload_RoutesSiteTrafficThroughTheInjectedTransport()
+    {
+        // 这条断言保证离线替身真的接上了:测试不应该有任何机会打到真实站点。
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/424242",
+        });
+
+        var timeout = Stopwatch.StartNew();
+        DownloadTaskDto snapshot;
+        do
+        {
+            await Task.Delay(10);
+            snapshot = await service.GetDownloadAsync(task.Id);
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(30), "任务未在 30 秒内结束。");
+        }
+        while (!DownloadSchedulerService.IsTerminal(snapshot.Status));
+
+        Assert.AreEqual("failed", snapshot.Status, "站点全部域名返回失败时任务应当失败。");
+        Assert.IsTrue(handler.RequestedUris.Count > 0, "站点请求应当经过注入的替身传输层。");
+        Assert.IsTrue(
+            handler.RequestedUris.All(uri => uri.StartsWith("https://", StringComparison.Ordinal)),
+            "替身记录到的应当全部是站点 API 请求。");
+    }
+
+    [TestMethod]
+    public async Task Dispose_WithActiveTasksDoesNotThrowAndIsIdempotent()
+    {
+        // 修复前 Dispose 会在仍在运行的 worker 底下直接释放它正在用的 CTS。
+        // 这里只验证释放路径本身健壮(不抛、可重复调用);worker 侧的时序不便断言。
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        for (var index = 1; index <= 3; index++)
+        {
+            await service.CreateDownloadAsync(new DownloadCreateRequest
+            {
+                Url = $"https://18comic.vip/album/{index}",
+            });
+        }
+
+        service.Dispose();
+        service.Dispose();
     }
 }

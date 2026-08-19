@@ -69,7 +69,7 @@ public sealed class DownloadEventStream
                     JsonPayload = payload,
                 };
             }
-            if (progress.Status is "completed" or "failed") yield break;
+            if (progress.Status is "completed" or "failed" or "cancelled") yield break;
             await Task.Delay(150, cancellationToken);
         }
     }

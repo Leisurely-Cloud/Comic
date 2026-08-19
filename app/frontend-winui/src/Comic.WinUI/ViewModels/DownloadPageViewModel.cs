@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +16,7 @@ using Microsoft.UI.Dispatching;
 
 namespace Comic.WinUI.ViewModels;
 
-public partial class DownloadPageViewModel : ObservableObject
+public partial class DownloadPageViewModel : ObservableObject, IDisposable
 {
     private readonly BackendClient _backendClient;
     private readonly DownloadEventStream _eventStream;
@@ -56,6 +55,35 @@ public partial class DownloadPageViewModel : ObservableObject
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         HistoryItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistoryItems));
         LoadSearchHistory();
+    }
+
+    /// <summary>
+    /// 页面导航离开时调用:取消 150ms 状态轮询与在途的搜索/解析请求。
+    /// 这个 ViewModel 是 transient,每次导航都会新建一个;不取消的话,被丢弃的实例
+    /// 会连同它的轮询循环继续存活,反复切换页面就会叠加多个独立轮询器。
+    /// </summary>
+    public void Dispose()
+    {
+        CancelAndDispose(ref _subscriptionCts);
+        CancelAndDispose(ref _searchCts);
+        CancelAndDispose(ref _resolveCts);
+    }
+
+    private static void CancelAndDispose(ref CancellationTokenSource? source)
+    {
+        var current = source;
+        source = null;
+        if (current is null) return;
+        try
+        {
+            current.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 已释放,无需再取消。
+        }
+
+        current.Dispose();
     }
 
     public ObservableCollection<DownloadTaskItemViewModel> Tasks { get; } = [];
@@ -203,10 +231,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务暂不可用，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"初始化异常: {ex.Message}";
@@ -284,12 +308,6 @@ public partial class DownloadPageViewModel : ObservableObject
             PageError = $"搜索出错: {ex.Error.Message}";
             SearchStatusText = "搜索失败";
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "[SearchAsync] HttpRequestException");
-            PageError = "内置服务调用失败，请重试。";
-            SearchStatusText = "搜索失败";
-        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[SearchAsync] Exception: {Type}", ex.GetType().Name);
@@ -345,12 +363,6 @@ public partial class DownloadPageViewModel : ObservableObject
             PageError = $"搜索出错: {ex.Error.Message}";
             SearchStatusText = "搜索失败";
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "[SearchByJmIdAsync] HttpRequestException");
-            PageError = "内置服务调用失败，请重试。";
-            SearchStatusText = "搜索失败";
-        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[SearchByJmIdAsync] Exception: {Type}", ex.GetType().Name);
@@ -398,10 +410,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = $"加载更多失败: {ex.Error.Message}";
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"加载更多异常: {ex.Message}";
@@ -442,10 +450,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = $"获取漫画详情失败: {ex.Error.Message}";
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -489,10 +493,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = $"获取漫画详情失败: {ex.Error.Message}";
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -693,10 +693,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = $"创建下载任务失败: {ex.Error.Message}";
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         finally
         {
             IsBusy = false;
@@ -733,10 +729,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -785,10 +777,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -886,10 +874,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -1023,10 +1007,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"批量停止异常: {ex.Message}";
@@ -1104,10 +1084,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"批量删除异常: {ex.Message}";
@@ -1179,10 +1155,6 @@ public partial class DownloadPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"操作异常: {ex.Message}";
@@ -1206,10 +1178,6 @@ public partial class DownloadPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {

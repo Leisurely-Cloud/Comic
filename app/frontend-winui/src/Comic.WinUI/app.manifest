@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.0.0" name="MyApp.app"/>
+  <assemblyIdentity version="1.0.0.0" name="Comic.WinUI.app"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -23,6 +23,12 @@
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+      <!--
+        漫画标题与章节名都来自站点且可以很长,「存储根目录 + 漫画名 + 章节名 + 图片名」
+        很容易超过 MAX_PATH(260)。声明长路径支持;实际生效还需要系统启用
+        HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled。
+      -->
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>
 </assembly>
