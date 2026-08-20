@@ -270,7 +270,9 @@ public partial class LibraryPageViewModel : ObservableObject
             return;
         }
 
-        // 新导出取代旧导出时,除了停止本地轮询,还要让服务端停止旧的导出线程。
+        // 开始新导出前清理上一次的残留。上面的 IsExporting 守卫已保证此刻没有正在运行的
+        // 导出,所以这里只是清掉上一个任务号、并取消可能仍在收尾的订阅循环。
+        // 用户主动取消走 CancelExportCommand,不是这条路径。
         await RequestServerExportCancelAsync();
         _exportCts?.Cancel();
         _exportCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
