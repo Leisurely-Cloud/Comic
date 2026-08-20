@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Comic.WinUI.Models;
@@ -191,10 +190,6 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败。";
-        }
         catch (Exception ex)
         {
             PageError = $"加载章节异常: {ex.Message}";
@@ -273,10 +268,6 @@ public partial class ReaderPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             PageError = ex.Error.Message;
-        }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败。";
         }
         catch (Exception ex)
         {
@@ -427,10 +418,6 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败。";
-        }
         catch (Exception ex)
         {
             PageError = $"加载图片异常: {ex.Message}";
@@ -549,6 +536,10 @@ public partial class ReaderPageViewModel : ObservableObject
 
             _dispatcherQueue.TryEnqueue(() =>
             {
+                // 回调是排队执行的:排队期间用户可能已切章(LoadChapterImagesAsync 会取消
+                // _imageCts)。不重新检查 token 就会把上一章的页码写进新章节的阅读进度。
+                if (cancellationToken.IsCancellationRequested) return;
+
                 var bitmap = new BitmapImage();
                 CurrentImage = bitmap;
                 CurrentImageIndex = index;

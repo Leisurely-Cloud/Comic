@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Comic.WinUI.Models;
 using Comic.WinUI.ViewModels;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -130,4 +131,115 @@ public sealed class DownloadTaskItemViewModelTests
         Assert.AreEqual(0, viewModel.SelectedChapterCount);
         Assert.IsTrue(viewModel.Chapters.All(chapter => !chapter.IsBatchMode));
     }
+
+    [TestMethod]
+    public void UpdateFrom_AppendsNewLogsWithoutResettingCollection()
+    {
+        // 轮询是 150ms 一次。原来每次都 Clear() 再重填,绑定的 ListView 会整表重建。
+        var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto
+        {
+            Id = "task-logs",
+            Logs = [Log("第一条")],
+        });
+        var firstEntry = viewModel.Logs[0];
+
+        var actions = new List<NotifyCollectionChangedAction>();
+        viewModel.Logs.CollectionChanged += (_, e) => actions.Add(e.Action);
+
+        viewModel.UpdateFrom(new DownloadTaskDto
+        {
+            Id = "task-logs",
+            Logs = [Log("第一条"), Log("第二条"), Log("第三条")],
+        });
+
+        Assert.AreEqual(3, viewModel.Logs.Count);
+        Assert.AreSame(firstEntry, viewModel.Logs[0], "已有日志项不应被重建。");
+        Assert.AreEqual("第三条", viewModel.LatestLogMessage);
+        CollectionAssert.AreEqual(
+            new[] { NotifyCollectionChangedAction.Add, NotifyCollectionChangedAction.Add },
+            actions,
+            "只应产生两次 Add,不应出现 Reset。");
+    }
+
+    [TestMethod]
+    public void UpdateFrom_EmitsNothingWhenLogsUnchanged()
+    {
+        var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto
+        {
+            Id = "task-logs-idle",
+            Logs = [Log("唯一一条")],
+        });
+
+        var changed = false;
+        viewModel.Logs.CollectionChanged += (_, _) => changed = true;
+
+        viewModel.UpdateFrom(new DownloadTaskDto
+        {
+            Id = "task-logs-idle",
+            Logs = [Log("唯一一条")],
+        });
+
+        Assert.AreEqual(1, viewModel.Logs.Count);
+        Assert.IsFalse(changed, "日志没有新增时不应触发任何集合变更。");
+    }
+
+    [TestMethod]
+    public void UpdateFrom_RebuildsLogsWhenServerListShrinks()
+    {
+        var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto
+        {
+            Id = "task-logs-trim",
+            Logs = [Log("a"), Log("b"), Log("c")],
+        });
+
+        viewModel.UpdateFrom(new DownloadTaskDto
+        {
+            Id = "task-logs-trim",
+            Logs = [Log("z")],
+        });
+
+        Assert.AreEqual(1, viewModel.Logs.Count);
+        Assert.AreEqual("z", viewModel.Logs[0].Message);
+    }
+
+    [TestMethod]
+    public void UpdateFrom_ReusesEveryChapterItemWhenOrderChanges()
+    {
+        // 章节匹配改成了先建字典再查,这里确认复用与顺序语义没变。
+        var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto
+        {
+            Id = "task-chapters",
+            Chapters =
+            [
+                new DownloadChapterProgressDto { Id = "c1", Title = "第1话" },
+                new DownloadChapterProgressDto { Id = "c2", Title = "第2话" },
+                new DownloadChapterProgressDto { Id = "c3", Title = "第3话" },
+            ],
+        });
+        var original = viewModel.Chapters.ToDictionary(chapter => chapter.Id);
+
+        // 服务端顺序变化 + 新增一章 + 删除一章。
+        viewModel.UpdateFrom(new DownloadTaskDto
+        {
+            Id = "task-chapters",
+            Chapters =
+            [
+                new DownloadChapterProgressDto { Id = "c3", Title = "第3话", Status = "completed" },
+                new DownloadChapterProgressDto { Id = "c1", Title = "第1话", Status = "running" },
+                new DownloadChapterProgressDto { Id = "c4", Title = "第4话" },
+            ],
+        });
+
+        Assert.AreEqual(3, viewModel.Chapters.Count);
+        var byId = viewModel.Chapters.ToDictionary(chapter => chapter.Id);
+        Assert.AreSame(original["c1"], byId["c1"]);
+        Assert.AreSame(original["c3"], byId["c3"]);
+        Assert.IsFalse(byId.ContainsKey("c2"), "服务端已移除的章节应被删掉。");
+        Assert.IsTrue(byId.ContainsKey("c4"), "服务端新增的章节应被加入。");
+        Assert.AreEqual("已完成", byId["c3"].StatusLabel);
+        Assert.AreEqual("下载中", byId["c1"].StatusLabel);
+    }
+
+    private static DownloadLogEntry Log(string message) =>
+        new() { Time = "00:00:00", Tag = "info", Message = message };
 }

@@ -98,12 +98,19 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         DownloadSpeedBytesPerSecond = dto.DownloadSpeedBytesPerSecond;
         TaskError = dto.TaskError;
 
-        Logs.Clear();
-        if (dto.Logs is not null)
+        // 日志是追加型的。整表 Clear + 重填会让绑定的 ListView 每秒重建 6~7 次,
+        // 所以只追加新增的尾部;仅在日志被截断(变短)时才整体重建。
+        var logEntries = dto.Logs ?? [];
+        if (Logs.Count > logEntries.Count)
         {
-            foreach (var entry in dto.Logs)
+            Logs.Clear();
+            foreach (var entry in logEntries) Logs.Add(entry);
+        }
+        else
+        {
+            for (var index = Logs.Count; index < logEntries.Count; index++)
             {
-                Logs.Add(entry);
+                Logs.Add(logEntries[index]);
             }
         }
 
@@ -117,19 +124,22 @@ public partial class DownloadTaskItemViewModel : ObservableObject
                 Chapters.RemoveAt(index);
             }
         }
+
+        // 建一次索引再查。原来在 chapterDtos 循环里对 Chapters 做 FirstOrDefault,
+        // 是 O(n²):400 章的漫画每次轮询要做十几万次字符串比较,而轮询是 150ms 一次。
+        var existingById = Chapters.ToDictionary(item => item.Id, StringComparer.Ordinal);
         foreach (var chapter in chapterDtos)
         {
-            var existing = Chapters.FirstOrDefault(item => item.Id == chapter.Id);
-            if (existing is null)
+            if (existingById.TryGetValue(chapter.Id, out var existing))
+            {
+                existing.UpdateFrom(chapter);
+            }
+            else
             {
                 var item = DownloadChapterProgressItemViewModel.FromDto(chapter);
                 item.IsBatchMode = IsBatchMode;
                 item.PropertyChanged += OnChapterPropertyChanged;
                 Chapters.Add(item);
-            }
-            else
-            {
-                existing.UpdateFrom(chapter);
             }
         }
 

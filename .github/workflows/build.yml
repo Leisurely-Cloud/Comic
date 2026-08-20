@@ -34,6 +34,8 @@ jobs:
   package:
     name: Build installer
     runs-on: windows-latest
+    # 打包与发布必须在测试通过后进行,否则 tag 推送会发出未经验证的安装包。
+    needs: test
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

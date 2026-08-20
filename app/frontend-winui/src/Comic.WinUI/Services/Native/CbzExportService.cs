@@ -24,6 +24,67 @@ public sealed class CbzExportService : IDisposable
 
     public void Dispose()
     {
+        // 与下载调度一致:先取消,等 worker 真正结束后再释放 CTS,且不阻塞关窗的 UI 线程。
+        foreach (var state in _exports.Values.ToArray())
+        {
+            try
+            {
+                state.Cancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                continue;
+            }
+
+            var worker = state.Worker;
+            if (worker is null || worker.IsCompleted)
+            {
+                state.Dispose();
+                continue;
+            }
+
+            worker.ContinueWith(
+                _ => state.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    /// <summary>清掉已结束的导出任务,避免导出表随会话无界增长。</summary>
+    private void PruneFinishedExports()
+    {
+        foreach (var pair in _exports.ToArray())
+        {
+            string status;
+            lock (pair.Value.Gate) status = pair.Value.Progress.Status;
+            if (status is not ("completed" or "failed" or "cancelled")) continue;
+            if (_exports.TryRemove(pair.Key, out var removed)) removed.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 请求取消导出任务。导出线程会在最近的章节边界退出,已生成的 CBZ 文件保留。
+    /// 返回是否成功发出取消请求(任务不存在或已结束时为 false)。
+    /// </summary>
+    public Task<bool> CancelExportAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_exports.TryGetValue(taskId, out var state)) return Task.FromResult(false);
+        lock (state.Gate)
+        {
+            if (state.Progress.Status != "running") return Task.FromResult(false);
+        }
+
+        try
+        {
+            state.Cancellation.Cancel();
+            return Task.FromResult(true);
+        }
+        catch (ObjectDisposedException)
+        {
+            return Task.FromResult(false);
+        }
     }
 
     public Task<ExportCbzResponse> ExportCbzAsync(string rootDir, CancellationToken cancellationToken = default)
@@ -31,6 +92,7 @@ public sealed class CbzExportService : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         var resolvedRoot = _library.ResolveLibraryRoot(rootDir);
         var metadata = _library.LoadLibraryMetadata(resolvedRoot);
+        PruneFinishedExports();
         var taskId = Guid.NewGuid().ToString("N")[..8];
         var state = new ExportTaskState
         {
@@ -42,7 +104,9 @@ public sealed class CbzExportService : IDisposable
             },
         };
         _exports[taskId] = state;
-        state.Worker = Task.Run(() => ProcessExportAsync(state, resolvedRoot, metadata?.MangaUrl ?? string.Empty), CancellationToken.None);
+        state.Worker = Task.Run(
+            () => ProcessExportAsync(state, resolvedRoot, metadata?.MangaUrl ?? string.Empty, state.Cancellation.Token),
+            CancellationToken.None);
         return Task.FromResult(new ExportCbzResponse { Status = "ok", TaskId = taskId, Message = "导出任务已创建" });
     }
 
@@ -53,10 +117,15 @@ public sealed class CbzExportService : IDisposable
         lock (state.Gate) return Task.FromResult(CloneExportProgress(state.Progress));
     }
 
-    private async Task ProcessExportAsync(ExportTaskState state, string rootDirectory, string mangaUrl)
+    private async Task ProcessExportAsync(
+        ExportTaskState state,
+        string rootDirectory,
+        string mangaUrl,
+        CancellationToken cancellationToken)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var chapters = _library.OrderChapterDirectories(_library.EnumerateChapterDirectories(rootDirectory)).ToList();
             if (chapters.Count == 0) throw new InvalidOperationException("当前漫画目录里没有可导出的已完成章节");
             var simplifiedMangaTitle = ToSimplifiedChinese(state.Progress.MangaTitle);
@@ -75,6 +144,7 @@ public sealed class CbzExportService : IDisposable
             for (var index = 0; index < chapters.Count; index++)
             {
                 var chapter = chapters[index];
+                cancellationToken.ThrowIfCancellationRequested();
                 var images = _library.EnumerateImages(chapter.FullName);
                 lock (state.Gate) state.Progress.CurrentChapter = LibraryStorageService.ChapterTitle(chapter.Name);
                 if (images.Count == 0) skipped.Add(chapter.Name);
@@ -87,7 +157,8 @@ public sealed class CbzExportService : IDisposable
                         LibraryStorageService.ChapterTitle(chapter.Name),
                         index + 1,
                         chapters.Count,
-                        mangaUrl);
+                        mangaUrl,
+                        cancellationToken);
                     exported++;
                 }
                 lock (state.Gate)
@@ -102,6 +173,16 @@ public sealed class CbzExportService : IDisposable
             }
             if (exported == 0) throw new InvalidOperationException("没有找到可写入 CBZ 的图片文件");
             lock (state.Gate) state.Progress.Status = "completed";
+        }
+        catch (OperationCanceledException)
+        {
+            // 已生成的 CBZ 文件保留,只标记任务被取消。
+            _logger.LogInformation("CBZ 导出任务已取消: {RootDirectory}", rootDirectory);
+            lock (state.Gate)
+            {
+                state.Progress.Status = "cancelled";
+                state.Progress.Error = "导出已取消";
+            }
         }
         catch (Exception ex)
         {
@@ -134,7 +215,8 @@ public sealed class CbzExportService : IDisposable
         string chapterTitle,
         int chapterNumber,
         int chapterCount,
-        string mangaUrl)
+        string mangaUrl,
+        CancellationToken cancellationToken)
     {
         var temporaryPath = archivePath + ".tmp";
         if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
@@ -145,10 +227,11 @@ public sealed class CbzExportService : IDisposable
             {
                 foreach (var imagePath in images)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var entry = archive.CreateEntry(Path.GetFileName(imagePath), CompressionLevel.Optimal);
                     await using var target = entry.Open();
                     await using var source = File.OpenRead(imagePath);
-                    await source.CopyToAsync(target);
+                    await source.CopyToAsync(target, cancellationToken);
                 }
                 var comicInfo = new XDocument(
                     new XDeclaration("1.0", "utf-8", null),
@@ -189,10 +272,25 @@ public sealed class CbzExportService : IDisposable
         Error = value.Error,
     };
 
-    private sealed class ExportTaskState
+    private sealed class ExportTaskState : IDisposable
     {
         public object Gate { get; } = new();
         public required ExportCbzProgress Progress { get; init; }
         public Task? Worker { get; set; }
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        public void Dispose()
+        {
+            try
+            {
+                Cancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 已释放,无需再取消。
+            }
+
+            Cancellation.Dispose();
+        }
     }
 }

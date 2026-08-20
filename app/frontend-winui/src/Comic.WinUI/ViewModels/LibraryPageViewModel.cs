@@ -24,6 +24,7 @@ public partial class LibraryPageViewModel : ObservableObject
     private int _totalItems;
     private readonly int _pageSize;
     private CancellationTokenSource? _exportCts;
+    private string _exportTaskId = string.Empty;
 
     public LibraryPageViewModel(
         BackendClient backendClient,
@@ -122,10 +123,6 @@ public partial class LibraryPageViewModel : ObservableObject
         {
             PageError = ex.Error.Message;
         }
-        catch (HttpRequestException)
-        {
-            PageError = "内置服务调用失败，请重试。";
-        }
         catch (Exception ex)
         {
             PageError = $"操作异常: {ex.Message}";
@@ -198,10 +195,6 @@ public partial class LibraryPageViewModel : ObservableObject
         catch (BackendApiException ex)
         {
             UpdateCheckStatus = $"检查失败: {ex.Error.Message}";
-        }
-        catch (HttpRequestException)
-        {
-            UpdateCheckStatus = "内置服务调用失败，请重试。";
         }
         catch (Exception ex)
         {
@@ -277,6 +270,10 @@ public partial class LibraryPageViewModel : ObservableObject
             return;
         }
 
+        // 开始新导出前清理上一次的残留。上面的 IsExporting 守卫已保证此刻没有正在运行的
+        // 导出,所以这里只是清掉上一个任务号、并取消可能仍在收尾的订阅循环。
+        // 用户主动取消走 CancelExportCommand,不是这条路径。
+        await RequestServerExportCancelAsync();
         _exportCts?.Cancel();
         _exportCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _exportCts.Token;
@@ -300,6 +297,10 @@ public partial class LibraryPageViewModel : ObservableObject
                 IsExporting = false;
                 return;
             }
+
+            // 记下任务号:取消时必须通知服务端真正停止导出线程,
+            // 否则只是本地停止轮询,后台仍在继续写文件。
+            _exportTaskId = response.TaskId;
 
             await foreach (var stateEvent in _eventStream.SubscribeExportAsync(response.TaskId, token))
             {
@@ -338,10 +339,20 @@ public partial class LibraryPageViewModel : ObservableObject
                     PageError = ExportStatusText;
                     break;
                 }
+
+                if (progress.Status == "cancelled")
+                {
+                    ExportStatusTitle = "CBZ 导出已取消";
+                    ExportStatusText = progress.ExportedCount > 0
+                        ? $"已取消，保留了已生成的 {progress.ExportedCount} 个 CBZ 文件。"
+                        : "导出已取消。";
+                    break;
+                }
             }
         }
         catch (OperationCanceledException)
         {
+            await RequestServerExportCancelAsync();
             ExportStatusTitle = "CBZ 导出已取消";
             ExportStatusText = "导出已取消";
         }
@@ -360,6 +371,35 @@ public partial class LibraryPageViewModel : ObservableObject
         finally
         {
             IsExporting = false;
+        }
+    }
+
+    /// <summary>取消正在进行的 CBZ 导出。</summary>
+    [RelayCommand]
+    private async Task CancelExport()
+    {
+        if (!IsExporting) return;
+        ExportStatusText = "正在取消导出...";
+        await RequestServerExportCancelAsync();
+        _exportCts?.Cancel();
+    }
+
+    /// <summary>
+    /// 通知服务端停止导出线程。仅停止本地轮询是不够的:导出 worker 会继续写文件。
+    /// 取消本身失败不应影响调用方,所以这里吞掉异常。
+    /// </summary>
+    private async Task RequestServerExportCancelAsync()
+    {
+        if (string.IsNullOrEmpty(_exportTaskId)) return;
+        var taskId = _exportTaskId;
+        _exportTaskId = string.Empty;
+        try
+        {
+            await _backendClient.CancelExportAsync(taskId, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            // 取消失败不影响调用方,导出线程最终也会随进程退出。
         }
     }
 

@@ -33,6 +33,14 @@ public sealed class JmComicService : IDisposable
         @"var\s+scramble_id\s*=\s*(\d+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    // Windows 保留设备名:即使带扩展名也不能作为文件或目录名。
+    private static readonly string[] ReservedDeviceNames =
+    [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
     private readonly JmSiteOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ILogger<JmComicService> _logger;
@@ -423,7 +431,9 @@ public sealed class JmComicService : IDisposable
         return (digest[^1] % divisor) * 2 + 2;
     }
 
-    public static byte[] DecryptPayload(long timestamp, string encryptedData)
+    // dataSecret 为 null 时回退到 JmSiteOptions.Default(保持既有调用方与测试可用);
+    // 实例调用一律传入自身 _options.AppDataSecret,否则注入的自定义站点配置会被静默忽略。
+    public static byte[] DecryptPayload(long timestamp, string encryptedData, string? dataSecret = null)
     {
         var encrypted = Convert.FromBase64String(encryptedData);
         if (encrypted.Length == 0 || encrypted.Length % 16 != 0)
@@ -431,7 +441,8 @@ public sealed class JmComicService : IDisposable
             throw new InvalidDataException("JM API 返回的密文长度无效");
         }
 
-        var key = Encoding.ASCII.GetBytes(Md5Hex($"{timestamp}{JmSiteOptions.Default.AppDataSecret}"));
+        var secret = string.IsNullOrEmpty(dataSecret) ? JmSiteOptions.Default.AppDataSecret : dataSecret;
+        var key = Encoding.ASCII.GetBytes(Md5Hex($"{timestamp}{secret}"));
         using var aes = Aes.Create();
         aes.Key = key;
         aes.Mode = CipherMode.ECB;
@@ -553,7 +564,7 @@ public sealed class JmComicService : IDisposable
                 {
                     throw new InvalidDataException("data 字段不是加密字符串");
                 }
-                var plaintext = DecryptPayload(timestamp, encrypted);
+                var plaintext = DecryptPayload(timestamp, encrypted, _options.AppDataSecret);
                 using var payload = JsonDocument.Parse(plaintext);
                 PromoteDomain(domain);
                 return payload.RootElement.Clone();
@@ -598,9 +609,20 @@ public sealed class JmComicService : IDisposable
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
                 var match = ScrambleRegex.Match(html);
                 PromoteDomain(domain);
-                return match.Success && int.TryParse(match.Groups[1].Value, out var value)
-                    ? value
-                    : _options.DefaultScrambleId;
+                if (match.Success && int.TryParse(match.Groups[1].Value, out var value))
+                {
+                    return value;
+                }
+
+                // 解析不到 scramble_id 时只能回退默认值,但错误的分块数会让图片还原成乱块,
+                // 且下载流程仍会“成功”。这里必须留下告警,否则站点改版后无从排查。
+                _logger.LogWarning(
+                    "未能从 {Domain} 的章节页解析 scramble_id(章节 {ChapterId}),回退默认值 {DefaultScrambleId}。" +
+                    "站点模板可能已改版,图片可能无法正确还原。",
+                    domain,
+                    chapterId,
+                    _options.DefaultScrambleId);
+                return _options.DefaultScrambleId;
             }
             catch (OperationCanceledException)
             {
@@ -894,8 +916,29 @@ public sealed class JmComicService : IDisposable
         var invalid = Path.GetInvalidFileNameChars();
         var cleaned = new string(value.Select(character => invalid.Contains(character) || char.IsControl(character) ? '_' : character).ToArray())
             .Trim('.', ' ');
-        if (cleaned.Length > 200) cleaned = cleaned[..200];
-        return string.IsNullOrWhiteSpace(cleaned) ? "unnamed" : cleaned;
+        cleaned = TruncatePreservingSurrogates(cleaned, 200);
+        if (string.IsNullOrWhiteSpace(cleaned)) return "unnamed";
+
+        // 站点标题是不可信输入。命中 Windows 保留设备名(含带扩展名的 NUL.jpg 之类)
+        // 会让 CreateDirectory / File.Create 直接失败,整章下载报一个难以定位的 IO 错误。
+        var stem = cleaned;
+        var dot = stem.IndexOf('.');
+        if (dot >= 0) stem = stem[..dot];
+        if (ReservedDeviceNames.Contains(stem, StringComparer.OrdinalIgnoreCase))
+        {
+            cleaned = "_" + cleaned;
+        }
+
+        return cleaned;
+    }
+
+    /// <summary>按码元截断但不切开代理对(标题里的 emoji 占两个码元,切一半会得到坏字符)。</summary>
+    private static string TruncatePreservingSurrogates(string value, int maxLength)
+    {
+        if (value.Length <= maxLength) return value;
+        var end = maxLength;
+        if (char.IsHighSurrogate(value[end - 1])) end--;
+        return value[..end].TrimEnd('.', ' ');
     }
 
     private static string Md5Hex(string value) =>

@@ -64,8 +64,11 @@ public sealed class BackendClient
         int page = 1,
         int pageSize = 20,
         CancellationToken cancellationToken = default) =>
-        InvokeAsync(() =>
+        InvokeAsync(() => Task.Run(() =>
         {
+            // 书库枚举要逐部漫画遍历章节目录并读取元数据,是重量级同步 IO。
+            // 必须离开 UI 线程,否则大书库会直接卡住界面。
+            // 调用方在 UI 线程 await,续体仍会回到 UI 线程,集合更新的线程性不变。
             cancellationToken.ThrowIfCancellationRequested();
             var entries = _library.EnumerateLibraryEntries()
                 .Where(entry => string.IsNullOrWhiteSpace(keyword) ||
@@ -77,7 +80,7 @@ public sealed class BackendClient
             var safePageSize = Math.Clamp(pageSize, 1, 100);
             var totalPages = Math.Max((int)Math.Ceiling(entries.Count / (double)safePageSize), 1);
             var safePage = Math.Clamp(page, 1, totalPages);
-            return Task.FromResult(new LibraryListResponse
+            return new LibraryListResponse
             {
                 Items = entries.Skip((safePage - 1) * safePageSize).Take(safePageSize).Select(entry => new LibraryItemDto
                 {
@@ -94,8 +97,8 @@ public sealed class BackendClient
                 Total = entries.Count,
                 Page = safePage,
                 PageSize = safePageSize,
-            });
-        }, "library_failed");
+            };
+        }, cancellationToken), "library_failed");
 
     public Task<bool> ToggleFavoriteAsync(string rootDir, CancellationToken cancellationToken = default) =>
         InvokeAsync(() =>
@@ -156,6 +159,9 @@ public sealed class BackendClient
 
     public Task<ExportCbzProgress> GetExportProgressAsync(string taskId, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _export.GetExportProgressAsync(taskId, cancellationToken), "export_not_found");
+
+    public Task<bool> CancelExportAsync(string taskId, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _export.CancelExportAsync(taskId, cancellationToken), "export_cancel_failed");
 
     public Task<RankingResponse> GetRankingAsync(
         string site = "jmcomic",

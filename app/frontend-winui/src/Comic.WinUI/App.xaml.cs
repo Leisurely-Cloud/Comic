@@ -36,12 +36,19 @@ public sealed partial class App : Application
         services.AddLogging(builder => builder.AddProvider(new FileLoggerProvider(logDirectory)));
 
         services.AddSingleton(new JmSiteOptions());
-        services.AddHttpClient<JmComicService>()
-            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+        // JmComicService 必须是单例:它持有专辑缓存和“当前可用 API 域名”的学习结果。
+        // 注册成 AddHttpClient 的 typed client 会让它变成 transient,于是 BackendClient 和
+        // DownloadSchedulerService 各捕获一份,缓存与域名故障转移的成果互相看不到。
+        // 单例长期持有 HttpClient,用 PooledConnectionLifetime 定期回收连接以避免 DNS 固化。
+        services.AddSingleton(provider => new JmComicService(
+            new System.Net.Http.HttpClient(new System.Net.Http.SocketsHttpHandler
             {
                 ConnectTimeout = TimeSpan.FromSeconds(5),
                 AutomaticDecompression = System.Net.DecompressionMethods.All,
-            });
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            }),
+            provider.GetRequiredService<JmSiteOptions>(),
+            provider.GetRequiredService<ILogger<JmComicService>>()));
         services.AddSingleton<LibraryStorageService>();
         services.AddSingleton<DownloadSchedulerService>();
         services.AddSingleton<CbzExportService>();
