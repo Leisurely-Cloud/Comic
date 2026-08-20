@@ -8,7 +8,6 @@ using Comic.WinUI.Models;
 using Comic.WinUI.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.UI.Dispatching;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace Comic.WinUI.ViewModels;
@@ -16,7 +15,7 @@ namespace Comic.WinUI.ViewModels;
 public partial class RankingPageViewModel : ObservableObject
 {
     private readonly BackendClient _client;
-    private readonly DispatcherQueue _dispatcher;
+    private readonly IDispatcher _dispatcher;
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
 
@@ -54,10 +53,10 @@ public partial class RankingPageViewModel : ObservableObject
     public event EventHandler<string>? NavigateToDetailRequested;
     public event EventHandler<string>? DownloadMangaRequested;
 
-    public RankingPageViewModel(BackendClient client)
+    public RankingPageViewModel(BackendClient client, IDispatcher dispatcher)
     {
         _client = client;
-        _dispatcher = DispatcherQueue.GetForCurrentThread();
+        _dispatcher = dispatcher;
         RankingItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
