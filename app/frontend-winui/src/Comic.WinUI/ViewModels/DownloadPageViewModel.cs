@@ -12,7 +12,6 @@ using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using Microsoft.UI.Dispatching;
 
 namespace Comic.WinUI.ViewModels;
 
@@ -24,7 +23,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     private readonly SearchHistoryService _searchHistoryService;
     private readonly ApplicationSettingsService _applicationSettings;
     private readonly ILogger<DownloadPageViewModel> _logger;
-    private readonly DispatcherQueue _dispatcherQueue;
+    private readonly IDispatcher _dispatcherQueue;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -44,7 +43,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         ShellViewModel shellViewModel,
         SearchHistoryService searchHistoryService,
         ApplicationSettingsService applicationSettings,
-        ILogger<DownloadPageViewModel> logger)
+        ILogger<DownloadPageViewModel> logger,
+        IDispatcher dispatcher)
     {
         _backendClient = backendClient;
         _eventStream = eventStream;
@@ -52,7 +52,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         _searchHistoryService = searchHistoryService;
         _applicationSettings = applicationSettings;
         _logger = logger;
-        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _dispatcherQueue = dispatcher;
         HistoryItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistoryItems));
         LoadSearchHistory();
     }

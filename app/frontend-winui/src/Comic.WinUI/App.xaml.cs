@@ -36,6 +36,10 @@ public sealed partial class App : Application
         services.AddLogging(builder => builder.AddProvider(new FileLoggerProvider(logDirectory)));
 
         services.AddSingleton(new JmSiteOptions());
+        // ConfigureServices 由 App 构造函数在 UI 线程上调用,所以这里能安全捕获
+        // DispatcherQueue。ViewModel 不再各自去 GetForCurrentThread(),否则它们
+        // 在非 UI 线程(单元测试)里就构造不出来。
+        services.AddSingleton<IDispatcher>(UiThreadDispatcher.CreateForCurrentThread());
         // JmComicService 必须是单例:它持有专辑缓存和“当前可用 API 域名”的学习结果。
         // 注册成 AddHttpClient 的 typed client 会让它变成 transient,于是 BackendClient 和
         // DownloadSchedulerService 各捕获一份,缓存与域名故障转移的成果互相看不到。

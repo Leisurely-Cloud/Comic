@@ -9,7 +9,6 @@ using Comic.WinUI.Services;
 using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Comic.WinUI.ViewModels;
@@ -22,7 +21,7 @@ public partial class ReaderPageViewModel : ObservableObject
     private const int PagedZoomMaximum = 300;
 
     private readonly BackendClient _backendClient;
-    private readonly DispatcherQueue _dispatcherQueue;
+    private readonly IDispatcher _dispatcherQueue;
     private readonly ReadingProgressService _readingProgressService;
 
     private CancellationTokenSource? _imageCts;
@@ -38,10 +37,11 @@ public partial class ReaderPageViewModel : ObservableObject
     public ReaderPageViewModel(
         BackendClient backendClient,
         ApplicationSettingsService applicationSettings,
-        ReadingProgressService readingProgressService)
+        ReadingProgressService readingProgressService,
+        IDispatcher dispatcher)
     {
         _backendClient = backendClient;
-        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _dispatcherQueue = dispatcher;
         _readingProgressService = readingProgressService;
         IsStripMode = applicationSettings.DefaultReaderMode == ApplicationSettingsService.ReaderStrip;
         StripZoomPercent = applicationSettings.DefaultStripZoomPercent;
