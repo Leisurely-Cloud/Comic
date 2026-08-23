@@ -12,6 +12,7 @@ build_pyinstaller/
 dist/
 dist_build/
 release/
+**/.nuget/
 
 # Temp files
 .tmp/

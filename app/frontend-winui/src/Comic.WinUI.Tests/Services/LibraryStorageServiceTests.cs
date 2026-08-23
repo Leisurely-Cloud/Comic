@@ -97,11 +97,86 @@ public sealed class LibraryStorageServiceTests
             """{"manga_title":"测试漫画"}""");
         var service = TestServiceFactory.CreateLibrary(_storageRoot);
 
+        Assert.IsFalse(service.EnumerateLibraryEntries().Single().IsFavorite);
         Assert.IsTrue(service.ToggleFavorite(_mangaRoot));
+        Assert.IsTrue(service.EnumerateLibraryEntries().Single().IsFavorite);
         Assert.IsFalse(service.ToggleFavorite(_mangaRoot));
         Assert.IsTrue(service.ToggleFavorite(_mangaRoot));
 
         var reloaded = TestServiceFactory.CreateLibrary(_storageRoot);
         Assert.IsTrue(reloaded.EnumerateLibraryEntries().Single().IsFavorite);
+    }
+
+    [TestMethod]
+    public void Library_DeduplicatesSameMangaIdAndPrefersCompletedDirectory()
+    {
+        File.WriteAllText(
+            Path.Combine(_mangaRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123","completed":true}""");
+        var duplicateRoot = Path.Combine(_storageRoot, "测试漫画 [123]");
+        Directory.CreateDirectory(Path.Combine(duplicateRoot, "001_第一话"));
+        Directory.CreateDirectory(Path.Combine(duplicateRoot, "002_第二话"));
+        File.WriteAllBytes(Path.Combine(duplicateRoot, "001_第一话", "001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(duplicateRoot, "002_第二话", "001.jpg"), [2]);
+        File.WriteAllText(
+            Path.Combine(duplicateRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123","completed":false}""");
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+
+        var entry = service.EnumerateLibraryEntries().Single();
+
+        Assert.AreEqual(_mangaRoot, entry.RootDirectory);
+        Assert.AreEqual(1, entry.DuplicateDirectoryCount);
+    }
+
+    [TestMethod]
+    public void DeleteManga_RecyclesPrimaryAndDuplicateDirectoriesAndRefreshesCache()
+    {
+        File.WriteAllText(
+            Path.Combine(_mangaRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
+        var duplicateRoot = Path.Combine(_storageRoot, "测试漫画 [123]");
+        var duplicateChapter = Path.Combine(duplicateRoot, "001_第一话");
+        Directory.CreateDirectory(duplicateChapter);
+        File.WriteAllBytes(Path.Combine(duplicateChapter, "001.jpg"), [1]);
+        File.WriteAllText(
+            Path.Combine(duplicateRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
+        var recycled = new List<string>();
+        var service = new LibraryStorageService(
+            _storageRoot,
+            recycleDirectory: path =>
+            {
+                recycled.Add(path);
+                Directory.Delete(path, true);
+            });
+        Assert.AreEqual(1, service.EnumerateLibraryEntries().Count);
+
+        var deletedCount = service.DeleteManga(_mangaRoot);
+
+        Assert.AreEqual(2, deletedCount);
+        CollectionAssert.AreEquivalent(
+            new[] { Path.GetFullPath(_mangaRoot), Path.GetFullPath(duplicateRoot) },
+            recycled);
+        Assert.IsFalse(Directory.Exists(_mangaRoot));
+        Assert.IsFalse(Directory.Exists(duplicateRoot));
+        Assert.AreEqual(0, service.EnumerateLibraryEntries().Count);
+    }
+
+    [TestMethod]
+    public void DeleteManga_RejectsDirectoryOutsideManagedLibrary()
+    {
+        var outsideRoot = Path.Combine(_container, "outside");
+        var outsideChapter = Path.Combine(outsideRoot, "001_第一话");
+        Directory.CreateDirectory(outsideChapter);
+        File.WriteAllBytes(Path.Combine(outsideChapter, "001.jpg"), [1]);
+        var recycleCalled = false;
+        var service = new LibraryStorageService(
+            _storageRoot,
+            recycleDirectory: _ => recycleCalled = true);
+
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => service.DeleteManga(outsideRoot));
+        Assert.IsFalse(recycleCalled);
+        Assert.IsTrue(Directory.Exists(outsideRoot));
     }
 }

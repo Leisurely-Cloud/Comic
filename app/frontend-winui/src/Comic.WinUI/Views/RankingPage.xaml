@@ -142,13 +142,46 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <!-- Load More -->
-                <Button Grid.Row="1"
-                        Content="加载更多"
-                        HorizontalAlignment="Center"
-                        Margin="0,8,0,0"
-                        Click="OnLoadMoreClick"
-                        Visibility="{x:Bind ViewModel.CanLoadMore, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <!-- Pagination -->
+                <Grid Grid.Row="1"
+                      Margin="0,10,0,0"
+                      HorizontalAlignment="Center"
+                      ColumnSpacing="10"
+                      Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Padding="14,6"
+                            IsEnabled="{x:Bind ViewModel.CanGoPrevious, Mode=OneWay}"
+                            Command="{x:Bind ViewModel.PreviousPageCommand, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE76B;" FontSize="11" />
+                            <TextBlock Text="上一页" />
+                        </StackPanel>
+                    </Button>
+                    <Border Grid.Column="1"
+                            MinWidth="150"
+                            Padding="14,7"
+                            CornerRadius="6"
+                            Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                        <TextBlock Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="12" Opacity="0.72" />
+                    </Border>
+                    <Button Grid.Column="2"
+                            Padding="14,6"
+                            IsEnabled="{x:Bind ViewModel.CanGoNext, Mode=OneWay}"
+                            Command="{x:Bind ViewModel.NextPageCommand, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="下一页" />
+                            <FontIcon Glyph="&#xE76C;" FontSize="11" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
             </Grid>
         </Grid>
         </Border>

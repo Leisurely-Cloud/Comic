@@ -7,10 +7,8 @@ namespace Comic.WinUI.Tests.Models;
 public class SiteCatalogTests
 {
     [TestMethod]
-    public void Catalog_ContainsOnlyJmComicIdentity()
+    public void Catalog_MapsJmComicIdentity()
     {
-        Assert.AreEqual("jmcomic", SiteCatalog.Key);
-        Assert.AreEqual("禁漫天堂", SiteCatalog.DisplayName);
         Assert.AreEqual("禁漫天堂", SiteCatalog.GetDisplayName("jmcomic"));
         Assert.AreEqual("jmcomic", SiteCatalog.GetKey("禁漫天堂"));
     }

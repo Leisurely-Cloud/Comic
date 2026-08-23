@@ -76,11 +76,6 @@ public sealed partial class RankingPage : Page
         _ = ViewModel.RefreshCommand.ExecuteAsync(null);
     }
 
-    private void OnLoadMoreClick(object sender, RoutedEventArgs e)
-    {
-        _ = ViewModel.LoadMoreCommand.ExecuteAsync(null);
-    }
-
     private void OnRankingItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is RankingItemViewModel item)

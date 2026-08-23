@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -17,32 +17,32 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Setup .NET 9
+    - name: Setup pinned .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '9.0.x'
-    - name: Install Windows App Runtime 1.8
-      shell: pwsh
-      run: |
-        $installer = Join-Path $env:RUNNER_TEMP "windowsappruntimeinstall-x64.exe"
-        Invoke-WebRequest -Uri "https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe" -OutFile $installer
-        Start-Process -FilePath $installer -ArgumentList "--quiet" -Wait
+        global-json-file: global.json
+    - name: Restore dependencies
+      run: dotnet restore app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -r win-x64
+    - name: Build tests
+      run: dotnet build app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-restore
     - name: Run WinUI tests
-      # 预装 Windows App Runtime 后 testhost 不再挂起,运行全量测试。
-      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --blame-hang-timeout 2m --blame-hang-dump-type none
+      # 测试宿主自带 Windows App SDK Runtime,无需修改 runner 的系统包注册。
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-build --no-restore --blame-hang-timeout 2m --blame-hang-dump-type none
 
   package:
     name: Build installer
     runs-on: windows-latest
     # 打包与发布必须在测试通过后进行,否则 tag 推送会发出未经验证的安装包。
     needs: test
+    permissions:
+      contents: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Setup .NET 9
+    - name: Setup pinned .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '9.0.x'
+        global-json-file: global.json
     - name: Publish framework-dependent C# app
       shell: pwsh
       run: |

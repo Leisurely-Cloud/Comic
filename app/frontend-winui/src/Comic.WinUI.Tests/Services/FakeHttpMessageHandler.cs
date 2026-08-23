@@ -8,10 +8,16 @@ namespace Comic.WinUI.Tests.Services;
 /// </summary>
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
-    private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
     private readonly List<string> _requestedUris = [];
+    private readonly TaskCompletionSource _requestStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
+    {
+        _responder = (request, _) => Task.FromResult(responder(request));
+    }
+
+    public FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
     {
         _responder = responder;
     }
@@ -21,17 +27,28 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         HttpStatusCode statusCode = HttpStatusCode.ServiceUnavailable) =>
         new(_ => new HttpResponseMessage(statusCode));
 
+    /// <summary>请求开始后一直等待,直到被测代码传播取消信号。</summary>
+    public static FakeHttpMessageHandler BlocksUntilCancelled() =>
+        new(async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
     public IReadOnlyList<string> RequestedUris
     {
         get { lock (_requestedUris) return _requestedUris.ToList(); }
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    public Task WaitForRequestAsync(TimeSpan timeout) => _requestStarted.Task.WaitAsync(timeout);
+
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_requestedUris) _requestedUris.Add(request.RequestUri?.ToString() ?? string.Empty);
-        return Task.FromResult(_responder(request));
+        _requestStarted.TrySetResult();
+        return await _responder(request, cancellationToken);
     }
 }

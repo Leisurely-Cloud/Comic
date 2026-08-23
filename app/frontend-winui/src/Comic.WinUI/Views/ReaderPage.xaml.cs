@@ -305,6 +305,14 @@ public sealed partial class ReaderPage : Page
         }
     }
 
+    private async void OnRetryStripImageClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ReaderStripImageItemViewModel item })
+        {
+            await ViewModel.LoadStripImageAsync(item);
+        }
+    }
+
     private void OnStripViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
         if (sender is not ScrollViewer scrollViewer ||

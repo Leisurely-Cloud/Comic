@@ -46,6 +46,7 @@ public partial class LibraryPageViewModel : ObservableObject
     public partial string Keyword { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDeleteSelectedManga))]
     public partial LibraryItemViewModel? SelectedItem { get; set; }
 
     [ObservableProperty]
@@ -59,6 +60,14 @@ public partial class LibraryPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool IsExporting { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDeleteSelectedManga))]
+    [NotifyPropertyChangedFor(nameof(DeleteButtonText))]
+    public partial bool IsDeleting { get; set; }
+
+    [ObservableProperty]
+    public partial string LibraryStatus { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string ExportStatusText { get; set; } = string.Empty;
@@ -95,10 +104,18 @@ public partial class LibraryPageViewModel : ObservableObject
 
     public string SelectedFavoriteButtonText => SelectedItem?.FavoriteButtonText ?? "收藏";
 
+    public bool CanDeleteSelectedManga =>
+        SelectedItem is not null &&
+        !string.IsNullOrWhiteSpace(SelectedItem.RootDir) &&
+        !IsDeleting;
+
+    public string DeleteButtonText => IsDeleting ? "正在处理" : "删除漫画";
+
     [RelayCommand]
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         PageError = string.Empty;
+        LibraryStatus = string.Empty;
         IsLoading = true;
         try
         {
@@ -151,6 +168,38 @@ public partial class LibraryPageViewModel : ObservableObject
         catch (Exception ex)
         {
             PageError = $"收藏操作失败: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    public async Task DeleteSelectedMangaAsync(CancellationToken cancellationToken = default)
+    {
+        if (SelectedItem is null || string.IsNullOrWhiteSpace(SelectedItem.RootDir) || IsDeleting) return;
+
+        var selectedRoot = SelectedItem.RootDir;
+        var selectedTitle = SelectedItem.Title;
+        PageError = string.Empty;
+        LibraryStatus = string.Empty;
+        IsDeleting = true;
+        try
+        {
+            var deletedDirectoryCount = await _backendClient.DeleteLibraryMangaAsync(selectedRoot, cancellationToken);
+            _readingProgressService.Remove(selectedRoot);
+            await LoadAsync(cancellationToken);
+            LibraryStatus = deletedDirectoryCount > 1
+                ? $"《{selectedTitle}》及 {deletedDirectoryCount - 1} 个重复目录已移入回收站。"
+                : $"《{selectedTitle}》已移入回收站。";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            PageError = $"删除失败：{ex.Message}";
+        }
+        finally
+        {
+            IsDeleting = false;
         }
     }
 
@@ -472,6 +521,17 @@ public partial class LibraryItemViewModel : ObservableObject
     public partial bool IsFavorite { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDuplicateDirectories))]
+    [NotifyPropertyChangedFor(nameof(DuplicateDirectoriesText))]
+    public partial int DuplicateDirectoryCount { get; set; }
+
+    public bool HasDuplicateDirectories => DuplicateDirectoryCount > 0;
+
+    public string DuplicateDirectoriesText => DuplicateDirectoryCount > 0
+        ? $"检测到 {DuplicateDirectoryCount} 个重复目录，当前显示最佳目录"
+        : string.Empty;
+
+    [ObservableProperty]
     public partial string ContinueReadingText { get; set; } = string.Empty;
 
     public string FavoriteButtonText => IsFavorite ? "取消收藏" : "收藏";
@@ -491,6 +551,7 @@ public partial class LibraryItemViewModel : ObservableObject
             DownloadedChapterCount = dto.DownloadedChapterCount,
             LastDownloadedChapterTitle = dto.LastDownloadedChapterTitle,
             IsFavorite = dto.IsFavorite,
+            DuplicateDirectoryCount = dto.DuplicateDirectoryCount,
         };
     }
 }

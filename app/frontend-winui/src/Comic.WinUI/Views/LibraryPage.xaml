@@ -52,10 +52,17 @@
                 <StackPanel Orientation="Horizontal" Spacing="16">
                     <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
                                Visibility="{x:Bind ViewModel.PageError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
-                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.LiveSetting="Assertive" />
                     <TextBlock Text="{x:Bind ViewModel.UpdateCheckStatus, Mode=OneWay}"
                                Visibility="{x:Bind ViewModel.UpdateCheckStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                                Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.LibraryStatus, Mode=OneWay}"
+                               Visibility="{x:Bind ViewModel.LibraryStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
+                               Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.LiveSetting="Polite" />
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -160,7 +167,8 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Width="48" Height="64" CornerRadius="6"
+                                    <Grid Grid.Column="0" Width="48" Height="64">
+                                    <Border CornerRadius="6"
                                             Background="{ThemeResource ControlFillColorDefaultBrush}">
                                         <Grid>
                                             <FontIcon Glyph="&#xE8F1;" FontSize="20" Opacity="0.35"
@@ -169,10 +177,42 @@
                                                    Stretch="UniformToFill" />
                                         </Grid>
                                     </Border>
+                                        <Border CornerRadius="6"
+                                                BorderThickness="2"
+                                                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                                Visibility="{x:Bind IsFavorite, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <Border Width="20" Height="20"
+                                                CornerRadius="10"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Top"
+                                                Margin="0,-6,-6,0"
+                                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                Visibility="{x:Bind IsFavorite, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <FontIcon Glyph="&#xE734;" FontSize="11"
+                                                      Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                    </Grid>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Text="{x:Bind Title, Mode=OneWay}"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                   TextTrimming="CharacterEllipsis" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{x:Bind Title, Mode=OneWay}"
+                                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <Border Grid.Column="1" Padding="7,2" CornerRadius="8"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    Visibility="{x:Bind IsFavorite, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" Spacing="3">
+                                                    <FontIcon Glyph="&#xE734;" FontSize="10"
+                                                              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                                    <TextBlock Text="已收藏" FontSize="10" FontWeight="SemiBold"
+                                                               Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
                                         <TextBlock Text="{x:Bind AuthorDisplay, Mode=OneWay}"
                                                    Visibility="{x:Bind AuthorDisplay, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                                                    Opacity="0.8" FontSize="12"
@@ -183,6 +223,10 @@
                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" />
                                         <TextBlock Text="{x:Bind SiteName, Mode=OneWay}" Opacity="0.7" FontSize="12" />
+                                        <TextBlock Text="{x:Bind DuplicateDirectoriesText, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   Visibility="{x:Bind HasDuplicateDirectories, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     </StackPanel>
                                     <FontIcon Grid.Column="2" Glyph="&#xE76C;" Opacity="0.5"
                                               VerticalAlignment="Center" />
@@ -262,6 +306,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Button Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
                                     HorizontalAlignment="Stretch"
@@ -305,6 +350,48 @@
                                     <TextBlock Text="{x:Bind ViewModel.SelectedFavoriteButtonText, Mode=OneWay}" />
                                 </StackPanel>
                             </Button>
+                            <Border Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                                    Margin="0,4,0,0"
+                                    Padding="10"
+                                    CornerRadius="8"
+                                    Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                                    BorderBrush="{ThemeResource SystemFillColorCriticalBrush}"
+                                    BorderThickness="1">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="危险操作"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                        <TextBlock Text="移入回收站后仍可恢复"
+                                                   FontSize="11"
+                                                   Opacity="0.78"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            MinWidth="104"
+                                            VerticalAlignment="Center"
+                                            Click="OnDeleteMangaClick"
+                                            IsEnabled="{x:Bind ViewModel.CanDeleteSelectedManga, Mode=OneWay}"
+                                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                            BorderBrush="{ThemeResource SystemFillColorCriticalBrush}"
+                                            AutomationProperties.Name="删除本地漫画"
+                                            AutomationProperties.HelpText="将选中漫画及其重复目录移入 Windows 回收站"
+                                            ToolTipService.ToolTip="将本地漫画移入回收站">
+                                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                                            <FontIcon Glyph="&#xE74D;" FontSize="14"
+                                                      Visibility="{x:Bind ViewModel.IsDeleting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
+                                            <ProgressRing Width="14" Height="14"
+                                                          IsActive="{x:Bind ViewModel.IsDeleting, Mode=OneWay}"
+                                                          Visibility="{x:Bind ViewModel.IsDeleting, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                            <TextBlock Text="{x:Bind ViewModel.DeleteButtonText, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
                         </Grid>
                     </StackPanel>
                 </ScrollViewer>

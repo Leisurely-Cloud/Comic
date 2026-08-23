@@ -151,7 +151,7 @@ public sealed class CbzExportServiceTests
         var second = await service.ExportCbzAsync(_mangaRoot);
         await WaitUntilFinishedAsync(service, second.TaskId);
 
-        Assert.ThrowsException<KeyNotFoundException>(
+        Assert.ThrowsExactly<KeyNotFoundException>(
             () => service.GetExportProgressAsync(first.TaskId).GetAwaiter().GetResult(),
             "上一个已结束的导出任务应当已被清理。");
     }

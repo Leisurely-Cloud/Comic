@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Comic.WinUI.Models"
     xmlns:viewModels="using:Comic.WinUI.ViewModels"
     mc:Ignorable="d">
 
@@ -12,6 +13,7 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="200" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Grid Grid.Row="0" Margin="0,0,0,8" ColumnSpacing="10">
@@ -104,6 +106,165 @@
                     </ListView.ItemTemplate>
                 </ListView>
             </Grid>
+
+            <Border Grid.Row="2"
+                    Padding="0,12,0,0"
+                    BorderThickness="0,1,0,0"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind ViewModel.HasManga, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="漫画评论" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{x:Bind ViewModel.CommentSummary, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ProgressRing Grid.Column="1" Width="16" Height="16"
+                                      IsActive="{x:Bind ViewModel.IsLoadingComments, Mode=OneWay}"
+                                      Visibility="{x:Bind ViewModel.IsLoadingComments, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <Button Grid.Column="2"
+                                Padding="8,4"
+                                Command="{x:Bind ViewModel.RefreshCommentsCommand, Mode=OneWay}"
+                                ToolTipService.ToolTip="刷新评论">
+                            <FontIcon Glyph="&#xE72C;" FontSize="13" />
+                        </Button>
+                    </Grid>
+
+                    <Grid Grid.Row="1">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
+                                    Visibility="{x:Bind ViewModel.IsLoadingComments, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="正在加载评论..." FontSize="12" Opacity="0.65" />
+                        </StackPanel>
+
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10"
+                                    Visibility="{x:Bind ViewModel.HasCommentsError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <FontIcon Glyph="&#xE783;" FontSize="26" Opacity="0.6" />
+                            <TextBlock Text="{x:Bind ViewModel.CommentsError, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.7" TextWrapping="Wrap" TextAlignment="Center" />
+                            <Button Content="重试" Padding="12,5"
+                                    Command="{x:Bind ViewModel.RefreshCommentsCommand, Mode=OneWay}" />
+                        </StackPanel>
+
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
+                                    Visibility="{x:Bind ViewModel.ShowCommentsEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <FontIcon Glyph="&#xE90A;" FontSize="30" Opacity="0.42" />
+                            <TextBlock Text="这部漫画暂时没有评论" FontSize="12" Opacity="0.62" />
+                        </StackPanel>
+
+                        <ListView ItemsSource="{x:Bind ViewModel.Comments, Mode=OneWay}"
+                                  SelectionMode="None"
+                                  Visibility="{x:Bind ViewModel.ShowCommentsList, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="models:MangaCommentDto">
+                                    <Grid Padding="4,8" RowSpacing="5">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0" ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{x:Bind AuthorDisplay}" FontWeight="SemiBold" FontSize="13" />
+                                                <Border Padding="5,1" CornerRadius="4"
+                                                        BorderThickness="1"
+                                                        BorderBrush="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        Visibility="{x:Bind IsSpoiler, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                    <TextBlock Text="剧透" FontSize="10"
+                                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="{x:Bind CreatedAt}"
+                                                       FontSize="11" Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Text="{x:Bind Content}"
+                                                   FontSize="13" TextWrapping="WrapWholeWords" />
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4"
+                                                    Visibility="{x:Bind HasLikes, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <FontIcon Glyph="&#xE8E1;" FontSize="11" Opacity="0.55" />
+                                            <TextBlock Text="{x:Bind LikesText}" FontSize="11" Opacity="0.55" />
+                                        </StackPanel>
+                                        <Border Grid.Row="3" Margin="6,2,0,0" Padding="9,5"
+                                                CornerRadius="4"
+                                                BorderThickness="2,0,0,0"
+                                                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                Visibility="{x:Bind HasReplies, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <ItemsControl ItemsSource="{x:Bind Replies}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="models:MangaCommentDto">
+                                                        <StackPanel Margin="0,3" Spacing="2">
+                                                            <TextBlock FontSize="12" TextWrapping="WrapWholeWords">
+                                                                <Run Text="{x:Bind AuthorDisplay}" FontWeight="SemiBold" />
+                                                                <Run Text="：" />
+                                                                <Run Text="{x:Bind Content}" />
+                                                            </TextBlock>
+                                                            <TextBlock Text="{x:Bind CreatedAt}" FontSize="10" Opacity="0.45" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+
+                    <Grid Grid.Row="2"
+                          HorizontalAlignment="Center"
+                          ColumnSpacing="8"
+                          Visibility="{x:Bind ViewModel.HasComments, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Padding="12,5"
+                                IsEnabled="{x:Bind ViewModel.CanGoPreviousComments, Mode=OneWay}"
+                                Command="{x:Bind ViewModel.PreviousCommentsPageCommand, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <FontIcon Glyph="&#xE76B;" FontSize="10" />
+                                <TextBlock Text="上一页" />
+                            </StackPanel>
+                        </Button>
+                        <Border Grid.Column="1"
+                                MinWidth="108"
+                                Padding="12,6"
+                                CornerRadius="6"
+                                Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                            <TextBlock Text="{x:Bind ViewModel.CommentPageSummary, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.72"
+                                       HorizontalAlignment="Center" />
+                        </Border>
+                        <Button Grid.Column="2"
+                                Padding="12,5"
+                                IsEnabled="{x:Bind ViewModel.CanGoNextComments, Mode=OneWay}"
+                                Command="{x:Bind ViewModel.NextCommentsPageCommand, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <TextBlock Text="下一页" />
+                                <FontIcon Glyph="&#xE76C;" FontSize="10" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </UserControl>

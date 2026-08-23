@@ -15,8 +15,8 @@ namespace Comic.WinUI.ViewModels;
 
 public partial class ReaderPageViewModel : ObservableObject
 {
-    private const int StripZoomMinimum = 50;
-    private const int StripZoomMaximum = 200;
+    private const int StripZoomMinimum = ApplicationSettingsService.StripZoomMinimum;
+    private const int StripZoomMaximum = ApplicationSettingsService.StripZoomMaximum;
     private const int PagedZoomMinimum = 50;
     private const int PagedZoomMaximum = 300;
 
@@ -78,7 +78,7 @@ public partial class ReaderPageViewModel : ObservableObject
     public partial bool IsStripMode { get; set; }
 
     [ObservableProperty]
-    public partial int StripZoomPercent { get; set; } = 100;
+    public partial int StripZoomPercent { get; set; } = ApplicationSettingsService.DefaultStripZoom;
 
     [ObservableProperty]
     public partial int PagedZoomPercent { get; set; } = 100;
@@ -101,8 +101,7 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public string PageIndicator => TotalImages > 0 ? $"{CurrentImageIndex + 1} / {TotalImages}" : "";
 
-    /// <summary>在线模式第一版仅支持分页,条漫开关禁用。</summary>
-    public bool CanToggleReaderMode => !_isOnlineMode;
+    public bool CanToggleReaderMode => true;
 
     public bool HasChapters => Chapters.Count > 0;
 
@@ -207,7 +206,6 @@ public partial class ReaderPageViewModel : ObservableObject
         _rootDir = mangaUrl;
         _isOnlineMode = true;
         OnPropertyChanged(nameof(CanToggleReaderMode));
-        IsStripMode = false; // 在线模式第一版仅支持分页
         IsLoading = true;
         PageError = string.Empty;
 
@@ -300,14 +298,7 @@ public partial class ReaderPageViewModel : ObservableObject
 
     partial void OnIsStripModeChanged(bool value)
     {
-        // 在线模式第一版仅支持分页,禁止切换条漫。
-        if (_isOnlineMode)
-        {
-            IsStripMode = false;
-            return;
-        }
-
-        if (_currentImagePaths.Count == 0) return;
+        if (CurrentImageCount == 0) return;
 
         if (value)
         {
@@ -319,7 +310,7 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             ClearStripImages();
             _ = ShowImageAsync(
-                Math.Clamp(CurrentImageIndex, 0, _currentImagePaths.Count - 1),
+                Math.Clamp(CurrentImageIndex, 0, CurrentImageCount - 1),
                 _imageCts?.Token ?? CancellationToken.None);
         }
     }
@@ -388,7 +379,8 @@ public partial class ReaderPageViewModel : ObservableObject
                 _currentImagePaths = result.Images;
             }
 
-            var totalCount = _isOnlineMode ? _currentImageSources.Count : _currentImagePaths.Count;
+            var totalCount = CurrentImageCount;
+            chapter.ImageCount = totalCount;
             TotalImages = totalCount;
             OnPropertyChanged(nameof(PageIndicator));
 
@@ -515,7 +507,7 @@ public partial class ReaderPageViewModel : ObservableObject
 
     private async Task ShowImageAsync(int index, CancellationToken cancellationToken)
     {
-        var totalCount = _isOnlineMode ? _currentImageSources.Count : _currentImagePaths.Count;
+        var totalCount = CurrentImageCount;
         if (index < 0 || index >= totalCount) return;
 
         IsLoading = true;
@@ -618,7 +610,9 @@ public partial class ReaderPageViewModel : ObservableObject
 
         try
         {
-            var bytes = await _backendClient.GetImageBytesAsync(item.Path, token.Value);
+            // 条漫元素只保存索引；真正读取时按当前章节模式选择本地文件或在线图片源。
+            // 元素离开虚拟化窗口会取消 token，避免继续下载已经看不到的在线图片。
+            var bytes = await GetImageBytesAtAsync(item.Index, token.Value);
             _dispatcherQueue.TryEnqueue(() =>
             {
                 if (!item.CanComplete(token.Value)) return;
@@ -669,11 +663,17 @@ public partial class ReaderPageViewModel : ObservableObject
     private void RebuildStripImages()
     {
         ClearStripImages();
-        for (var index = 0; index < _currentImagePaths.Count; index++)
+        for (var index = 0; index < CurrentImageCount; index++)
         {
-            StripImages.Add(new ReaderStripImageItemViewModel(index, _currentImagePaths[index]));
+            var sourceHint = _isOnlineMode
+                ? _currentImageSources[index].Url
+                : _currentImagePaths[index];
+            StripImages.Add(new ReaderStripImageItemViewModel(index, sourceHint));
         }
     }
+
+    private int CurrentImageCount =>
+        _isOnlineMode ? _currentImageSources.Count : _currentImagePaths.Count;
 
     private void ClearStripImages()
     {

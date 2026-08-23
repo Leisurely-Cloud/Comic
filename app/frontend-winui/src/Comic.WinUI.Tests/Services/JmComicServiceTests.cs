@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Comic.WinUI.Services.Native;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -136,6 +138,144 @@ public class JmComicServiceTests
 
         Assert.AreEqual(200, result.Length);
         Assert.AreEqual(new string('a', 198) + "😀", result);
+    }
+
+    [TestMethod]
+    public async Task DownloadChapterAsync_WaitsBeforeStartingImageRequests()
+    {
+        var imageRequestCount = 0;
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/chapter", StringComparison.OrdinalIgnoreCase))
+            {
+                var tokenParam = request.Headers.GetValues("tokenparam").Single();
+                var timestamp = long.Parse(tokenParam.Split(',')[0]);
+                var payload = Encoding.UTF8.GetBytes(
+                    """{"id":"123","name":"测试章节","images":["001.jpg","002.jpg","003.jpg"]}""");
+                var encrypted = EncryptWithSecret(timestamp, "185Hcomic3PAPP7R", payload);
+                var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(envelope, Encoding.UTF8, "application/json")
+                };
+            }
+
+            if (path.EndsWith("/chapter_view_template", StringComparison.OrdinalIgnoreCase))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<script>var scramble_id = 220980;</script>")
+                };
+            }
+
+            if (path.Contains("/media/photos/", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref imageRequestCount);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([1, 2, 3])
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+        using var client = new HttpClient(handler);
+        var service = new JmComicService(client);
+        var pauseReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var root = Path.Combine(Path.GetTempPath(), $"comic-pause-{Guid.NewGuid():N}");
+
+        try
+        {
+            async Task WaitBeforeImage(CancellationToken cancellationToken)
+            {
+                pauseReached.TrySetResult();
+                await resume.Task.WaitAsync(cancellationToken);
+            }
+
+            var download = service.DownloadChapterAsync(
+                new JmChapter(1, "123", "测试章节"),
+                root,
+                maxConcurrentImages: 2,
+                waitBeforeImage: WaitBeforeImage);
+
+            await pauseReached.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await Task.Delay(100);
+            Assert.AreEqual(0, Volatile.Read(ref imageRequestCount), "暂停时不应发起新的图片请求。");
+
+            resume.TrySetResult();
+            var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.AreEqual(3, result.ImageCount);
+            Assert.AreEqual(3, Volatile.Read(ref imageRequestCount));
+        }
+        finally
+        {
+            resume.TrySetResult();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetAlbumCommentsAsync_ParsesCommentsRepliesAndPlainText()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/forum", request.RequestUri?.AbsolutePath);
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "aid=323359");
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "page=2");
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "mode=all");
+
+            var tokenParam = request.Headers.GetValues("tokenparam").Single();
+            var timestamp = long.Parse(tokenParam.Split(',')[0]);
+            var payload = Encoding.UTF8.GetBytes(
+                """
+                {
+                  "total": "12",
+                  "list": [
+                    {
+                      "CID": "88",
+                      "UID": "9",
+                      "nickname": "测试用户",
+                      "content": "很好看<br>&lt;继续更新&gt;<b>！</b>",
+                      "addtime": "1700000000",
+                      "likes": "3",
+                      "spoiler": "2",
+                      "replys": [
+                        {
+                          "CID": "89",
+                          "username": "回复者",
+                          "content": "同感",
+                          "addtime": "2026-08-22"
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+            var encrypted = EncryptWithSecret(timestamp, "185Hcomic3PAPP7R", payload);
+            var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(envelope, Encoding.UTF8, "application/json")
+            };
+        });
+        using var client = new HttpClient(handler);
+        using var service = new JmComicService(client);
+
+        var result = await service.GetAlbumCommentsAsync("https://18comic.vip/album/323359", 2);
+
+        Assert.AreEqual(12, result.Total);
+        Assert.AreEqual(2, result.Page);
+        Assert.AreEqual(1, result.Items.Count);
+        Assert.AreEqual("88", result.Items[0].Id);
+        Assert.AreEqual("测试用户", result.Items[0].AuthorDisplay);
+        Assert.AreEqual("很好看\n<继续更新>！", result.Items[0].Content);
+        Assert.AreEqual(3, result.Items[0].Likes);
+        Assert.IsTrue(result.Items[0].IsSpoiler);
+        Assert.AreEqual(1, result.Items[0].Replies.Count);
+        Assert.AreEqual("回复者", result.Items[0].Replies[0].AuthorDisplay);
     }
 
     private static string EncryptWithSecret(long timestamp, string secret, byte[] plaintext)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Comic.WinUI.Models;
@@ -16,6 +17,12 @@ public partial class RankingPageViewModel : ObservableObject
 {
     private readonly BackendClient _client;
     private readonly IDispatcher _dispatcher;
+    private readonly List<RankingItem> _loadedItems = [];
+    private CancellationTokenSource? _rankingCts;
+    private int _loadedServerPage;
+    private bool _serverHasMore;
+
+    public const int PageSize = 20;
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
 
@@ -43,7 +50,12 @@ public partial class RankingPageViewModel : ObservableObject
     [ObservableProperty]
     public partial int CurrentPage { get; set; } = 1;
 
-    public bool CanLoadMore => !IsSinglePage && !IsLoading;
+    public bool CanGoPrevious => CurrentPage > 1 && !IsLoading;
+
+    public bool CanGoNext => !IsLoading &&
+        (CurrentPage * PageSize < _loadedItems.Count || _serverHasMore);
+
+    public string PageSummary => $"第 {CurrentPage} 页 · 每页 {PageSize} 部";
 
     public bool HasItems => RankingItems.Count > 0;
 
@@ -62,7 +74,7 @@ public partial class RankingPageViewModel : ObservableObject
 
     partial void OnSelectedSectionChanged(string value)
     {
-        _ = LoadRankingAsync();
+        _ = LoadRankingPageAsync(1, reset: true);
     }
 
     partial void OnSelectedSectionItemChanged(SectionItem? value)
@@ -75,54 +87,42 @@ public partial class RankingPageViewModel : ObservableObject
 
     partial void OnIsSinglePageChanged(bool value)
     {
-        OnPropertyChanged(nameof(CanLoadMore));
+        OnPropertyChanged(nameof(CanGoNext));
     }
 
     partial void OnCurrentPageChanged(int value)
     {
-        OnPropertyChanged(nameof(CanLoadMore));
+        OnPropertyChanged(nameof(CanGoPrevious));
+        OnPropertyChanged(nameof(CanGoNext));
+        OnPropertyChanged(nameof(PageSummary));
+    }
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanGoPrevious));
+        OnPropertyChanged(nameof(CanGoNext));
     }
 
     [RelayCommand]
     private async Task RefreshAsync()
     {
-        await LoadRankingAsync();
+        await LoadRankingPageAsync(1, reset: true);
     }
 
     [RelayCommand]
-    private async Task LoadMoreAsync()
+    private Task PreviousPageAsync()
     {
-        if (IsSinglePage || IsLoading) return;
+        return CanGoPrevious
+            ? LoadRankingPageAsync(CurrentPage - 1, reset: false)
+            : Task.CompletedTask;
+    }
 
-        try
-        {
-            IsLoading = true;
-            CurrentPage++;
-
-            var result = await _client.GetRankingAsync(SiteCatalog.Key, SelectedSection, CurrentPage);
-            if (result == null) return;
-
-            _dispatcher.TryEnqueue(() =>
-            {
-                foreach (var item in result.Items ?? Enumerable.Empty<RankingItem>())
-                {
-                    RankingItems.Add(new RankingItemViewModel(
-                        item,
-                        NavigateToDetailCommand,
-                        DownloadMangaCommand,
-                        RankingItems.Count + 1));
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            CurrentPage--;
-            ErrorMessage = $"加载更多失败: {ex.Message}";
-        }
-        finally
-        {
-            IsLoading = false;
-        }
+    [RelayCommand]
+    private Task NextPageAsync()
+    {
+        return CanGoNext
+            ? LoadRankingPageAsync(CurrentPage + 1, reset: false)
+            : Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -195,27 +195,72 @@ public partial class RankingPageViewModel : ObservableObject
         }
     }
 
-    private async Task LoadRankingAsync()
+    private async Task LoadRankingPageAsync(int targetPage, bool reset)
     {
         if (string.IsNullOrEmpty(SelectedSection)) return;
+
+        CancellationTokenSource source;
+        if (reset)
+        {
+            CancelAndDispose(ref _rankingCts);
+            source = new CancellationTokenSource();
+            _rankingCts = source;
+            _loadedItems.Clear();
+            _loadedServerPage = 0;
+            _serverHasMore = true;
+        }
+        else
+        {
+            if (IsLoading) return;
+            source = _rankingCts ?? new CancellationTokenSource();
+            _rankingCts ??= source;
+        }
 
         try
         {
             IsLoading = true;
             HasError = false;
             ErrorMessage = "";
-            CurrentPage = 1;
+            var token = source.Token;
+            var requiredItemCount = Math.Max(targetPage, 1) * PageSize;
+            while (_loadedItems.Count < requiredItemCount && _serverHasMore)
+            {
+                var serverPage = _loadedServerPage + 1;
+                var result = await _client.GetRankingAsync(
+                    SiteCatalog.Key,
+                    SelectedSection,
+                    serverPage,
+                    token);
+                token.ThrowIfCancellationRequested();
+                if (result == null) break;
 
-            var result = await _client.GetRankingAsync(SiteCatalog.Key, SelectedSection, CurrentPage);
-            if (result == null) return;
+                var incoming = result.Items ?? [];
+                IsSinglePage = result.IsSinglePage;
+                _loadedServerPage = serverPage;
+                _serverHasMore = !result.IsSinglePage && incoming.Count > 0;
+                _loadedItems.AddRange(incoming);
+            }
 
-            IsSinglePage = result.IsSinglePage;
+            var pageItems = _loadedItems
+                .Skip((Math.Max(targetPage, 1) - 1) * PageSize)
+                .Take(PageSize)
+                .ToList();
 
+            // 站点没有提供可靠总页数。探测到空页时保留当前页，仅关闭“下一页”，
+            // 避免用户被带到一张空白榜单。
+            if (targetPage > 1 && pageItems.Count == 0)
+            {
+                _serverHasMore = false;
+                OnPropertyChanged(nameof(CanGoNext));
+                return;
+            }
+
+            CurrentPage = Math.Max(targetPage, 1);
             _dispatcher.TryEnqueue(() =>
             {
                 RankingItems.Clear();
-                var index = 0;
-                foreach (var item in result.Items ?? Enumerable.Empty<RankingItem>())
+                var index = (CurrentPage - 1) * PageSize;
+                foreach (var item in pageItems)
                 {
                     RankingItems.Add(new RankingItemViewModel(
                         item,
@@ -224,6 +269,11 @@ public partial class RankingPageViewModel : ObservableObject
                         ++index));
                 }
             });
+            OnPropertyChanged(nameof(CanGoNext));
+        }
+        catch (OperationCanceledException)
+        {
+            // 切换榜单分类时静默取消旧请求，避免旧分类覆盖新分类。
         }
         catch (Exception ex)
         {
@@ -232,8 +282,20 @@ public partial class RankingPageViewModel : ObservableObject
         }
         finally
         {
-            IsLoading = false;
+            if (ReferenceEquals(_rankingCts, source))
+            {
+                IsLoading = false;
+            }
         }
+    }
+
+    private static void CancelAndDispose(ref CancellationTokenSource? source)
+    {
+        var current = source;
+        source = null;
+        if (current is null) return;
+        try { current.Cancel(); } catch (ObjectDisposedException) { }
+        current.Dispose();
     }
 
 }
