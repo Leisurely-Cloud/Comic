@@ -198,7 +198,8 @@ public class JmComicServiceTests
                 new JmChapter(1, "123", "测试章节"),
                 root,
                 maxConcurrentImages: 2,
-                waitBeforeImage: WaitBeforeImage);
+                waitBeforeImage: WaitBeforeImage,
+                preferredDirectoryName: "1");
 
             await pauseReached.Task.WaitAsync(TimeSpan.FromSeconds(2));
             await Task.Delay(100);
@@ -208,6 +209,8 @@ public class JmComicServiceTests
             var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.AreEqual(3, result.ImageCount);
+            Assert.AreEqual("1", result.DirectoryName);
+            Assert.IsTrue(Directory.Exists(Path.Combine(root, "1")));
             Assert.AreEqual(3, Volatile.Read(ref imageRequestCount));
         }
         finally

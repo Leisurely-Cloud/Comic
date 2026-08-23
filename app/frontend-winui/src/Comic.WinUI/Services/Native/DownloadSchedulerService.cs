@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Comic.WinUI.Models;
 using Microsoft.Extensions.Logging;
@@ -616,7 +617,11 @@ public sealed class DownloadSchedulerService : IDisposable
                                     completed,
                                     selected.Count,
                                     imageToken,
-                                    logTransitions: false));
+                                    logTransitions: false),
+                                preferredDirectoryName: PreferredChapterDirectoryName(
+                                    chapter,
+                                    rootDirectory,
+                                    manga.Id));
                             break;
                         }
                         catch (OperationCanceledException) { throw; }
@@ -796,7 +801,8 @@ public sealed class DownloadSchedulerService : IDisposable
         foreach (var directory in new DirectoryInfo(_library.StorageRoot).EnumerateDirectories())
         {
             var metadata = _library.LoadLibraryMetadata(directory.FullName);
-            var metadataId = metadata is null ? null : JmComicService.ParseMangaId(metadata.MangaUrl).MangaId;
+            var metadataId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId
+                ?? JmComicService.ParseMangaId(directory.Name).MangaId;
             var titleMatches = string.Equals(metadata?.MangaTitle, manga.Title, StringComparison.OrdinalIgnoreCase);
             if (string.Equals(metadataId, manga.Id, StringComparison.Ordinal) ||
                 (metadataId is null && titleMatches))
@@ -819,10 +825,23 @@ public sealed class DownloadSchedulerService : IDisposable
         var legacy = Path.Combine(_library.StorageRoot, JmComicService.SanitizeFileName(manga.Title));
         if (Directory.Exists(legacy) && _library.LoadLibraryMetadata(legacy) is null) return legacy;
 
+        if (_applicationSettings?.DownloadDirectoryLayout == ApplicationSettingsService.DirectoryLayoutJmCompatible)
+        {
+            return Path.Combine(_library.StorageRoot, manga.Id);
+        }
+
         return Path.Combine(
             _library.StorageRoot,
             JmComicService.SanitizeFileName($"{manga.Title} [{manga.Id}]"));
     }
+
+    internal static string? PreferredChapterDirectoryName(
+        JmChapter chapter,
+        string rootDirectory,
+        string mangaId) =>
+        string.Equals(Path.GetFileName(rootDirectory), mangaId, StringComparison.Ordinal)
+            ? chapter.Order.ToString(CultureInfo.InvariantCulture)
+            : null;
 
     internal Dictionary<int, DownloadedChapterRecord> GetLocalDownloadedChapters(string rootDirectory)
     {
@@ -1038,6 +1057,7 @@ public sealed class DownloadSchedulerService : IDisposable
 
         var root = Path.GetFullPath(rootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var orderPrefix = $"{chapter.Order:000}_";
+        var jmDirectoryName = chapter.Order.ToString(CultureInfo.InvariantCulture);
         var candidates = Directory.EnumerateDirectories(root)
             .Where(path =>
             {
@@ -1045,6 +1065,8 @@ public sealed class DownloadSchedulerService : IDisposable
                 return (!string.IsNullOrWhiteSpace(directoryName) &&
                         (string.Equals(name, directoryName, StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(name, TemporaryChapterPrefix + directoryName, StringComparison.OrdinalIgnoreCase))) ||
+                       string.Equals(name, jmDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(name, TemporaryChapterPrefix + jmDirectoryName, StringComparison.OrdinalIgnoreCase) ||
                        name.StartsWith(orderPrefix, StringComparison.OrdinalIgnoreCase) ||
                        name.StartsWith(TemporaryChapterPrefix + orderPrefix, StringComparison.OrdinalIgnoreCase);
             })

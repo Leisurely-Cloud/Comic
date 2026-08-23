@@ -73,6 +73,33 @@ public sealed class CbzExportServiceTests
     }
 
     [TestMethod]
+    public async Task ExportCbz_UsesMetadataTitleForNumericJmChapterDirectory()
+    {
+        var jmRoot = Path.Combine(_storageRoot, "200");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [1, 2, 3]);
+        File.WriteAllText(
+            Path.Combine(jmRoot, "元数据.json"),
+            """{"manga_title":"JM 导出测试","manga_url":"https://18comic.vip/album/200","downloaded_chapters":[{"order":1,"dir_name":"1","title":"第1话 正式标题","image_count":1}]}""");
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateExporter(library);
+
+        var response = await service.ExportCbzAsync(jmRoot);
+        var progress = await WaitUntilFinishedAsync(service, response.TaskId);
+
+        Assert.AreEqual("completed", progress.Status);
+        Assert.AreEqual("第1话 正式标题", progress.CurrentChapter);
+        var archivePath = Path.Combine(progress.ExportDir, "1.cbz");
+        using var archive = ZipFile.OpenRead(archivePath);
+        var comicInfoEntry = archive.GetEntry("ComicInfo.xml");
+        Assert.IsNotNull(comicInfoEntry);
+        using var reader = new StreamReader(comicInfoEntry.Open());
+        var comicInfo = XDocument.Parse(await reader.ReadToEndAsync());
+        Assert.AreEqual("第1话 正式标题", comicInfo.Root?.Element("Title")?.Value);
+    }
+
+    [TestMethod]
     public async Task CancelExport_StopsMidRunAndKeepsAlreadyWrittenArchives()
     {
         // 章节要足够多,确保观察到"已开始"之后仍有大量剩余工作可以被取消。

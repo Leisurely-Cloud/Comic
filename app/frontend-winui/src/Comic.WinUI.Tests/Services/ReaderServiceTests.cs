@@ -77,6 +77,26 @@ public sealed class ReaderServiceTests
     }
 
     [TestMethod]
+    public async Task Reader_UsesMetadataTitleForNumericJmChapterFolders()
+    {
+        var jmRoot = Path.Combine(_storageRoot, "123");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [1]);
+        File.WriteAllText(
+            Path.Combine(jmRoot, "元数据.json"),
+            """{"manga_title":"JM 测试漫画","downloaded_chapters":[{"order":1,"dir_name":"1","title":"第1话 真正标题","image_count":1}]}""");
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        var service = TestServiceFactory.CreateReader(library);
+
+        var chapters = await service.GetReaderChaptersAsync(jmRoot);
+
+        Assert.AreEqual("JM 测试漫画", chapters.MangaTitle);
+        Assert.AreEqual("第1话 真正标题", chapters.Chapters.Single().Title);
+        Assert.AreEqual("1", chapters.Chapters.Single().DirName);
+    }
+
+    [TestMethod]
     public async Task Reader_RejectsPathsOutsideManagedStorage()
     {
         var outsideManga = Path.Combine(_container, "outside", "外部漫画");

@@ -120,12 +120,17 @@ public sealed class LibraryStorageService
         IReadOnlyCollection<FailedChapterRecord> failures)
     {
         if (manga is null || string.IsNullOrWhiteSpace(rootDirectory)) return;
-        var downloaded = EnumerateChapterContents(rootDirectory).Select(chapter => new DownloadedChapterRecord
+        var downloaded = EnumerateChapterContents(rootDirectory).Select(chapter =>
         {
-            Order = ChapterOrder(chapter.Directory.Name),
-            DirName = chapter.Directory.Name,
-            Title = ChapterTitle(chapter.Directory.Name),
-            ImageCount = chapter.Images.Count,
+            var order = ChapterOrder(chapter.Directory.Name);
+            var remoteChapter = manga.Chapters.FirstOrDefault(item => item.Order == order);
+            return new DownloadedChapterRecord
+            {
+                Order = order,
+                DirName = chapter.Directory.Name,
+                Title = remoteChapter?.Title is { Length: > 0 } title ? title : ChapterTitle(chapter.Directory.Name),
+                ImageCount = chapter.Images.Count,
+            };
         }).OrderBy(record => record.Order).ToList();
         var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         var existing = LoadLibraryMetadata(rootDirectory);
@@ -174,18 +179,27 @@ public sealed class LibraryStorageService
             var chapters = EnumerateChapterDirectories(directory.FullName);
             if (chapters.Count == 0) continue;
             var metadata = LoadLibraryMetadata(directory.FullName);
+            var directoryMangaId = JmComicService.ParseMangaId(directory.Name).MangaId;
+            var inferredMangaId = ResolveMangaId(metadata, directory.Name);
             var ordered = OrderChapterDirectories(chapters).ToList();
             var fallbackCover = EnumerateImages(directory.FullName).FirstOrDefault()
                 ?? EnumerateImages(ordered[0].FullName).FirstOrDefault()
                 ?? string.Empty;
             entries.Add(new LibraryEntry(
-                metadata?.MangaTitle is { Length: > 0 } metadataTitle ? metadataTitle : directory.Name,
+                metadata?.MangaTitle is { Length: > 0 } metadataTitle &&
+                    !(directoryMangaId is not null && string.Equals(metadataTitle, directory.Name, StringComparison.Ordinal))
+                    ? metadataTitle
+                    : directoryMangaId is { Length: > 0 } mangaId ? $"JM{mangaId}" : directory.Name,
                 metadata is null ? string.Empty : string.Join("、", metadata.Authors
                     .Where(author => !string.IsNullOrWhiteSpace(author))
                     .Distinct(StringComparer.OrdinalIgnoreCase)),
-                metadata?.SiteName is { Length: > 0 } siteName ? siteName : "本地漫画",
+                metadata?.SiteName is { Length: > 0 } siteName
+                    ? siteName
+                    : inferredMangaId is null ? "本地漫画" : SiteCatalog.DisplayName,
                 directory.FullName,
-                metadata?.MangaUrl ?? string.Empty,
+                metadata?.MangaUrl is { Length: > 0 } mangaUrl
+                    ? mangaUrl
+                    : inferredMangaId is { Length: > 0 } id ? $"https://18comic.vip/album/{id}" : string.Empty,
                 metadata?.CoverUrl is { Length: > 0 } coverUrl ? coverUrl : fallbackCover,
                 ordered.Count,
                 metadata?.LastDownloadedChapterTitle is { Length: > 0 } lastTitle ? lastTitle : ChapterTitle(ordered[^1].Name),
@@ -227,18 +241,35 @@ public sealed class LibraryStorageService
             : $"{SiteCatalog.Key}:{mangaId}";
     }
 
+    private static string? ResolveMangaId(LibraryMetadata? metadata, string directoryName) =>
+        JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId
+        ?? JmComicService.ParseMangaId(directoryName).MangaId;
+
     /// <summary>切换漫画的收藏状态,返回切换后的状态。</summary>
     public bool ToggleFavorite(string rootDirectory)
     {
         var resolvedRoot = ResolveLibraryRoot(rootDirectory);
+        var directoryName = Path.GetFileName(resolvedRoot);
+        var inferredMangaId = JmComicService.ParseMangaId(directoryName).MangaId;
         var metadata = LoadLibraryMetadata(resolvedRoot) ?? new LibraryMetadata
         {
             SiteKey = SiteCatalog.Key,
-            SiteName = SiteCatalog.DisplayName,
-            MangaTitle = Path.GetFileName(resolvedRoot),
+            SiteName = inferredMangaId is null ? "本地漫画" : SiteCatalog.DisplayName,
+            MangaTitle = inferredMangaId is null ? directoryName : $"JM{inferredMangaId}",
             RootDirectory = resolvedRoot,
-            MangaUrl = string.Empty,
+            MangaUrl = inferredMangaId is null ? string.Empty : $"https://18comic.vip/album/{inferredMangaId}",
         };
+        if (inferredMangaId is not null)
+        {
+            if (string.IsNullOrWhiteSpace(metadata.SiteKey)) metadata.SiteKey = SiteCatalog.Key;
+            if (string.IsNullOrWhiteSpace(metadata.SiteName)) metadata.SiteName = SiteCatalog.DisplayName;
+            if (string.IsNullOrWhiteSpace(metadata.MangaUrl)) metadata.MangaUrl = $"https://18comic.vip/album/{inferredMangaId}";
+            if (string.IsNullOrWhiteSpace(metadata.MangaTitle) ||
+                string.Equals(metadata.MangaTitle, directoryName, StringComparison.Ordinal))
+            {
+                metadata.MangaTitle = $"JM{inferredMangaId}";
+            }
+        }
         metadata.IsFavorite = !metadata.IsFavorite;
         metadata.SavedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         WriteJsonAtomically(Path.Combine(resolvedRoot, "元数据.json"), metadata);
@@ -254,7 +285,7 @@ public sealed class LibraryStorageService
     {
         var resolvedRoot = ResolveLibraryRoot(rootDirectory);
         var selectedMetadata = LoadLibraryMetadata(resolvedRoot);
-        var mangaId = JmComicService.ParseMangaId(selectedMetadata?.MangaUrl ?? string.Empty).MangaId;
+        var mangaId = ResolveMangaId(selectedMetadata, Path.GetFileName(resolvedRoot));
         var targets = new List<string> { resolvedRoot };
 
         if (mangaId is not null)
@@ -269,7 +300,7 @@ public sealed class LibraryStorageService
                 }
 
                 var metadata = LoadLibraryMetadata(directory.FullName);
-                var candidateId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId;
+                var candidateId = ResolveMangaId(metadata, directory.Name);
                 if (candidateId != mangaId || EnumerateChapterDirectories(directory.FullName).Count == 0) continue;
 
                 // 每个待删除目录都必须独立通过受管路径校验，不能仅凭元数据中的 ID 删除。
@@ -391,6 +422,15 @@ public sealed class LibraryStorageService
             directoryName[..separator].All(char.IsDigit)
                 ? directoryName[(separator + 1)..]
                 : directoryName;
+    }
+
+    public static string ChapterTitle(string directoryName, LibraryMetadata? metadata)
+    {
+        var order = ChapterOrder(directoryName);
+        var record = metadata?.DownloadedChapters.FirstOrDefault(chapter =>
+            string.Equals(chapter.DirName, directoryName, StringComparison.OrdinalIgnoreCase) ||
+            (order != int.MaxValue && chapter.Order == order));
+        return record?.Title is { Length: > 0 } title ? title : ChapterTitle(directoryName);
     }
 
     // ---- 受管路径校验 ----

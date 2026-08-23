@@ -232,7 +232,8 @@ public sealed class JmComicService : IDisposable
         int maxConcurrentImages,
         CancellationToken cancellationToken = default,
         Action<JmImageProgress>? progress = null,
-        Func<CancellationToken, Task>? waitBeforeImage = null)
+        Func<CancellationToken, Task>? waitBeforeImage = null,
+        string? preferredDirectoryName = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!int.TryParse(chapter.Id, out var chapterId))
@@ -259,7 +260,9 @@ public sealed class JmComicService : IDisposable
 
         var scrambleId = await GetScrambleIdAsync(chapterId, cancellationToken);
         var chapterTitle = ResolveChapterTitle(payload, chapter);
-        var chapterDirectoryName = $"{chapter.Order:000}_{SanitizeFileName(chapterTitle)}";
+        var chapterDirectoryName = string.IsNullOrWhiteSpace(preferredDirectoryName)
+            ? $"{chapter.Order:000}_{SanitizeFileName(chapterTitle)}"
+            : SanitizeFileName(preferredDirectoryName);
         var finalDirectory = Path.Combine(rootDirectory, chapterDirectoryName);
         var temporaryDirectory = Path.Combine(rootDirectory, TempChapterPrefix + chapterDirectoryName);
 

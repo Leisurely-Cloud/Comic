@@ -27,7 +27,7 @@ public sealed class ReaderService
             .Select(item => new ReaderChapterDto
         {
             DirName = item.Directory.Name,
-            Title = LibraryStorageService.ChapterTitle(item.Directory.Name),
+            Title = LibraryStorageService.ChapterTitle(item.Directory.Name, metadata),
             Order = LibraryStorageService.ChapterOrder(item.Directory.Name),
             ImageCount = item.Images.Count,
         }).ToList();

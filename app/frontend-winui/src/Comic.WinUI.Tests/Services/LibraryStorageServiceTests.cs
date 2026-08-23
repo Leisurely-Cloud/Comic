@@ -45,6 +45,59 @@ public sealed class LibraryStorageServiceTests
     }
 
     [TestMethod]
+    public void Library_RecognizesMetadataFreeJmDirectoryLayout()
+    {
+        var jmRoot = Path.Combine(_storageRoot, "123");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [1]);
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+
+        var entry = service.EnumerateLibraryEntries().Single(item => item.RootDirectory == jmRoot);
+
+        Assert.AreEqual("JM123", entry.Title);
+        Assert.AreEqual("禁漫天堂", entry.SiteName);
+        Assert.AreEqual("https://18comic.vip/album/123", entry.MangaUrl);
+
+        Assert.IsTrue(service.ToggleFavorite(jmRoot));
+        var favorite = service.EnumerateLibraryEntries().Single(item => item.RootDirectory == jmRoot);
+        Assert.AreEqual("JM123", favorite.Title);
+        Assert.AreEqual("禁漫天堂", favorite.SiteName);
+        Assert.AreEqual("https://18comic.vip/album/123", favorite.MangaUrl);
+        Assert.IsTrue(favorite.IsFavorite);
+    }
+
+    [TestMethod]
+    public void SaveMetadata_PreservesRemoteChapterTitleForNumericDirectories()
+    {
+        var jmRoot = Path.Combine(_storageRoot, "456");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [1]);
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+        var manga = new JmMangaInfo(
+            "456",
+            "数字目录漫画",
+            string.Empty,
+            [new JmChapter(1, "11", "第1话 正式标题")],
+            null,
+            string.Empty,
+            []);
+
+        service.SaveLibraryMetadata(
+            manga,
+            "https://18comic.vip/album/456",
+            jmRoot,
+            completed: true,
+            failures: []);
+
+        var metadata = service.LoadLibraryMetadata(jmRoot);
+        Assert.IsNotNull(metadata);
+        Assert.AreEqual("第1话 正式标题", metadata.DownloadedChapters.Single().Title);
+        Assert.AreEqual("第1话 正式标题", metadata.LastDownloadedChapterTitle);
+    }
+
+    [TestMethod]
     public void Library_RecognizesLegacyNamedChapterFolders()
     {
         var legacyRoot = Path.Combine(_storageRoot, "旧版漫画");
@@ -142,6 +195,10 @@ public sealed class LibraryStorageServiceTests
         File.WriteAllText(
             Path.Combine(duplicateRoot, "元数据.json"),
             """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
+        var jmRoot = Path.Combine(_storageRoot, "123");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [3]);
         var recycled = new List<string>();
         var service = new LibraryStorageService(
             _storageRoot,
@@ -154,12 +211,13 @@ public sealed class LibraryStorageServiceTests
 
         var deletedCount = service.DeleteManga(_mangaRoot);
 
-        Assert.AreEqual(2, deletedCount);
+        Assert.AreEqual(3, deletedCount);
         CollectionAssert.AreEquivalent(
-            new[] { Path.GetFullPath(_mangaRoot), Path.GetFullPath(duplicateRoot) },
+            new[] { Path.GetFullPath(_mangaRoot), Path.GetFullPath(duplicateRoot), Path.GetFullPath(jmRoot) },
             recycled);
         Assert.IsFalse(Directory.Exists(_mangaRoot));
         Assert.IsFalse(Directory.Exists(duplicateRoot));
+        Assert.IsFalse(Directory.Exists(jmRoot));
         Assert.AreEqual(0, service.EnumerateLibraryEntries().Count);
     }
 
