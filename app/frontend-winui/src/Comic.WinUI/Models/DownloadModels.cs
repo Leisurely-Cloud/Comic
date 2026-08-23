@@ -45,6 +45,12 @@ public sealed class DownloadTaskDto
     [JsonPropertyName("download_speed_bytes_per_second")]
     public double DownloadSpeedBytesPerSecond { get; set; }
 
+    [JsonPropertyName("local_skipped_chapter_count")]
+    public int LocalSkippedChapterCount { get; set; }
+
+    [JsonPropertyName("requested_chapter_count")]
+    public int RequestedChapterCount { get; set; }
+
     [JsonPropertyName("task_error")]
     public ApiError? TaskError { get; set; }
 
@@ -143,6 +149,9 @@ public sealed class DownloadHistoryItem : ObservableObject
     [JsonPropertyName("total_chapter_count")]
     public int TotalChapterCount { get; set; }
 
+    [JsonPropertyName("downloaded_this_run_chapter_count")]
+    public int DownloadedThisRunChapterCount { get; set; }
+
     [JsonPropertyName("root_dir")]
     public string RootDir { get; set; } = string.Empty;
 
@@ -190,8 +199,24 @@ public sealed class DownloadHistoryItem : ObservableObject
 
     [JsonIgnore]
     public string ChapterProgressText => TotalChapterCount > 0
+        ? $"已完成 {CompletedChapterCount} / {TotalChapterCount} 章" +
+          (DownloadedThisRunChapterCount > 0
+              ? $" · 本次补下载 {DownloadedThisRunChapterCount} 章"
+              : string.Empty)
+        : "暂无章节统计";
+
+    [JsonIgnore]
+    public string AggregateChapterProgressText => TotalChapterCount > 0
         ? $"已完成 {CompletedChapterCount} / {TotalChapterCount} 章"
         : "暂无章节统计";
+
+    [JsonIgnore]
+    public string ThisRunProgressText => DownloadedThisRunChapterCount > 0
+        ? $"本次补下载 {DownloadedThisRunChapterCount} 章"
+        : string.Empty;
+
+    [JsonIgnore]
+    public bool HasThisRunProgress => DownloadedThisRunChapterCount > 0;
 
     [JsonIgnore]
     public string ProgressText => $"{Math.Clamp(Progress, 0, 100):0}%";

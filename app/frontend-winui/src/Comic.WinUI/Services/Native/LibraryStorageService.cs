@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Comic.WinUI.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.VisualBasic.FileIO;
 
 namespace Comic.WinUI.Services.Native;
 
@@ -22,15 +23,24 @@ public sealed class LibraryStorageService
     };
 
     private readonly ILogger<LibraryStorageService> _logger;
+    private readonly Action<string> _recycleDirectory;
+    private readonly object _libraryCacheLock = new();
+    private IReadOnlyList<LibraryEntry>? _libraryCache;
+    private DateTime _libraryCacheAtUtc;
+    private static readonly TimeSpan LibraryCacheLifetime = TimeSpan.FromSeconds(2);
 
     public LibraryStorageService(ApplicationSettingsService applicationSettings, ILogger<LibraryStorageService>? logger = null)
         : this(applicationSettings.StorageRoot, logger)
     {
     }
 
-    internal LibraryStorageService(string storageRoot, ILogger<LibraryStorageService>? logger = null)
+    internal LibraryStorageService(
+        string storageRoot,
+        ILogger<LibraryStorageService>? logger = null,
+        Action<string>? recycleDirectory = null)
     {
         _logger = logger ?? NullLogger<LibraryStorageService>.Instance;
+        _recycleDirectory = recycleDirectory ?? MoveDirectoryToRecycleBin;
         var requestedStorageRoot = Path.GetFullPath(storageRoot);
         Directory.CreateDirectory(requestedStorageRoot);
         StorageRoot = ResolveExistingDirectoryPath(requestedStorageRoot);
@@ -56,7 +66,17 @@ public sealed class LibraryStorageService
         var requested = Path.GetFullPath(Environment.ExpandEnvironmentVariables(requestedRoot.Trim()));
         Directory.CreateDirectory(requested);
         StorageRoot = ResolveExistingDirectoryPath(requested);
+        InvalidateLibraryCache();
         return StorageRoot;
+    }
+
+    public void InvalidateLibraryCache()
+    {
+        lock (_libraryCacheLock)
+        {
+            _libraryCache = null;
+            _libraryCacheAtUtc = default;
+        }
     }
 
     // ---- 元数据 ----
@@ -100,12 +120,12 @@ public sealed class LibraryStorageService
         IReadOnlyCollection<FailedChapterRecord> failures)
     {
         if (manga is null || string.IsNullOrWhiteSpace(rootDirectory)) return;
-        var downloaded = EnumerateChapterDirectories(rootDirectory).Select(directory => new DownloadedChapterRecord
+        var downloaded = EnumerateChapterContents(rootDirectory).Select(chapter => new DownloadedChapterRecord
         {
-            Order = ChapterOrder(directory.Name),
-            DirName = directory.Name,
-            Title = ChapterTitle(directory.Name),
-            ImageCount = EnumerateImages(directory.FullName).Count,
+            Order = ChapterOrder(chapter.Directory.Name),
+            DirName = chapter.Directory.Name,
+            Title = ChapterTitle(chapter.Directory.Name),
+            ImageCount = chapter.Images.Count,
         }).OrderBy(record => record.Order).ToList();
         var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         var existing = LoadLibraryMetadata(rootDirectory);
@@ -127,17 +147,26 @@ public sealed class LibraryStorageService
             LastDownloadedChapterTitle = downloaded.LastOrDefault()?.Title ?? string.Empty,
             LastDownloadedChapterOrder = downloaded.LastOrDefault()?.Order,
             DownloadedChapters = downloaded,
-            Completed = completed && failures.Count == 0,
+            Completed = completed && failures.Count == 0 && downloaded.Count >= manga.Chapters.Count,
             CreatedAt = existing?.CreatedAt is { Length: > 0 } created ? created : now,
             SavedAt = now,
             LastFailedChapterRecords = failures.ToList(),
             LastFailedChapterCount = failures.Count,
         };
         WriteJsonAtomically(Path.Combine(rootDirectory, "元数据.json"), metadata);
+        InvalidateLibraryCache();
     }
 
     public IReadOnlyList<LibraryEntry> EnumerateLibraryEntries()
     {
+        lock (_libraryCacheLock)
+        {
+            if (_libraryCache is not null && DateTime.UtcNow - _libraryCacheAtUtc < LibraryCacheLifetime)
+            {
+                return _libraryCache;
+            }
+        }
+
         var entries = new List<LibraryEntry>();
         foreach (var directory in new DirectoryInfo(StorageRoot).EnumerateDirectories())
         {
@@ -161,9 +190,41 @@ public sealed class LibraryStorageService
                 ordered.Count,
                 metadata?.LastDownloadedChapterTitle is { Length: > 0 } lastTitle ? lastTitle : ChapterTitle(ordered[^1].Name),
                 ParseDate(metadata?.SavedAt) ?? directory.LastWriteTime,
-                metadata?.IsFavorite ?? false));
+                metadata?.IsFavorite ?? false,
+                metadata?.Completed ?? false,
+                0));
         }
-        return entries;
+        var deduplicated = entries
+            .GroupBy(LibraryIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var best = group
+                    .OrderByDescending(entry => entry.Completed)
+                    .ThenByDescending(entry => entry.DownloadedChapterCount)
+                    .ThenByDescending(entry => entry.SavedAt)
+                    .First();
+                return best with
+                {
+                    IsFavorite = group.Any(entry => entry.IsFavorite),
+                    DuplicateDirectoryCount = group.Count() - 1,
+                };
+            })
+            .ToList();
+        var result = deduplicated.AsReadOnly();
+        lock (_libraryCacheLock)
+        {
+            _libraryCache = result;
+            _libraryCacheAtUtc = DateTime.UtcNow;
+        }
+        return result;
+    }
+
+    private static string LibraryIdentityKey(LibraryEntry entry)
+    {
+        var mangaId = JmComicService.ParseMangaId(entry.MangaUrl).MangaId;
+        return mangaId is null
+            ? $"path:{entry.RootDirectory}"
+            : $"{SiteCatalog.Key}:{mangaId}";
     }
 
     /// <summary>切换漫画的收藏状态,返回切换后的状态。</summary>
@@ -181,7 +242,61 @@ public sealed class LibraryStorageService
         metadata.IsFavorite = !metadata.IsFavorite;
         metadata.SavedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         WriteJsonAtomically(Path.Combine(resolvedRoot, "元数据.json"), metadata);
+        InvalidateLibraryCache();
         return metadata.IsFavorite;
+    }
+
+    /// <summary>
+    /// 将漫画目录移入 Windows 回收站。同一站点漫画 ID 对应的重复目录会一并处理，
+    /// 避免删除当前展示目录后，被去重隐藏的旧目录重新出现在书库中。
+    /// </summary>
+    public int DeleteManga(string rootDirectory)
+    {
+        var resolvedRoot = ResolveLibraryRoot(rootDirectory);
+        var selectedMetadata = LoadLibraryMetadata(resolvedRoot);
+        var mangaId = JmComicService.ParseMangaId(selectedMetadata?.MangaUrl ?? string.Empty).MangaId;
+        var targets = new List<string> { resolvedRoot };
+
+        if (mangaId is not null)
+        {
+            foreach (var directory in new DirectoryInfo(StorageRoot).EnumerateDirectories())
+            {
+                if (SamePath(directory.FullName, resolvedRoot) ||
+                    directory.Name.StartsWith('.') ||
+                    directory.Name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var metadata = LoadLibraryMetadata(directory.FullName);
+                var candidateId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId;
+                if (candidateId != mangaId || EnumerateChapterDirectories(directory.FullName).Count == 0) continue;
+
+                // 每个待删除目录都必须独立通过受管路径校验，不能仅凭元数据中的 ID 删除。
+                targets.Add(ResolveLibraryRoot(directory.FullName));
+            }
+        }
+
+        var uniqueTargets = targets
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            // 先处理重复目录，最后处理用户当前看到的主目录。
+            .OrderBy(path => SamePath(path, resolvedRoot))
+            .ToList();
+        var deletedCount = 0;
+        try
+        {
+            foreach (var target in uniqueTargets)
+            {
+                _recycleDirectory(target);
+                deletedCount++;
+            }
+        }
+        finally
+        {
+            InvalidateLibraryCache();
+        }
+
+        return deletedCount;
     }
 
     // ---- 目录与文件工具 ----
@@ -197,6 +312,26 @@ public sealed class LibraryStorageService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "枚举章节目录失败: {Path}", rootDirectory);
+            return [];
+        }
+    }
+
+    internal List<ChapterContent> EnumerateChapterContents(string rootDirectory)
+    {
+        try
+        {
+            var chapters = new List<ChapterContent>();
+            foreach (var directory in new DirectoryInfo(rootDirectory).EnumerateDirectories())
+            {
+                if (!IsPotentialChapterDirectoryName(directory.Name)) continue;
+                var images = EnumerateImages(directory.FullName);
+                if (images.Count > 0) chapters.Add(new ChapterContent(directory, images));
+            }
+            return chapters;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "枚举章节内容失败: {Path}", rootDirectory);
             return [];
         }
     }
@@ -346,6 +481,15 @@ public sealed class LibraryStorageService
         return Path.GetFullPath(file.ResolveLinkTarget(true)?.FullName ?? file.FullName);
     }
 
+    private static void MoveDirectoryToRecycleBin(string directory)
+    {
+        FileSystem.DeleteDirectory(
+            directory,
+            UIOption.OnlyErrorDialogs,
+            RecycleOption.SendToRecycleBin,
+            UICancelOption.ThrowException);
+    }
+
     private static string ReadMetadataString(JsonElement root, params string[] propertyNames)
     {
         foreach (var property in root.EnumerateObject())
@@ -403,7 +547,11 @@ public sealed record LibraryEntry(
     int DownloadedChapterCount,
     string LastDownloadedChapterTitle,
     DateTime SavedAt,
-    bool IsFavorite);
+    bool IsFavorite,
+    bool Completed,
+    int DuplicateDirectoryCount);
+
+internal sealed record ChapterContent(DirectoryInfo Directory, IReadOnlyList<string> Images);
 
 public sealed class LibraryMetadata
 {

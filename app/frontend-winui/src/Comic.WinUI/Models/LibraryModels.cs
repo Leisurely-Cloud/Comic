@@ -31,6 +31,9 @@ public sealed class LibraryItemDto
 
     [JsonPropertyName("is_favorite")]
     public bool IsFavorite { get; set; }
+
+    [JsonPropertyName("duplicate_directory_count")]
+    public int DuplicateDirectoryCount { get; set; }
 }
 
 public sealed class LibraryListResponse

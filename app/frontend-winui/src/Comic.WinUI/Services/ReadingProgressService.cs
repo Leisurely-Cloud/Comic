@@ -69,6 +69,18 @@ public sealed class ReadingProgressService
         }
     }
 
+    public void Remove(string rootDirectory)
+    {
+        var key = NormalizeRootDirectory(rootDirectory);
+        if (string.IsNullOrEmpty(key)) return;
+
+        lock (_gate)
+        {
+            if (!_entries.Remove(key)) return;
+            SaveToDisk();
+        }
+    }
+
     private Dictionary<string, ReadingProgressEntry> LoadFromDisk()
     {
         try

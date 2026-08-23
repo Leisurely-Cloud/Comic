@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
@@ -139,6 +140,52 @@ public sealed class JmComicService : IDisposable
         };
     }
 
+    public async Task<MangaCommentsResponse> GetAlbumCommentsAsync(
+        string mangaInput,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        var (mangaId, _) = ParseMangaId(mangaInput);
+        if (string.IsNullOrWhiteSpace(mangaId))
+        {
+            throw new ArgumentException("无法识别漫画编号，不能加载评论");
+        }
+
+        var safePage = Math.Max(page, 1);
+        var payload = await RequestApiAsync(
+            "/forum",
+            new Dictionary<string, string>
+            {
+                ["mode"] = "all",
+                ["page"] = safePage.ToString(),
+                ["aid"] = mangaId,
+            },
+            cancellationToken);
+
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("禁漫天堂评论结果结构无效");
+        }
+
+        var comments = new List<MangaCommentDto>();
+        if (payload.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            comments.AddRange(list.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.Object)
+                .Select(item => ParseComment(item, 0)));
+        }
+
+        var total = payload.TryGetProperty("total", out var totalElement)
+            ? ReadInt(totalElement)
+            : comments.Count;
+        return new MangaCommentsResponse
+        {
+            Items = comments,
+            Total = Math.Max(total, comments.Count),
+            Page = safePage,
+        };
+    }
+
     public async Task<MangaResolveResponse> ResolveAsync(
         string url,
         CancellationToken cancellationToken = default)
@@ -184,7 +231,8 @@ public sealed class JmComicService : IDisposable
         string rootDirectory,
         int maxConcurrentImages,
         CancellationToken cancellationToken = default,
-        Action<JmImageProgress>? progress = null)
+        Action<JmImageProgress>? progress = null,
+        Func<CancellationToken, Task>? waitBeforeImage = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!int.TryParse(chapter.Id, out var chapterId))
@@ -248,7 +296,8 @@ public sealed class JmComicService : IDisposable
                             Volatile.Read(ref successCount),
                             tasks.Count,
                             totalBytes));
-                    });
+                    },
+                    waitBeforeImage);
                 if (succeeded)
                 {
                     var completed = Interlocked.Increment(ref successCount);
@@ -640,7 +689,8 @@ public sealed class JmComicService : IDisposable
     private async Task<bool> DownloadImageAsync(
         ImageDownload item,
         CancellationToken cancellationToken,
-        Action<int>? bytesDownloaded = null)
+        Action<int>? bytesDownloaded = null,
+        Func<CancellationToken, Task>? waitBeforeAttempt = null)
     {
         if (File.Exists(item.Destination) && new FileInfo(item.Destination).Length > 0) return true;
         var partialPath = item.Destination + ".part";
@@ -649,6 +699,10 @@ public sealed class JmComicService : IDisposable
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (waitBeforeAttempt is not null)
+                {
+                    await waitBeforeAttempt(cancellationToken);
+                }
                 try
                 {
                     var uri = attempt == 0
@@ -870,6 +924,54 @@ public sealed class JmComicService : IDisposable
         return int.TryParse(element.ValueKind == JsonValueKind.String ? element.GetString() : null, out number)
             ? number
             : 0;
+    }
+
+    private static MangaCommentDto ParseComment(JsonElement element, int depth)
+    {
+        var author = GetString(element, "nickname");
+        if (string.IsNullOrWhiteSpace(author)) author = GetString(element, "username");
+
+        var replies = new List<MangaCommentDto>();
+        if (depth < 3)
+        {
+            JsonElement replyElements = default;
+            var hasReplies = element.TryGetProperty("replys", out replyElements) ||
+                             element.TryGetProperty("replies", out replyElements);
+            if (hasReplies && replyElements.ValueKind == JsonValueKind.Array)
+            {
+                replies.AddRange(replyElements.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.Object)
+                    .Select(item => ParseComment(item, depth + 1)));
+            }
+        }
+
+        var spoilerValue = GetString(element, "spoiler");
+        if (string.IsNullOrWhiteSpace(spoilerValue)) spoilerValue = GetString(element, "is_spoiler");
+        var createdAt = GetString(element, "addtime");
+        if (string.IsNullOrWhiteSpace(createdAt)) createdAt = GetString(element, "created_at");
+
+        return new MangaCommentDto
+        {
+            Id = GetString(element, "CID") is { Length: > 0 } id ? id : GetString(element, "id"),
+            UserId = GetString(element, "UID"),
+            Author = author,
+            Content = SanitizeCommentContent(GetString(element, "content")),
+            CreatedAt = FormatTimestamp(createdAt),
+            Likes = element.TryGetProperty("likes", out var likes) ? Math.Max(ReadInt(likes), 0) : 0,
+            IsSpoiler = spoilerValue is "1" or "2" or "true",
+            Replies = replies,
+        };
+    }
+
+    private static string SanitizeCommentContent(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "（无文字内容）";
+        var text = Regex.Replace(value, @"<\s*br\s*/?\s*>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<\s*/\s*p\s*>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<[^>]+>", string.Empty);
+        text = WebUtility.HtmlDecode(text).Replace("\r\n", "\n").Replace('\r', '\n');
+        text = Regex.Replace(text, @"\n{3,}", "\n\n").Trim();
+        return string.IsNullOrWhiteSpace(text) ? "（无文字内容）" : text;
     }
 
     private static List<string> GetStringArray(JsonElement element, string propertyName)

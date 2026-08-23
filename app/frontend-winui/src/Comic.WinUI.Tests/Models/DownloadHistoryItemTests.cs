@@ -18,11 +18,15 @@ public sealed class DownloadHistoryItemTests
             Progress = 100,
             CompletedChapterCount = 12,
             TotalChapterCount = 12,
+            DownloadedThisRunChapterCount = 2,
             FinishedAt = "2026-08-17 18:30:00",
         };
 
         Assert.AreEqual("已完成", item.StatusLabel);
-        Assert.AreEqual("已完成 12 / 12 章", item.ChapterProgressText);
+        Assert.AreEqual("已完成 12 / 12 章 · 本次补下载 2 章", item.ChapterProgressText);
+        Assert.AreEqual("已完成 12 / 12 章", item.AggregateChapterProgressText);
+        Assert.AreEqual("本次补下载 2 章", item.ThisRunProgressText);
+        Assert.IsTrue(item.HasThisRunProgress);
         Assert.AreEqual("100%", item.ProgressText);
         Assert.AreEqual("2026-08-17 18:30", item.FinishedAtDisplay);
         Assert.AreEqual(SiteCatalog.DisplayName, item.SiteDisplay);

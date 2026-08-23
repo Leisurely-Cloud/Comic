@@ -105,6 +105,57 @@ public sealed class DownloadSchedulerServiceTests
     }
 
     [TestMethod]
+    public async Task DownloadHistory_ConsolidatesSameMangaAndShowsAggregateLocalProgress()
+    {
+        File.WriteAllText(
+            Path.Combine(_mangaRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123","total_chapters":1}""");
+        var stateDirectory = Path.Combine(_storageRoot, ".comic_state");
+        Directory.CreateDirectory(stateDirectory);
+        File.WriteAllText(
+            Path.Combine(stateDirectory, "task_history.json"),
+            System.Text.Json.JsonSerializer.Serialize(new[]
+            {
+                new DownloadHistoryItem
+                {
+                    Id = "old-stopped",
+                    Url = "https://18comic.vip/album/123",
+                    SiteKey = SiteCatalog.Key,
+                    MangaTitle = "测试漫画",
+                    RootDir = _mangaRoot,
+                    Status = "stopped",
+                    CompletedChapterCount = 0,
+                    TotalChapterCount = 1,
+                },
+                new DownloadHistoryItem
+                {
+                    Id = "latest-completed",
+                    Url = "https://18comic.vip/album/123",
+                    SiteKey = SiteCatalog.Key,
+                    MangaTitle = "测试漫画",
+                    RootDir = _mangaRoot,
+                    Status = "completed",
+                    Progress = 100,
+                    CompletedChapterCount = 1,
+                    TotalChapterCount = 1,
+                },
+            }));
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var history = await service.GetDownloadHistoryAsync(1, 20);
+        var item = history.Items.Single();
+
+        Assert.AreEqual("latest-completed", item.Id);
+        Assert.AreEqual(1, item.CompletedChapterCount);
+        Assert.AreEqual(1, item.TotalChapterCount);
+        Assert.AreEqual(1, item.DownloadedThisRunChapterCount);
+        Assert.AreEqual("已完成 1 / 1 章 · 本次补下载 1 章", item.ChapterProgressText);
+    }
+
+    [TestMethod]
     public void SelectChapters_AcceptsChapterUrlsAndLegacyTitles()
     {
         var manga = new JmMangaInfo(
@@ -213,24 +264,246 @@ public sealed class DownloadSchedulerServiceTests
     }
 
     [TestMethod]
+    public async Task CreateDownload_ReturnsExistingActiveTaskForTheSameMangaAndSelection()
+    {
+        using var handler = FakeHttpMessageHandler.BlocksUntilCancelled();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+        var request = new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/123",
+            Chapters = ["https://18comic.vip/photo/456"],
+        };
+
+        var first = await service.CreateDownloadAsync(request);
+        await handler.WaitForRequestAsync(TimeSpan.FromSeconds(5));
+        var duplicate = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "123",
+            Chapters = ["https://18comic.vip/photo/456"],
+        });
+        var tasks = await service.GetDownloadsAsync();
+
+        Assert.AreEqual(first.Id, duplicate.Id);
+        Assert.AreEqual(1, tasks.Items.Count);
+    }
+
+    [TestMethod]
+    public void IsAlreadyDownloaded_UsesMangaIdentityAndEverySelectedChapter()
+    {
+        var manga = new JmMangaInfo(
+            "123",
+            "同名漫画",
+            string.Empty,
+            [new JmChapter(1, "11", "第1话"), new JmChapter(2, "12", "第2话")],
+            null,
+            string.Empty,
+            []);
+        var metadata = new LibraryMetadata
+        {
+            MangaUrl = "https://18comic.vip/album/123",
+            DownloadedChapters =
+            [
+                new DownloadedChapterRecord { Order = 1, DirName = "001_第1话", ImageCount = 50 },
+            ],
+        };
+
+        Assert.IsTrue(DownloadSchedulerService.IsAlreadyDownloaded(metadata, manga, [manga.Chapters[0]]));
+        Assert.IsFalse(DownloadSchedulerService.IsAlreadyDownloaded(metadata, manga, manga.Chapters));
+
+        metadata.MangaUrl = "https://18comic.vip/album/999";
+        Assert.IsFalse(DownloadSchedulerService.IsAlreadyDownloaded(metadata, manga, [manga.Chapters[0]]));
+    }
+
+    [TestMethod]
+    public void LegacyLibraryWithoutSourceId_IsMatchedByTitleAndActualChapterFiles()
+    {
+        var legacyRoot = Path.Combine(_storageRoot, "旧版目录名");
+        Directory.CreateDirectory(Path.Combine(legacyRoot, "第1话 标题"));
+        Directory.CreateDirectory(Path.Combine(legacyRoot, "第2话 标题"));
+        File.WriteAllBytes(Path.Combine(legacyRoot, "第1话 标题", "001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(legacyRoot, "第2话 标题", "001.jpg"), [2]);
+        File.WriteAllText(
+            Path.Combine(legacyRoot, "元数据.json"),
+            """{"manga_title":"旧版漫画","manga_url":"","downloaded_chapters":[]}""");
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(FakeHttpMessageHandler.AlwaysFails()), library);
+        var manga = new JmMangaInfo(
+            "123",
+            "旧版漫画",
+            string.Empty,
+            [new JmChapter(1, "11", "第1话"), new JmChapter(2, "12", "第2话")],
+            null,
+            string.Empty,
+            []);
+
+        var resolvedRoot = service.ResolveMangaRootDirectory(manga);
+        var local = service.GetLocalDownloadedChapters(resolvedRoot);
+
+        Assert.AreEqual(legacyRoot, resolvedRoot);
+        CollectionAssert.AreEquivalent(new[] { 1, 2 }, local.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ResumePreparation_ReusesCachedMangaWithoutAnotherSiteRequest()
+    {
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+        var cached = new JmMangaInfo(
+            "123",
+            "已解析漫画",
+            string.Empty,
+            [new JmChapter(1, "11", "第1话")],
+            null,
+            string.Empty,
+            []);
+
+        var result = await service.ResolveMangaInfoForRunAsync(
+            cached,
+            "https://18comic.vip/album/123",
+            CancellationToken.None);
+
+        Assert.AreSame(cached, result);
+        Assert.AreEqual(0, handler.RequestedUris.Count);
+    }
+
+    [TestMethod]
     public async Task Dispose_WithActiveTasksDoesNotThrowAndIsIdempotent()
     {
-        // 修复前 Dispose 会在仍在运行的 worker 底下直接释放它正在用的 CTS。
-        // 这里只验证释放路径本身健壮(不抛、可重复调用);worker 侧的时序不便断言。
-        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        using var handler = FakeHttpMessageHandler.BlocksUntilCancelled();
         var library = TestServiceFactory.CreateLibrary(_storageRoot);
         var service = TestServiceFactory.CreateScheduler(
             TestServiceFactory.CreateOfflineJmComic(handler), library);
 
-        for (var index = 1; index <= 3; index++)
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
         {
-            await service.CreateDownloadAsync(new DownloadCreateRequest
-            {
-                Url = $"https://18comic.vip/album/{index}",
-            });
-        }
+            Url = "https://18comic.vip/album/1",
+        });
+        await handler.WaitForRequestAsync(TimeSpan.FromSeconds(5));
 
         service.Dispose();
         service.Dispose();
+
+        var snapshot = await WaitUntilTerminalAsync(service, task.Id);
+        Assert.AreEqual("stopped", snapshot.Status);
+        Assert.IsFalse(service.HasActiveTasks());
+    }
+
+    [TestMethod]
+    public async Task StopDownload_CancelsBlockedRequestAndReachesStoppedState()
+    {
+        using var handler = FakeHttpMessageHandler.BlocksUntilCancelled();
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/2",
+        });
+        await handler.WaitForRequestAsync(TimeSpan.FromSeconds(5));
+
+        var stop = await service.StopDownloadAsync(task.Id);
+        var snapshot = await WaitUntilTerminalAsync(service, task.Id);
+
+        Assert.AreEqual("stopping", stop.Status);
+        Assert.AreEqual("stopped", snapshot.Status);
+        Assert.IsFalse(service.HasActiveTasks());
+    }
+
+    [TestMethod]
+    public async Task ResumeDownload_RestartsAStoppedTaskWithAFreshCancellationToken()
+    {
+        var requestCount = 0;
+        var firstRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new FakeHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            var current = Interlocked.Increment(ref requestCount);
+            if (current == 1)
+            {
+                firstRequestStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            return new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable);
+        });
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/3",
+        });
+        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopDownloadAsync(task.Id);
+        var stopped = await WaitUntilTerminalAsync(service, task.Id);
+
+        var resumed = await service.ResumeDownloadAsync(task.Id);
+
+        Assert.IsTrue(resumed.Status is "pending" or "running");
+        var timeout = Stopwatch.StartNew();
+        while (Volatile.Read(ref requestCount) < 2)
+        {
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(5), "继续后没有发起新的下载请求。");
+            await Task.Delay(10);
+        }
+        Assert.AreEqual("stopped", stopped.Status);
+        Assert.IsTrue(service.HasActiveTasks() || DownloadSchedulerService.IsTerminal((await service.GetDownloadAsync(task.Id)).Status));
+    }
+
+    [TestMethod]
+    public async Task ResumeDownload_DuringStoppingWaitsForShutdownThenRestarts()
+    {
+        var requestCount = 0;
+        var firstRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new FakeHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            var current = Interlocked.Increment(ref requestCount);
+            if (current == 1)
+            {
+                firstRequestStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            return new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable);
+        });
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/4",
+        });
+        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var stop = await service.StopDownloadAsync(task.Id);
+        var resumed = await service.ResumeDownloadAsync(task.Id).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual("stopping", stop.Status);
+        Assert.IsTrue(resumed.Status is "pending" or "running");
+        var timeout = Stopwatch.StartNew();
+        while (Volatile.Read(ref requestCount) < 2)
+        {
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(5), "正在停止时点击继续后没有重新发起请求。");
+            await Task.Delay(10);
+        }
+    }
+
+    private static async Task<DownloadTaskDto> WaitUntilTerminalAsync(
+        DownloadSchedulerService service,
+        string taskId)
+    {
+        var timeout = Stopwatch.StartNew();
+        while (true)
+        {
+            var snapshot = await service.GetDownloadAsync(taskId);
+            if (DownloadSchedulerService.IsTerminal(snapshot.Status)) return snapshot;
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(5), "下载任务取消后未在 5 秒内结束。");
+            await Task.Delay(10);
+        }
     }
 }

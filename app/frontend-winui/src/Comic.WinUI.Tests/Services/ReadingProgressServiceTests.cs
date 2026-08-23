@@ -58,4 +58,22 @@ public sealed class ReadingProgressServiceTests
         Assert.IsNotNull(reloaded);
         Assert.AreEqual(2, reloaded.PageIndex);
     }
+
+    [TestMethod]
+    public void Remove_DeletesOnlySelectedMangaProgressAndPersists()
+    {
+        var firstRoot = Path.Combine(_container, "first-manga");
+        var secondRoot = Path.Combine(_container, "second-manga");
+        var service = new ReadingProgressService(_container);
+        service.Save(firstRoot, "chapter-1", 3);
+        service.Save(secondRoot, "chapter-2", 5);
+
+        service.Remove(firstRoot);
+
+        Assert.IsNull(service.Get(firstRoot));
+        Assert.IsNotNull(service.Get(secondRoot));
+        var reloaded = new ReadingProgressService(_container);
+        Assert.IsNull(reloaded.Get(firstRoot));
+        Assert.AreEqual(5, reloaded.Get(secondRoot)?.PageIndex);
+    }
 }

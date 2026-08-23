@@ -26,6 +26,7 @@ public sealed class DownloadSchedulerService : IDisposable
     private readonly ApplicationSettingsService? _applicationSettings;
     private readonly ILogger<DownloadSchedulerService> _logger;
     private readonly ConcurrentDictionary<string, NativeDownloadTask> _downloads = [];
+    private readonly object _createLock = new();
     // 任务号是 Guid 前 8 位,没有时间序,不能拿来排序。这里单独记创建次序。
     private readonly ConcurrentDictionary<string, long> _creationOrder = [];
     private long _creationSequence;
@@ -51,6 +52,39 @@ public sealed class DownloadSchedulerService : IDisposable
     public static bool IsTerminal(string status) => status is "completed" or "failed" or "partial" or "stopped";
 
     public bool HasActiveTasks() => _downloads.Values.Any(state => !IsTerminal(CloneTask(state).Status));
+
+    /// <summary>判断指定本地漫画是否仍有未结束任务，兼顾重复目录与尚未解析出目录的任务。</summary>
+    public bool HasActiveTaskForManga(string rootDirectory)
+    {
+        var resolvedRoot = _library.ResolveLibraryRoot(rootDirectory);
+        var metadata = _library.LoadLibraryMetadata(resolvedRoot);
+        var mangaId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId;
+
+        foreach (var state in _downloads.Values)
+        {
+            var snapshot = CloneTask(state);
+            if (IsTerminal(snapshot.Status)) continue;
+
+            string taskRoot;
+            lock (state.Gate)
+            {
+                taskRoot = state.RootDirectory;
+            }
+
+            if (!string.IsNullOrWhiteSpace(taskRoot) && LibraryStorageService.SamePath(taskRoot, resolvedRoot))
+            {
+                return true;
+            }
+
+            var taskMangaId = JmComicService.ParseMangaId(state.Request.Url).MangaId;
+            if (mangaId is not null && taskMangaId == mangaId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>存储根目录切换后,把历史归档到旧位置并从新位置重新加载。</summary>
     public void ReloadHistoryForStorageChange()
@@ -92,28 +126,51 @@ public sealed class DownloadSchedulerService : IDisposable
     public Task<DownloadTaskDto> CreateDownloadAsync(DownloadCreateRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var id = Guid.NewGuid().ToString("N")[..8];
-        var state = new NativeDownloadTask(
-            new DownloadCreateRequest
+        lock (_createLock)
+        {
+            var duplicate = _downloads.Values.FirstOrDefault(state =>
+                !IsTerminal(CloneTask(state).Status) && SameDownloadRequest(state.Request, request));
+            if (duplicate is not null)
             {
-                Url = request.Url,
-                SiteKey = SiteCatalog.Key,
-                Source = request.Source,
-                Chapters = request.Chapters?.ToList(),
-            },
-            new DownloadTaskDto
-            {
-                Id = id,
-                Url = request.Url,
-                SiteKey = SiteCatalog.Key,
-                Status = "pending",
-                StatusText = "等待开始",
-            });
-        _downloads[id] = state;
-        _creationOrder[id] = Interlocked.Increment(ref _creationSequence);
-        state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
-        return Task.FromResult(CloneTask(state));
+                return Task.FromResult(CloneTask(duplicate));
+            }
+
+            var id = Guid.NewGuid().ToString("N")[..8];
+            var state = new NativeDownloadTask(
+                new DownloadCreateRequest
+                {
+                    Url = request.Url,
+                    SiteKey = SiteCatalog.Key,
+                    Source = request.Source,
+                    Chapters = request.Chapters?.ToList(),
+                },
+                new DownloadTaskDto
+                {
+                    Id = id,
+                    Url = request.Url,
+                    SiteKey = SiteCatalog.Key,
+                    Status = "pending",
+                    StatusText = "等待开始",
+                });
+            _downloads[id] = state;
+            _creationOrder[id] = Interlocked.Increment(ref _creationSequence);
+            state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+            return Task.FromResult(CloneTask(state));
+        }
     }
+
+    private static bool SameDownloadRequest(DownloadCreateRequest left, DownloadCreateRequest right)
+    {
+        var leftId = JmComicService.ParseMangaId(left.Url).MangaId;
+        var rightId = JmComicService.ParseMangaId(right.Url).MangaId;
+        if (leftId is null || rightId is null || !string.Equals(leftId, rightId, StringComparison.Ordinal)) return false;
+
+        var leftChapters = (left.Chapters ?? []).Select(NormalizeChapterSelection).Order().ToArray();
+        var rightChapters = (right.Chapters ?? []).Select(NormalizeChapterSelection).Order().ToArray();
+        return leftChapters.SequenceEqual(rightChapters, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeChapterSelection(string value) => value.Trim();
 
     public Task<DownloadListResponse> GetDownloadsAsync(CancellationToken cancellationToken = default)
     {
@@ -143,16 +200,17 @@ public sealed class DownloadSchedulerService : IDisposable
             {
                 state.PauseRequested = true;
                 state.Dto.Status = "pausing";
-                state.Dto.StatusText = "正在暂停，等待当前章节收尾";
+                state.Dto.StatusText = "正在暂停，等待当前图片收尾";
             }
         }
         return Task.FromResult(new DownloadActionResponse { Status = CloneTask(state).Status });
     }
 
-    public Task<DownloadActionResponse> ResumeDownloadAsync(string taskId, CancellationToken cancellationToken = default)
+    public async Task<DownloadActionResponse> ResumeDownloadAsync(string taskId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = RequireTask(taskId);
+        Task? stoppedWorker = null;
         lock (state.Gate)
         {
             if (state.Dto.Status is "paused" or "pausing")
@@ -162,8 +220,32 @@ public sealed class DownloadSchedulerService : IDisposable
                 state.Dto.StatusText = "继续下载中";
                 ResetDownloadSpeedLocked(state);
             }
+            else if (state.Dto.Status is "stopping" or "stopped")
+            {
+                stoppedWorker = state.Worker;
+            }
         }
-        return Task.FromResult(new DownloadActionResponse { Status = CloneTask(state).Status });
+
+        if (stoppedWorker is not null)
+        {
+            await stoppedWorker.WaitAsync(cancellationToken);
+            lock (state.Gate)
+            {
+                if (state.Dto.Status == "stopped")
+                {
+                    state.ReplaceStopSource();
+                    state.PauseRequested = false;
+                    state.HistoryRecorded = false;
+                    state.Dto.Status = "running";
+                    state.Dto.StatusText = "正在恢复任务，检查本地进度";
+                    state.Dto.TaskError = null;
+                    ResetDownloadSpeedLocked(state);
+                    RemoveHistoryRecord(state.Dto.Id);
+                    state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+                }
+            }
+        }
+        return new DownloadActionResponse { Status = CloneTask(state).Status };
     }
 
     public Task<DownloadActionResponse> StopDownloadAsync(string taskId, CancellationToken cancellationToken = default)
@@ -397,19 +479,75 @@ public sealed class DownloadSchedulerService : IDisposable
         var failures = new List<FailedChapterRecord>();
         try
         {
-            AppendLog(state, "info", "正在解析漫画链接...");
-            var manga = await _jmComic.GetMangaInfoFromUrlAsync(state.Request.Url, token);
-            AppendLog(state, "info", $"漫画: {manga.Title}，共 {manga.Chapters.Count} 章");
+            JmMangaInfo? manga;
+            lock (state.Gate) manga = state.Manga;
+            if (manga is null)
+            {
+                AppendLog(state, "info", "正在解析漫画链接...");
+                manga = await ResolveMangaInfoForRunAsync(null, state.Request.Url, token);
+                AppendLog(state, "info", $"漫画: {manga.Title}，共 {manga.Chapters.Count} 章");
+            }
+            else
+            {
+                AppendLog(state, "info", "复用已解析的漫画信息，正在检查本地进度...");
+            }
             lock (state.Gate)
             {
                 state.Manga = manga;
                 state.Dto.MangaTitle = manga.Title;
                 state.Dto.SiteKey = SiteCatalog.Key;
             }
-            var rootDirectory = Path.Combine(_library.StorageRoot, JmComicService.SanitizeFileName(manga.Title));
+            var rootDirectory = ResolveMangaRootDirectory(manga);
             Directory.CreateDirectory(rootDirectory);
-            var selected = SelectChapters(manga, state.Request.Chapters);
-            if (selected.Count == 0) throw new InvalidOperationException("没有匹配到可下载章节");
+            var requestedSelection = SelectChapters(manga, state.Request.Chapters);
+            if (requestedSelection.Count == 0) throw new InvalidOperationException("没有匹配到可下载章节");
+
+            var localChapters = GetLocalDownloadedChapters(rootDirectory);
+            if (requestedSelection.All(chapter => localChapters.ContainsKey(chapter.Order)))
+            {
+                lock (state.Gate)
+                {
+                    state.RootDirectory = rootDirectory;
+                    state.TotalChapterCount = requestedSelection.Count;
+                    state.CompletedChapterCount = requestedSelection.Count;
+                    state.Dto.LocalSkippedChapterCount = requestedSelection.Count;
+                    state.Dto.RequestedChapterCount = requestedSelection.Count;
+                    state.Dto.Chapters = requestedSelection.Select(chapter =>
+                    {
+                        var downloaded = localChapters[chapter.Order];
+                        return new DownloadChapterProgressDto
+                        {
+                            Id = chapter.Id,
+                            Title = chapter.Title,
+                            Status = "completed",
+                            CompletedImages = downloaded.ImageCount,
+                            TotalImages = downloaded.ImageCount,
+                            Progress = 100,
+                            DirectoryName = downloaded.DirName,
+                        };
+                    }).ToList();
+                    state.Dto.Progress = 100;
+                    state.Dto.Status = "completed";
+                    state.Dto.StatusText = "本地已下载，已跳过";
+                    state.Dto.TaskError = null;
+                }
+                AppendLog(state, "info", "所选章节本地已完整下载，跳过重复下载");
+                return;
+            }
+
+            var selected = requestedSelection
+                .Where(chapter => !localChapters.ContainsKey(chapter.Order))
+                .ToList();
+            var skippedLocalCount = requestedSelection.Count - selected.Count;
+            lock (state.Gate)
+            {
+                state.Dto.LocalSkippedChapterCount = skippedLocalCount;
+                state.Dto.RequestedChapterCount = requestedSelection.Count;
+            }
+            if (skippedLocalCount > 0)
+            {
+                AppendLog(state, "info", $"本地已有 {skippedLocalCount} 章，仅下载缺少的 {selected.Count} 章");
+            }
 
             lock (state.Gate)
             {
@@ -472,7 +610,13 @@ public sealed class DownloadSchedulerService : IDisposable
                                     completed,
                                     selected.Count,
                                     chapterNumber,
-                                    imageProgress));
+                                    imageProgress),
+                                waitBeforeImage: imageToken => WaitWhilePausedAsync(
+                                    state,
+                                    completed,
+                                    selected.Count,
+                                    imageToken,
+                                    logTransitions: false));
                             break;
                         }
                         catch (OperationCanceledException) { throw; }
@@ -636,6 +780,75 @@ public sealed class DownloadSchedulerService : IDisposable
             AppendLog(state, "error", ex.Message);
         }
         finally { RecordHistory(state); }
+    }
+
+    internal Task<JmMangaInfo> ResolveMangaInfoForRunAsync(
+        JmMangaInfo? cached,
+        string mangaUrl,
+        CancellationToken cancellationToken) =>
+        cached is not null
+            ? Task.FromResult(cached)
+            : _jmComic.GetMangaInfoFromUrlAsync(mangaUrl, cancellationToken);
+
+    internal string ResolveMangaRootDirectory(JmMangaInfo manga)
+    {
+        var candidates = new List<(string Path, bool Completed, int ChapterCount, DateTime SavedAt)>();
+        foreach (var directory in new DirectoryInfo(_library.StorageRoot).EnumerateDirectories())
+        {
+            var metadata = _library.LoadLibraryMetadata(directory.FullName);
+            var metadataId = metadata is null ? null : JmComicService.ParseMangaId(metadata.MangaUrl).MangaId;
+            var titleMatches = string.Equals(metadata?.MangaTitle, manga.Title, StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(metadataId, manga.Id, StringComparison.Ordinal) ||
+                (metadataId is null && titleMatches))
+            {
+                candidates.Add((
+                    directory.FullName,
+                    metadata?.Completed ?? false,
+                    _library.EnumerateChapterDirectories(directory.FullName).Count,
+                    directory.LastWriteTime));
+            }
+        }
+
+        if (candidates.Count > 0)
+            return candidates
+                .OrderByDescending(candidate => candidate.Completed)
+                .ThenByDescending(candidate => candidate.ChapterCount)
+                .ThenByDescending(candidate => candidate.SavedAt)
+                .First().Path;
+
+        var legacy = Path.Combine(_library.StorageRoot, JmComicService.SanitizeFileName(manga.Title));
+        if (Directory.Exists(legacy) && _library.LoadLibraryMetadata(legacy) is null) return legacy;
+
+        return Path.Combine(
+            _library.StorageRoot,
+            JmComicService.SanitizeFileName($"{manga.Title} [{manga.Id}]"));
+    }
+
+    internal Dictionary<int, DownloadedChapterRecord> GetLocalDownloadedChapters(string rootDirectory)
+    {
+        return _library.EnumerateChapterDirectories(rootDirectory)
+            .Select(directory => new DownloadedChapterRecord
+            {
+                Order = LibraryStorageService.ChapterOrder(directory.Name),
+                DirName = directory.Name,
+                Title = LibraryStorageService.ChapterTitle(directory.Name),
+                ImageCount = _library.EnumerateImages(directory.FullName).Count,
+            })
+            .Where(chapter => chapter.Order > 0 && chapter.ImageCount > 0)
+            .GroupBy(chapter => chapter.Order)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(chapter => chapter.ImageCount).First());
+    }
+
+    internal static bool IsAlreadyDownloaded(
+        LibraryMetadata? metadata,
+        JmMangaInfo manga,
+        IReadOnlyCollection<JmChapter> selected)
+    {
+        if (metadata is null) return false;
+        var metadataId = JmComicService.ParseMangaId(metadata.MangaUrl).MangaId;
+        if (!string.Equals(metadataId, manga.Id, StringComparison.Ordinal)) return false;
+        return selected.All(chapter => metadata.DownloadedChapters.Any(downloaded =>
+            downloaded.Order == chapter.Order && downloaded.ImageCount > 0));
     }
 
     private static void ReportImageProgress(
@@ -854,7 +1067,12 @@ public sealed class DownloadSchedulerService : IDisposable
         }
     }
 
-    private async Task WaitWhilePausedAsync(NativeDownloadTask state, int completed, int total, CancellationToken cancellationToken)
+    private async Task WaitWhilePausedAsync(
+        NativeDownloadTask state,
+        int completed,
+        int total,
+        CancellationToken cancellationToken,
+        bool logTransitions = true)
     {
         var logged = false;
         while (true)
@@ -870,14 +1088,14 @@ public sealed class DownloadSchedulerService : IDisposable
                 }
             }
             if (!paused) break;
-            if (!logged)
+            if (logTransitions && !logged)
             {
                 AppendLog(state, "info", "下载已暂停");
                 logged = true;
             }
             await Task.Delay(200, cancellationToken);
         }
-        if (logged) AppendLog(state, "info", "下载已继续");
+        if (logTransitions && logged) AppendLog(state, "info", "下载已继续");
     }
 
     public static List<JmChapter> SelectChapters(JmMangaInfo manga, IReadOnlyCollection<string>? requested)
@@ -920,11 +1138,13 @@ public sealed class DownloadSchedulerService : IDisposable
             {
                 changed |= EnrichHistoryMetadata(item);
             }
+            var consolidated = ConsolidateHistory(items);
+            changed |= consolidated.Count != items.Count;
             if (changed)
             {
-                _library.WriteJsonAtomically(HistoryFile, items);
+                _library.WriteJsonAtomically(HistoryFile, consolidated);
             }
-            return items;
+            return consolidated;
         }
         catch (Exception ex)
         {
@@ -948,6 +1168,38 @@ public sealed class DownloadSchedulerService : IDisposable
         }
 
         var metadata = _library.LoadLibraryMetadata(item.RootDir);
+        var localChapterCount = _library.EnumerateChapterDirectories(item.RootDir).Count;
+        if (item.DownloadedThisRunChapterCount == 0 && item.Status == "completed" && item.TotalChapterCount > 0)
+        {
+            item.DownloadedThisRunChapterCount = item.TotalChapterCount;
+            changed = true;
+        }
+        var aggregateTotal = Math.Max(metadata?.TotalChapters ?? 0, item.TotalChapterCount);
+        if (localChapterCount > item.CompletedChapterCount)
+        {
+            item.CompletedChapterCount = localChapterCount;
+            changed = true;
+        }
+        if (aggregateTotal > item.TotalChapterCount)
+        {
+            item.TotalChapterCount = aggregateTotal;
+            changed = true;
+        }
+        if (item.TotalChapterCount > 0)
+        {
+            var aggregateProgress = Math.Clamp(item.CompletedChapterCount / (double)item.TotalChapterCount * 100, 0, 100);
+            if (Math.Abs(item.Progress - aggregateProgress) > 0.01)
+            {
+                item.Progress = aggregateProgress;
+                changed = true;
+            }
+            if (item.CompletedChapterCount >= item.TotalChapterCount && item.Status != "completed")
+            {
+                item.Status = "completed";
+                item.TaskError = null;
+                changed = true;
+            }
+        }
         if (string.IsNullOrWhiteSpace(item.MangaTitle) && !string.IsNullOrWhiteSpace(metadata?.MangaTitle))
         {
             item.MangaTitle = metadata.MangaTitle;
@@ -984,6 +1236,30 @@ public sealed class DownloadSchedulerService : IDisposable
         return changed;
     }
 
+    internal static List<DownloadHistoryItem> ConsolidateHistory(IEnumerable<DownloadHistoryItem> items)
+    {
+        var consolidated = new List<DownloadHistoryItem>();
+        foreach (var item in items)
+        {
+            var key = HistoryMangaKey(item);
+            var existingIndex = key.Length == 0
+                ? -1
+                : consolidated.FindIndex(existing => HistoryMangaKey(existing) == key);
+            if (existingIndex >= 0) consolidated.RemoveAt(existingIndex);
+            consolidated.Add(item);
+        }
+        return consolidated;
+    }
+
+    private static string HistoryMangaKey(DownloadHistoryItem item)
+    {
+        var mangaId = JmComicService.ParseMangaId(item.Url).MangaId;
+        if (mangaId is not null) return $"{item.SiteKey}:{mangaId}";
+        return string.IsNullOrWhiteSpace(item.MangaTitle)
+            ? string.Empty
+            : $"{item.SiteKey}:title:{item.MangaTitle.Trim().ToUpperInvariant()}";
+    }
+
     private void RecordHistory(NativeDownloadTask state)
     {
         DownloadHistoryItem item;
@@ -1008,15 +1284,31 @@ public sealed class DownloadSchedulerService : IDisposable
                 Progress = state.Dto.Progress,
                 CompletedChapterCount = state.CompletedChapterCount,
                 TotalChapterCount = state.TotalChapterCount,
+                DownloadedThisRunChapterCount = state.CompletedChapterCount,
                 RootDir = state.RootDirectory,
                 TaskError = state.Dto.TaskError is null ? null : new ApiError { Code = state.Dto.TaskError.Code, Message = state.Dto.TaskError.Message },
                 FinishedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             };
         }
+        EnrichHistoryMetadata(item);
         lock (_historyLock)
         {
+            var key = HistoryMangaKey(item);
+            if (key.Length > 0)
+            {
+                _history.RemoveAll(existing => HistoryMangaKey(existing) == key);
+            }
             _history.Add(item);
             if (_history.Count > 200) _history.RemoveRange(0, _history.Count - 200);
+        }
+        SaveHistory();
+    }
+
+    private void RemoveHistoryRecord(string taskId)
+    {
+        lock (_historyLock)
+        {
+            _history.RemoveAll(item => string.Equals(item.Id, taskId, StringComparison.Ordinal));
         }
         SaveHistory();
     }
@@ -1067,6 +1359,8 @@ public sealed class DownloadSchedulerService : IDisposable
                 StatusText = state.Dto.StatusText,
                 Progress = state.Dto.Progress,
                 DownloadSpeedBytesPerSecond = speedIsFresh ? state.Dto.DownloadSpeedBytesPerSecond : 0,
+                LocalSkippedChapterCount = state.Dto.LocalSkippedChapterCount,
+                RequestedChapterCount = state.Dto.RequestedChapterCount,
                 TaskError = state.Dto.TaskError is null ? null : new ApiError { Code = state.Dto.TaskError.Code, Message = state.Dto.TaskError.Message },
                 Logs = state.Dto.Logs.Select(log => new DownloadLogEntry { Time = log.Time, Tag = log.Tag, Message = log.Message }).ToList(),
                 Chapters = state.Dto.Chapters.Select(chapter => new DownloadChapterProgressDto
@@ -1097,6 +1391,7 @@ public sealed class DownloadSchedulerService : IDisposable
         Progress = item.Progress,
         CompletedChapterCount = item.CompletedChapterCount,
         TotalChapterCount = item.TotalChapterCount,
+        DownloadedThisRunChapterCount = item.DownloadedThisRunChapterCount,
         RootDir = item.RootDir,
         TaskError = item.TaskError is null ? null : new ApiError { Code = item.TaskError.Code, Message = item.TaskError.Message },
         FinishedAt = item.FinishedAt,
@@ -1113,7 +1408,7 @@ public sealed class DownloadSchedulerService : IDisposable
         public object Gate { get; } = new();
         public DownloadCreateRequest Request { get; }
         public DownloadTaskDto Dto { get; }
-        public CancellationTokenSource StopSource { get; } = new();
+        public CancellationTokenSource StopSource { get; private set; } = new();
         public HashSet<string> StoppedChapterIds { get; } = new(StringComparer.Ordinal);
         public HashSet<string> DeletedChapterIds { get; } = new(StringComparer.Ordinal);
         public CancellationTokenSource? CurrentChapterStopSource { get; set; }
@@ -1130,6 +1425,12 @@ public sealed class DownloadSchedulerService : IDisposable
         public long SpeedWindowStartedTimestamp { get; set; }
         public int SpeedLastCompletedImages { get; set; }
         public DateTimeOffset? SpeedLastActivityAt { get; set; }
+
+        public void ReplaceStopSource()
+        {
+            StopSource.Dispose();
+            StopSource = new CancellationTokenSource();
+        }
 
         /// <summary>只请求停止,不释放。关闭流程需要先取消、等 worker 退出,再 Dispose。</summary>
         public void RequestStop()

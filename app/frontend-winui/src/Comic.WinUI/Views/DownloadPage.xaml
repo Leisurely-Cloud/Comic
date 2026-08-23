@@ -24,6 +24,7 @@
     <Grid Padding="24,16,24,24" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -73,7 +74,14 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="1">
+        <InfoBar Grid.Row="1"
+                 IsOpen="{x:Bind ViewModel.HasDownloadNotice, Mode=OneWay}"
+                 IsClosable="False"
+                 Severity="Success"
+                 Title="无需重复下载"
+                 Message="{x:Bind ViewModel.DownloadNotice, Mode=OneWay}" />
+
+        <Grid Grid.Row="2">
             <Grid x:Name="DiscoveryWorkspace" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -85,8 +93,8 @@
 
                 <Grid Grid.Row="1" ColumnSpacing="14">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="400" />
-                        <ColumnDefinition Width="*" MinWidth="0" />
+                        <ColumnDefinition Width="3*" MinWidth="500" />
+                        <ColumnDefinition Width="2*" MinWidth="460" />
                     </Grid.ColumnDefinitions>
 
                     <controls:SearchResultsList Grid.Column="0"

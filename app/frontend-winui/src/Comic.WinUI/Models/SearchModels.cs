@@ -13,6 +13,32 @@ public sealed class SearchResponse
     public int Total { get; set; }
 }
 
+public sealed class MangaCommentsResponse
+{
+    public List<MangaCommentDto> Items { get; set; } = [];
+
+    public int Total { get; set; }
+
+    public int Page { get; set; }
+}
+
+public sealed class MangaCommentDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string Author { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public string CreatedAt { get; set; } = string.Empty;
+    public int Likes { get; set; }
+    public bool IsSpoiler { get; set; }
+    public List<MangaCommentDto> Replies { get; set; } = [];
+
+    public string AuthorDisplay => string.IsNullOrWhiteSpace(Author) ? "匿名用户" : Author;
+    public string LikesText => Likes > 0 ? Likes.ToString() : string.Empty;
+    public bool HasLikes => Likes > 0;
+    public bool HasReplies => Replies.Count > 0;
+}
+
 public sealed class SearchResultItem
 {
     [JsonPropertyName("title")]

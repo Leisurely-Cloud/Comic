@@ -114,6 +114,61 @@ public sealed class DownloadPageViewModelTests
         viewModel.Dispose();
     }
 
+    [TestMethod]
+    public void ApplyDownloadNotice_ShowsVisibleMessageWhenLocalFilesAreSkipped()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.ApplyDownloadNotice(new DownloadTaskDto
+        {
+            MangaTitle = "测试漫画",
+            Status = "completed",
+            StatusText = "本地已下载，已跳过",
+            LocalSkippedChapterCount = 2,
+            RequestedChapterCount = 2,
+        });
+
+        Assert.IsTrue(viewModel.HasDownloadNotice);
+        StringAssert.Contains(viewModel.DownloadNotice, "测试漫画");
+        StringAssert.Contains(viewModel.DownloadNotice, "已跳过重复下载");
+    }
+
+    [TestMethod]
+    public void ApplyDownloadNotice_ShowsHowManyMissingChaptersWillBeDownloaded()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.ApplyDownloadNotice(new DownloadTaskDto
+        {
+            MangaTitle = "测试漫画",
+            Status = "running",
+            LocalSkippedChapterCount = 344,
+            RequestedChapterCount = 345,
+        });
+
+        Assert.IsTrue(viewModel.HasDownloadNotice);
+        StringAssert.Contains(viewModel.DownloadNotice, "本地已有 344 章");
+        StringAssert.Contains(viewModel.DownloadNotice, "缺少的 1 章");
+    }
+
+    [TestMethod]
+    public void CommentPagination_UsesTenItemsPerPageAndUpdatesNavigationState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.CurrentManga = new MangaResolveResponse { Title = "测试漫画" };
+        viewModel.CommentTotal = 25;
+
+        Assert.AreEqual("第 1 / 3 页", viewModel.CommentPageSummary);
+        Assert.IsFalse(viewModel.CanGoPreviousComments);
+        Assert.IsTrue(viewModel.CanGoNextComments);
+
+        viewModel.CommentPage = 3;
+
+        Assert.AreEqual("第 3 / 3 页", viewModel.CommentPageSummary);
+        Assert.IsTrue(viewModel.CanGoPreviousComments);
+        Assert.IsFalse(viewModel.CanGoNextComments);
+    }
+
     private DownloadPageViewModel CreateViewModel()
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));

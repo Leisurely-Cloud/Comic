@@ -33,9 +33,12 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _subscriptionCts;
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _resolveCts;
+    private CancellationTokenSource? _commentsCts;
     private int _lastEventId;
     private int _searchPage;
     private int _lastSearchPageSize;
+
+    public const int CommentPageSize = 10;
 
     public DownloadPageViewModel(
         BackendClient backendClient,
@@ -54,6 +57,12 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         _logger = logger;
         _dispatcherQueue = dispatcher;
         HistoryItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistoryItems));
+        Comments.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasComments));
+            OnPropertyChanged(nameof(ShowCommentsList));
+            OnPropertyChanged(nameof(ShowCommentsEmptyState));
+        };
         LoadSearchHistory();
     }
 
@@ -67,6 +76,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         CancelAndDispose(ref _subscriptionCts);
         CancelAndDispose(ref _searchCts);
         CancelAndDispose(ref _resolveCts);
+        CancelAndDispose(ref _commentsCts);
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)
@@ -95,6 +105,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public ObservableCollection<DownloadHistoryItem> HistoryItems { get; } = [];
 
     public ObservableCollection<SearchHistoryEntry> SearchHistory { get; } = [];
+
+    public ObservableCollection<MangaCommentDto> Comments { get; } = [];
 
     public bool HasSearchHistory => SearchHistory.Count > 0;
 
@@ -160,6 +172,12 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public partial string PageError { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDownloadNotice))]
+    public partial string DownloadNotice { get; set; } = string.Empty;
+
+    public bool HasDownloadNotice => !string.IsNullOrWhiteSpace(DownloadNotice);
+
+    [ObservableProperty]
     public partial SearchResultItemViewModel? SelectedSearchResult { get; set; }
 
     [ObservableProperty]
@@ -178,6 +196,43 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public bool HasCurrentTask => CurrentTask is not null;
 
     public bool HasManga => CurrentManga is not null;
+
+    [ObservableProperty]
+    public partial bool IsLoadingComments { get; set; }
+
+    [ObservableProperty]
+    public partial string CommentsError { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial int CommentTotal { get; set; }
+
+    [ObservableProperty]
+    public partial int CommentPage { get; set; } = 1;
+
+    public bool HasComments => Comments.Count > 0;
+
+    public bool HasCommentsError => !string.IsNullOrWhiteSpace(CommentsError);
+
+    public bool ShowCommentsList => HasComments && !IsLoadingComments && !HasCommentsError;
+
+    public bool ShowCommentsEmptyState => HasManga && !IsLoadingComments && !HasCommentsError && !HasComments;
+
+    public bool CanGoPreviousComments => HasManga && !IsLoadingComments && CommentPage > 1;
+
+    public bool CanGoNextComments => HasManga && !IsLoadingComments && CommentPage * CommentPageSize < CommentTotal;
+
+    public string CommentSummary => CommentTotal > 0 ? $"{CommentTotal} 条" : "暂无评论";
+
+    public string CommentPageSummary
+    {
+        get
+        {
+            var pageCount = CommentTotal > 0
+                ? Math.Max((int)Math.Ceiling(CommentTotal / (double)CommentPageSize), 1)
+                : 1;
+            return $"第 {CommentPage} / {pageCount} 页";
+        }
+    }
 
     public string CurrentMangaTitle => CurrentManga?.Title ?? string.Empty;
     public string CurrentMangaSiteName => CurrentManga?.SiteName ?? string.Empty;
@@ -221,6 +276,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     {
         IsBusy = true;
         PageError = string.Empty;
+        DownloadNotice = string.Empty;
         try
         {
             var list = await _backendClient.GetDownloadsAsync(cancellationToken);
@@ -549,6 +605,35 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanLoadMoreSearchResults));
     }
 
+    partial void OnIsLoadingCommentsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowCommentsList));
+        OnPropertyChanged(nameof(ShowCommentsEmptyState));
+        OnPropertyChanged(nameof(CanGoPreviousComments));
+        OnPropertyChanged(nameof(CanGoNextComments));
+    }
+
+    partial void OnCommentsErrorChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasCommentsError));
+        OnPropertyChanged(nameof(ShowCommentsList));
+        OnPropertyChanged(nameof(ShowCommentsEmptyState));
+    }
+
+    partial void OnCommentTotalChanged(int value)
+    {
+        OnPropertyChanged(nameof(CommentSummary));
+        OnPropertyChanged(nameof(CommentPageSummary));
+        OnPropertyChanged(nameof(CanGoNextComments));
+    }
+
+    partial void OnCommentPageChanged(int value)
+    {
+        OnPropertyChanged(nameof(CommentPageSummary));
+        OnPropertyChanged(nameof(CanGoPreviousComments));
+        OnPropertyChanged(nameof(CanGoNextComments));
+    }
+
     partial void OnSelectedSearchResultChanged(SearchResultItemViewModel? value)
     {
         if (value is not null)
@@ -598,6 +683,11 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
 
     partial void OnCurrentMangaChanged(MangaResolveResponse? value)
     {
+        CancelAndDispose(ref _commentsCts);
+        Comments.Clear();
+        CommentsError = string.Empty;
+        CommentTotal = 0;
+        CommentPage = 1;
         _dispatcherQueue.TryEnqueue(() =>
         {
             OnPropertyChanged(nameof(HasManga));
@@ -642,7 +732,81 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(ChapterSelectionSummary));
             OnPropertyChanged(nameof(CanStartDownload));
             OnPropertyChanged(nameof(DownloadButtonText));
+            OnPropertyChanged(nameof(ShowCommentsEmptyState));
+            OnPropertyChanged(nameof(CanGoPreviousComments));
+            OnPropertyChanged(nameof(CanGoNextComments));
+
+            if (value is not null)
+            {
+                _ = RefreshCommentsAsync();
+            }
         });
+    }
+
+    [RelayCommand]
+    public Task RefreshCommentsAsync(CancellationToken cancellationToken = default) =>
+        LoadCommentsPageAsync(CommentPage, cancellationToken);
+
+    [RelayCommand]
+    public Task PreviousCommentsPageAsync(CancellationToken cancellationToken = default) =>
+        CanGoPreviousComments
+            ? LoadCommentsPageAsync(CommentPage - 1, cancellationToken)
+            : Task.CompletedTask;
+
+    [RelayCommand]
+    public Task NextCommentsPageAsync(CancellationToken cancellationToken = default) =>
+        CanGoNextComments
+            ? LoadCommentsPageAsync(CommentPage + 1, cancellationToken)
+            : Task.CompletedTask;
+
+    private async Task LoadCommentsPageAsync(int targetPage, CancellationToken cancellationToken)
+    {
+        var mangaUrl = CurrentManga?.MangaUrl;
+        if (string.IsNullOrWhiteSpace(mangaUrl)) return;
+
+        CancelAndDispose(ref _commentsCts);
+        var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _commentsCts = source;
+        var page = Math.Max(targetPage, 1);
+        var token = source.Token;
+        IsLoadingComments = true;
+        CommentsError = string.Empty;
+        try
+        {
+            var response = await _backendClient.GetMangaCommentsAsync(mangaUrl, page, token);
+            token.ThrowIfCancellationRequested();
+            if (!string.Equals(CurrentManga?.MangaUrl, mangaUrl, StringComparison.OrdinalIgnoreCase)) return;
+
+            if (page > 1 && response.Items.Count == 0)
+            {
+                CommentsError = "这一页暂时没有评论，请返回上一页。";
+                return;
+            }
+
+            Comments.Clear();
+            foreach (var comment in response.Items) Comments.Add(comment);
+            CommentTotal = Math.Max(response.Total, response.Items.Count);
+            CommentPage = response.Page > 0 ? response.Page : page;
+        }
+        catch (OperationCanceledException)
+        {
+            // 切换漫画或离开页面时静默取消旧评论请求。
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "加载漫画评论失败: {MangaUrl}", mangaUrl);
+            if (ReferenceEquals(_commentsCts, source))
+            {
+                CommentsError = "评论加载失败，请稍后重试。";
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_commentsCts, source))
+            {
+                IsLoadingComments = false;
+            }
+        }
     }
 
     [RelayCommand]
@@ -675,6 +839,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         PageError = string.Empty;
+        DownloadNotice = string.Empty;
         try
         {
             var selectedChapters = HasChapters
@@ -693,6 +858,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
                     Chapters = selectedChapters,
                 },
                 cancellationToken);
+
+            ApplyDownloadNotice(task);
 
             UpsertTask(task);
             CurrentTask = Tasks.FirstOrDefault(item => item.Id == task.Id) ?? SelectPreferredTask();
@@ -1132,7 +1299,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         => CurrentTask is not null && CurrentTask.Status is "running" or "dispatched";
 
     private bool CanResume()
-        => CurrentTask is not null && CurrentTask.Status is "paused" or "pausing";
+        => CurrentTask is not null && CurrentTask.Status is "paused" or "pausing" or "stopping" or "stopped";
 
     private bool CanStop()
         => CurrentTask is not null && CurrentTask.Status is "pending" or "running" or "paused" or "pausing" or "dispatched";
@@ -1229,6 +1396,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             _dispatcherQueue.TryEnqueue(() =>
             {
                 UpsertTask(dto);
+                ApplyDownloadNotice(dto);
                 if (dto.Id == CurrentTaskId)
                 {
                     CurrentTask = Tasks.FirstOrDefault(item => item.Id == dto.Id);
@@ -1262,6 +1430,21 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         if (ReferenceEquals(existing, CurrentTask))
         {
             NotifyTaskControlCanExecuteChanged();
+        }
+    }
+
+    internal void ApplyDownloadNotice(DownloadTaskDto dto)
+    {
+        if (dto.LocalSkippedChapterCount <= 0) return;
+
+        var missingCount = Math.Max(0, dto.RequestedChapterCount - dto.LocalSkippedChapterCount);
+        if (missingCount == 0 || string.Equals(dto.StatusText, "本地已下载，已跳过", StringComparison.Ordinal))
+        {
+            DownloadNotice = $"《{dto.MangaTitle}》所选章节本地已存在，已跳过重复下载。";
+        }
+        else
+        {
+            DownloadNotice = $"《{dto.MangaTitle}》本地已有 {dto.LocalSkippedChapterCount} 章，仅补下载缺少的 {missingCount} 章。";
         }
     }
 

@@ -93,6 +93,7 @@ public sealed class BackendClient
                     DownloadedChapterCount = entry.DownloadedChapterCount,
                     LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
                     IsFavorite = entry.IsFavorite,
+                    DuplicateDirectoryCount = entry.DuplicateDirectoryCount,
                 }).ToList(),
                 Total = entries.Count,
                 Page = safePage,
@@ -106,6 +107,18 @@ public sealed class BackendClient
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(_library.ToggleFavorite(rootDir));
         }, "favorite_toggle_failed");
+
+    public Task<int> DeleteLibraryMangaAsync(string rootDir, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_downloads.HasActiveTaskForManga(rootDir))
+            {
+                throw new InvalidOperationException("这部漫画仍有未结束的下载任务，请先停止任务再删除。");
+            }
+
+            return _library.DeleteManga(rootDir);
+        }, cancellationToken), "library_delete_failed");
 
     public Task<SettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _library.GetSettingsAsync(cancellationToken), "settings_failed");
@@ -214,6 +227,12 @@ public sealed class BackendClient
         int page = 1,
         CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _jmComic.SearchAsync(query, page, cancellationToken: cancellationToken), "search_failed");
+
+    public Task<MangaCommentsResponse> GetMangaCommentsAsync(
+        string mangaUrl,
+        int page = 1,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.GetAlbumCommentsAsync(mangaUrl, page, cancellationToken), "comments_failed");
 
     public Task<DownloadHistoryResponse> GetDownloadHistoryAsync(
         int page = 1,

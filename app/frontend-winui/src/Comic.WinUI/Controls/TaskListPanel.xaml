@@ -409,11 +409,15 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{x:Bind ChapterProgressText, Mode=OneWay}"
+                                            <TextBlock Text="{x:Bind AggregateChapterProgressText, Mode=OneWay}"
                                                        FontSize="12" Opacity="0.75" />
                                             <TextBlock Grid.Column="1" Text="{x:Bind ProgressText, Mode=OneWay}"
                                                        FontSize="12" FontWeight="SemiBold" />
                                         </Grid>
+                                        <TextBlock Text="{x:Bind ThisRunProgressText, Mode=OneWay}"
+                                                   FontSize="11" Opacity="0.68"
+                                                   TextAlignment="Right"
+                                                   Visibility="{x:Bind HasThisRunProgress, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                                         <ProgressBar Minimum="0" Maximum="100" Height="4"
                                                      Value="{x:Bind Progress, Mode=OneWay}" />
                                         <TextBlock Text="{x:Bind FinishedAtDisplay, Mode=OneWay}"
