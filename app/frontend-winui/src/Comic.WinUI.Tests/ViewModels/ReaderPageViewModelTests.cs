@@ -1,3 +1,7 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Comic.WinUI.Services;
 using Comic.WinUI.Services.Native;
 using Comic.WinUI.Tests.Services;
@@ -84,11 +88,84 @@ public sealed class ReaderPageViewModelTests
         Assert.AreEqual(5, saved.PageIndex);
     }
 
+    [TestMethod]
+    public async Task OnlineStripMode_BuildsLazyItemsWithoutDownloadingAllImages()
+    {
+        _handler.Dispose();
+        var imageRequestCount = 0;
+        _handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/album", StringComparison.OrdinalIgnoreCase))
+            {
+                return EncryptedApiResponse(
+                    request,
+                    """{"id":"456","name":"在线条漫测试","series":[{"id":"123","name":"第一话"}]}""");
+            }
+
+            if (path.EndsWith("/chapter", StringComparison.OrdinalIgnoreCase))
+            {
+                return EncryptedApiResponse(
+                    request,
+                    """{"id":"123","name":"第一话","images":["001.jpg","002.jpg","003.jpg"]}""");
+            }
+
+            if (path.EndsWith("/chapter_view_template", StringComparison.OrdinalIgnoreCase))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<script>var scramble_id = 220980;</script>")
+                };
+            }
+
+            if (path.Contains("/media/photos/", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref imageRequestCount);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([1, 2, 3])
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+        var dispatcher = new DeferredDispatcher();
+        var progressService = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var viewModel = CreateViewModel(dispatcher, progressService, useStripMode: true);
+
+        await viewModel.LoadOnlineAsync("https://18comic.vip/album/456");
+        await WaitUntilAsync(() => viewModel.StripImages.Count == 3, TimeSpan.FromSeconds(5));
+
+        Assert.IsTrue(viewModel.CanToggleReaderMode);
+        Assert.IsTrue(viewModel.IsStripMode);
+        Assert.AreEqual("在线条漫测试", viewModel.MangaTitle);
+        Assert.AreEqual(3, viewModel.TotalImages);
+        Assert.AreEqual(3, viewModel.SelectedChapter?.ImageCount);
+        Assert.AreEqual(3, viewModel.StripImages.Count);
+        Assert.IsTrue(viewModel.StripImages.All(item => item.Image is null));
+        Assert.AreEqual(0, Volatile.Read(ref imageRequestCount));
+
+        // 模拟第一个虚拟化元素进入可视区，只允许请求这一页，不能顺带拉完整章。
+        await viewModel.LoadStripImageAsync(viewModel.StripImages[0]);
+        Assert.AreEqual(1, Volatile.Read(ref imageRequestCount));
+    }
+
     private ReaderPageViewModel CreateViewModel(
         IDispatcher dispatcher,
-        ReadingProgressService progressService)
+        ReadingProgressService progressService,
+        bool useStripMode = false)
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        if (useStripMode)
+        {
+            settings.UpdatePreferences(
+                ApplicationSettingsService.SystemTheme,
+                ApplicationSettingsService.SelectNone,
+                true,
+                ApplicationSettingsService.ReaderStrip,
+                ApplicationSettingsService.DefaultStripZoom,
+                20);
+        }
         var library = TestServiceFactory.CreateLibrary(_storageRoot);
         var jmComic = TestServiceFactory.CreateOfflineJmComic(_handler);
         _scheduler = TestServiceFactory.CreateScheduler(jmComic, library);
@@ -103,6 +180,35 @@ public sealed class ReaderPageViewModelTests
             settings);
 
         return new ReaderPageViewModel(backendClient, settings, progressService, dispatcher);
+    }
+
+    private static HttpResponseMessage EncryptedApiResponse(HttpRequestMessage request, string json)
+    {
+        var timestamp = long.Parse(request.Headers.GetValues("tokenparam").Single().Split(',')[0]);
+        var plaintext = Encoding.UTF8.GetBytes(json);
+        var keyText = Convert.ToHexString(MD5.HashData(
+            Encoding.UTF8.GetBytes(timestamp + "185Hcomic3PAPP7R"))).ToLowerInvariant();
+        using var aes = Aes.Create();
+        aes.Key = Encoding.ASCII.GetBytes(keyText);
+        aes.Mode = CipherMode.ECB;
+        aes.Padding = PaddingMode.PKCS7;
+        using var encryptor = aes.CreateEncryptor();
+        var encrypted = Convert.ToBase64String(
+            encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length));
+        var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(envelope, Encoding.UTF8, "application/json")
+        };
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        while (!condition())
+        {
+            await Task.Delay(10, cancellation.Token);
+        }
     }
 
     private void CreateChapter(string directoryName, int imageCount)

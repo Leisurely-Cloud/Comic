@@ -88,4 +88,29 @@ public sealed class ApplicationSettingsServiceTests
         Assert.AreEqual(3, settings.DownloadConcurrency);
         Assert.AreEqual(3, settings.ChapterRetryCount);
     }
+
+    [TestMethod]
+    public void StripZoom_DefaultsToFortyAndAllowsThirtyPercent()
+    {
+        var settings = new ApplicationSettingsService(_container);
+        Assert.AreEqual(40, settings.DefaultStripZoomPercent);
+
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderStrip,
+            30,
+            20);
+        Assert.AreEqual(30, settings.DefaultStripZoomPercent);
+
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderStrip,
+            10,
+            20);
+        Assert.AreEqual(30, settings.DefaultStripZoomPercent);
+    }
 }

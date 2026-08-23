@@ -21,12 +21,15 @@ public sealed class ReaderService
         cancellationToken.ThrowIfCancellationRequested();
         var resolvedRoot = _library.ResolveLibraryRoot(rootDir);
         var metadata = _library.LoadLibraryMetadata(resolvedRoot);
-        var chapters = _library.OrderChapterDirectories(_library.EnumerateChapterDirectories(resolvedRoot)).Select(item => new ReaderChapterDto
+        var chapters = _library.EnumerateChapterContents(resolvedRoot)
+            .OrderBy(item => LibraryStorageService.ChapterOrder(item.Directory.Name))
+            .ThenBy(item => item.Directory.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new ReaderChapterDto
         {
-            DirName = item.Name,
-            Title = LibraryStorageService.ChapterTitle(item.Name),
-            Order = LibraryStorageService.ChapterOrder(item.Name),
-            ImageCount = _library.EnumerateImages(item.FullName).Count,
+            DirName = item.Directory.Name,
+            Title = LibraryStorageService.ChapterTitle(item.Directory.Name),
+            Order = LibraryStorageService.ChapterOrder(item.Directory.Name),
+            ImageCount = item.Images.Count,
         }).ToList();
         return Task.FromResult(new ReaderChaptersResponse
         {

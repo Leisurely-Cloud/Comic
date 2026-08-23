@@ -15,6 +15,9 @@ public sealed class ApplicationSettingsService
     public const string SelectLatest = "latest";
     public const string ReaderPaged = "paged";
     public const string ReaderStrip = "strip";
+    public const int StripZoomMinimum = 30;
+    public const int StripZoomMaximum = 200;
+    public const int DefaultStripZoom = 40;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -180,7 +183,8 @@ public sealed class ApplicationSettingsService
         _ => ReaderPaged,
     };
 
-    private static int NormalizeStripZoom(int value) => Math.Clamp(value, 50, 200);
+    private static int NormalizeStripZoom(int value) =>
+        Math.Clamp(value, StripZoomMinimum, StripZoomMaximum);
 
     private static int NormalizeLibraryPageSize(int value) => value switch
     {
@@ -201,7 +205,7 @@ public sealed class ApplicationSettingsService
         public string ChapterSelectionMode { get; set; } = SelectNone;
         public bool ExpandNavigationPane { get; set; } = true;
         public string DefaultReaderMode { get; set; } = ReaderPaged;
-        public int DefaultStripZoomPercent { get; set; } = 100;
+        public int DefaultStripZoomPercent { get; set; } = DefaultStripZoom;
         public int LibraryPageSize { get; set; } = 20;
         public int DownloadConcurrency { get; set; } = 3;
         public int ChapterRetryCount { get; set; } = 3;

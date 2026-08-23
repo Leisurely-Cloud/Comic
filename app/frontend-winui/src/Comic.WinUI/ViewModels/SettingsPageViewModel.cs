@@ -115,7 +115,7 @@ public partial class SettingsPageViewModel : ObservableObject
     public partial SettingOption? SelectedReaderMode { get; set; }
 
     [ObservableProperty]
-    public partial double DefaultStripZoomPercent { get; set; } = 100;
+    public partial double DefaultStripZoomPercent { get; set; } = ApplicationSettingsService.DefaultStripZoom;
 
     [ObservableProperty]
     public partial SettingOption? SelectedLibraryPageSize { get; set; }
@@ -227,7 +227,7 @@ public partial class SettingsPageViewModel : ObservableObject
         SelectedChapterSelection = ChapterSelectionOptions.First();
         ExpandNavigationPane = true;
         SelectedReaderMode = ReaderModeOptions.First();
-        DefaultStripZoomPercent = 100;
+        DefaultStripZoomPercent = ApplicationSettingsService.DefaultStripZoom;
         SelectedLibraryPageSize = LibraryPageSizeOptions.First(option => option.Key == "20");
         SelectedConcurrency = ConcurrencyOptions.First(option => option.Key == "3");
         SelectedChapterRetryCount = ChapterRetryOptions.First(option => option.Key == "3");

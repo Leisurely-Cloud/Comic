@@ -211,10 +211,17 @@
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
                                     Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <TextBlock Text="{x:Bind Error, Mode=OneWay}"
-                                           Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                           TextWrapping="Wrap"
-                                           MaxWidth="680" />
+                                <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                    <TextBlock Text="{x:Bind Error, Mode=OneWay}"
+                                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center"
+                                               MaxWidth="680" />
+                                    <Button Content="重试本页"
+                                            HorizontalAlignment="Center"
+                                            Click="OnRetryStripImageClick"
+                                            AutomationProperties.Name="重新加载当前图片" />
+                                </StackPanel>
                             </Border>
                         </Grid>
                     </DataTemplate>
