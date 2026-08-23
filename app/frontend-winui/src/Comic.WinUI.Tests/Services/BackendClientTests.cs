@@ -68,7 +68,7 @@ public sealed class BackendClientTests
             reader,
             settings);
 
-        await Assert.ThrowsExceptionAsync<BackendApiException>(
+        await Assert.ThrowsExactlyAsync<BackendApiException>(
             () => client.UpdateSettingsAsync(new SettingsUpdateRequest { StorageRoot = "   " }));
     }
 }

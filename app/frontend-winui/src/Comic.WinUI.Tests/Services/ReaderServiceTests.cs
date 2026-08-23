@@ -85,9 +85,9 @@ public sealed class ReaderServiceTests
         var library = TestServiceFactory.CreateLibrary(_storageRoot);
         var service = TestServiceFactory.CreateReader(library);
 
-        await Assert.ThrowsExceptionAsync<UnauthorizedAccessException>(
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(
             () => service.GetReaderChaptersAsync(outsideManga));
-        await Assert.ThrowsExceptionAsync<ArgumentException>(
+        await Assert.ThrowsExactlyAsync<ArgumentException>(
             () => service.GetChapterImagesAsync(_mangaRoot, "..\\outside"));
     }
 }

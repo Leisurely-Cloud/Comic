@@ -13,17 +13,24 @@
     <LangVersion>preview</LangVersion>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Keep the test host independent of per-user Windows App Runtime
+         registration. This also makes command-line and CI runs reproducible. -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
-    <PackageReference Include="MSTest.TestAdapter" Version="3.6.3" />
-    <PackageReference Include="MSTest.TestFramework" Version="3.6.3" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Comic.WinUI\Comic.WinUI.csproj" />
+    <ProjectReference Include="..\Comic.WinUI\Comic.WinUI.csproj">
+      <AdditionalProperties>WindowsAppSdkBootstrapInitialize=false;WindowsAppSdkDeploymentManagerInitialize=false</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 </Project>
