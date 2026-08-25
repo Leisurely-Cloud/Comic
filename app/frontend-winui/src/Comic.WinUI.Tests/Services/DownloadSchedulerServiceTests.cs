@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Comic.WinUI.Models;
+using Comic.WinUI.Services;
 using Comic.WinUI.Services.Native;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -185,9 +186,13 @@ public sealed class DownloadSchedulerServiceTests
     {
         var chapterTwo = Path.Combine(_mangaRoot, "002_第二话");
         var temporaryChapterTwo = Path.Combine(_mangaRoot, ".下载中_002_第二话");
+        var jmChapterTwo = Path.Combine(_mangaRoot, "2");
+        var temporaryJmChapterTwo = Path.Combine(_mangaRoot, ".下载中_2");
         var chapterTwenty = Path.Combine(_mangaRoot, "020_第二十话");
         Directory.CreateDirectory(chapterTwo);
         Directory.CreateDirectory(temporaryChapterTwo);
+        Directory.CreateDirectory(jmChapterTwo);
+        Directory.CreateDirectory(temporaryJmChapterTwo);
         Directory.CreateDirectory(chapterTwenty);
         File.WriteAllBytes(Path.Combine(chapterTwo, "001.jpg"), [2]);
         File.WriteAllBytes(Path.Combine(temporaryChapterTwo, "001.jpg"), [3]);
@@ -200,6 +205,8 @@ public sealed class DownloadSchedulerServiceTests
 
         Assert.IsFalse(Directory.Exists(chapterTwo));
         Assert.IsFalse(Directory.Exists(temporaryChapterTwo));
+        Assert.IsFalse(Directory.Exists(jmChapterTwo));
+        Assert.IsFalse(Directory.Exists(temporaryJmChapterTwo));
         Assert.IsTrue(Directory.Exists(_chapterRoot));
         Assert.IsTrue(Directory.Exists(chapterTwenty));
     }
@@ -344,6 +351,68 @@ public sealed class DownloadSchedulerServiceTests
 
         Assert.AreEqual(legacyRoot, resolvedRoot);
         CollectionAssert.AreEquivalent(new[] { 1, 2 }, local.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public void JmCompatibleLayout_UsesNumericMangaAndChapterDirectoryNames()
+    {
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderPaged,
+            100,
+            20,
+            3,
+            3,
+            ApplicationSettingsService.DirectoryLayoutJmCompatible);
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(FakeHttpMessageHandler.AlwaysFails()),
+            library,
+            settings);
+        var manga = new JmMangaInfo(
+            "456",
+            "格式测试",
+            string.Empty,
+            [new JmChapter(7, "77", "第7话")],
+            null,
+            string.Empty,
+            []);
+
+        Assert.AreEqual(Path.Combine(_storageRoot, "456"), service.ResolveMangaRootDirectory(manga));
+        Assert.AreEqual(
+            "7",
+            DownloadSchedulerService.PreferredChapterDirectoryName(
+                manga.Chapters[0],
+                Path.Combine(_storageRoot, "456"),
+                manga.Id));
+    }
+
+    [TestMethod]
+    public void ExistingNumericJmDirectory_IsReusedRegardlessOfCurrentLayout()
+    {
+        var jmRoot = Path.Combine(_storageRoot, "789");
+        var jmChapter = Path.Combine(jmRoot, "1");
+        Directory.CreateDirectory(jmChapter);
+        File.WriteAllBytes(Path.Combine(jmChapter, "00001.jpg"), [1]);
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(FakeHttpMessageHandler.AlwaysFails()), library);
+        var manga = new JmMangaInfo(
+            "789",
+            "已存在的 JM 目录",
+            string.Empty,
+            [new JmChapter(1, "11", "第1话")],
+            null,
+            string.Empty,
+            []);
+
+        Assert.AreEqual(jmRoot, service.ResolveMangaRootDirectory(manga));
+        Assert.AreEqual(
+            "1",
+            DownloadSchedulerService.PreferredChapterDirectoryName(manga.Chapters[0], jmRoot, manga.Id));
     }
 
     [TestMethod]

@@ -49,11 +49,14 @@ public sealed class SettingsPageViewModelTests
         pageViewModel.StorageRoot = "   "; // 空目录会触发 UpdateSettingsAsync 拒绝
         pageViewModel.SelectedLibraryPageSize = pageViewModel.LibraryPageSizeOptions
             .First(option => option.Key == "10");
+        pageViewModel.SelectedDownloadDirectoryLayout = pageViewModel.DownloadDirectoryLayoutOptions
+            .First(option => option.Key == ApplicationSettingsService.DirectoryLayoutJmCompatible);
 
         await pageViewModel.SaveCommand.ExecuteAsync(null);
 
         // 普通设置已保存,即使目录更新失败。
         Assert.AreEqual(10, settings.LibraryPageSize);
+        Assert.AreEqual(ApplicationSettingsService.DirectoryLayoutJmCompatible, settings.DownloadDirectoryLayout);
         Assert.IsTrue(pageViewModel.SettingsError.Contains("下载目录", StringComparison.Ordinal));
         Assert.IsTrue(pageViewModel.SaveStatus.Length > 0);
     }

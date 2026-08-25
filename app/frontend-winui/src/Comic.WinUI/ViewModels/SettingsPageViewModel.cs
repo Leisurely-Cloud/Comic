@@ -45,6 +45,12 @@ public partial class SettingsPageViewModel : ObservableObject
         new(ApplicationSettingsService.SelectAll, "默认全选"),
     ];
 
+    public IReadOnlyList<SettingOption> DownloadDirectoryLayoutOptions { get; } =
+    [
+        new(ApplicationSettingsService.DirectoryLayoutOrganized, "应用整理格式"),
+        new(ApplicationSettingsService.DirectoryLayoutJmCompatible, "JM 兼容格式"),
+    ];
+
     public IReadOnlyList<SettingOption> ReaderModeOptions { get; } =
     [
         new(ApplicationSettingsService.ReaderPaged, "单页模式"),
@@ -126,6 +132,9 @@ public partial class SettingsPageViewModel : ObservableObject
     [ObservableProperty]
     public partial SettingOption? SelectedChapterRetryCount { get; set; }
 
+    [ObservableProperty]
+    public partial SettingOption? SelectedDownloadDirectoryLayout { get; set; }
+
     public string DefaultStripZoomText => $"{DefaultStripZoomPercent:0}%";
 
     partial void OnDefaultStripZoomPercentChanged(double value) =>
@@ -153,6 +162,8 @@ public partial class SettingsPageViewModel : ObservableObject
             SelectedChapterRetryCount = ChapterRetryOptions.FirstOrDefault(
                 option => option.Key == _applicationSettings.ChapterRetryCount.ToString())
                 ?? ChapterRetryOptions.First(option => option.Key == "3");
+            SelectedDownloadDirectoryLayout = DownloadDirectoryLayoutOptions.First(
+                option => option.Key == _applicationSettings.DownloadDirectoryLayout);
             SettingsError = string.Empty;
             SaveStatus = string.Empty;
         }
@@ -182,7 +193,8 @@ public partial class SettingsPageViewModel : ObservableObject
                 (int)Math.Round(DefaultStripZoomPercent),
                 int.TryParse(SelectedLibraryPageSize?.Key, out var pageSize) ? pageSize : 20,
                 int.TryParse(SelectedConcurrency?.Key, out var concurrency) ? concurrency : 3,
-                int.TryParse(SelectedChapterRetryCount?.Key, out var retryCount) ? retryCount : 3);
+                int.TryParse(SelectedChapterRetryCount?.Key, out var retryCount) ? retryCount : 3,
+                SelectedDownloadDirectoryLayout?.Key ?? ApplicationSettingsService.DirectoryLayoutOrganized);
 
             // 2. 尝试更新下载目录。存在未结束的下载任务时会被拒绝,
             //    单独提示即可,不能因为目录更新失败而丢失其他设置。
@@ -231,6 +243,8 @@ public partial class SettingsPageViewModel : ObservableObject
         SelectedLibraryPageSize = LibraryPageSizeOptions.First(option => option.Key == "20");
         SelectedConcurrency = ConcurrencyOptions.First(option => option.Key == "3");
         SelectedChapterRetryCount = ChapterRetryOptions.First(option => option.Key == "3");
+        SelectedDownloadDirectoryLayout = DownloadDirectoryLayoutOptions.First(
+            option => option.Key == ApplicationSettingsService.DirectoryLayoutOrganized);
         SettingsError = string.Empty;
         SaveStatus = "已恢复默认值，点击“保存设置”后生效。";
     }

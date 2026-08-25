@@ -15,6 +15,8 @@ public sealed class ApplicationSettingsService
     public const string SelectLatest = "latest";
     public const string ReaderPaged = "paged";
     public const string ReaderStrip = "strip";
+    public const string DirectoryLayoutOrganized = "organized";
+    public const string DirectoryLayoutJmCompatible = "jm-compatible";
     public const int StripZoomMinimum = 30;
     public const int StripZoomMaximum = 200;
     public const int DefaultStripZoom = 40;
@@ -65,6 +67,8 @@ public sealed class ApplicationSettingsService
 
     public int ChapterRetryCount => NormalizeRetryCount(_preferences.ChapterRetryCount);
 
+    public string DownloadDirectoryLayout => NormalizeDirectoryLayout(_preferences.DownloadDirectoryLayout);
+
     public string SettingsDirectory => Path.GetDirectoryName(_filePath) ?? string.Empty;
 
     public void UpdatePreferences(string theme, string chapterSelectionMode)
@@ -109,6 +113,29 @@ public sealed class ApplicationSettingsService
         int downloadConcurrency,
         int chapterRetryCount)
     {
+        UpdatePreferences(
+            theme,
+            chapterSelectionMode,
+            expandNavigationPane,
+            defaultReaderMode,
+            defaultStripZoomPercent,
+            libraryPageSize,
+            downloadConcurrency,
+            chapterRetryCount,
+            DownloadDirectoryLayout);
+    }
+
+    public void UpdatePreferences(
+        string theme,
+        string chapterSelectionMode,
+        bool expandNavigationPane,
+        string defaultReaderMode,
+        int defaultStripZoomPercent,
+        int libraryPageSize,
+        int downloadConcurrency,
+        int chapterRetryCount,
+        string downloadDirectoryLayout)
+    {
         var normalizedTheme = NormalizeTheme(theme);
         var themeChanged = !string.Equals(Theme, normalizedTheme, StringComparison.Ordinal);
         _preferences.Theme = normalizedTheme;
@@ -119,6 +146,7 @@ public sealed class ApplicationSettingsService
         _preferences.LibraryPageSize = NormalizeLibraryPageSize(libraryPageSize);
         _preferences.DownloadConcurrency = NormalizeConcurrency(downloadConcurrency);
         _preferences.ChapterRetryCount = NormalizeRetryCount(chapterRetryCount);
+        _preferences.DownloadDirectoryLayout = NormalizeDirectoryLayout(downloadDirectoryLayout);
         Save();
         if (themeChanged) ThemeChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -198,6 +226,12 @@ public sealed class ApplicationSettingsService
 
     private static int NormalizeRetryCount(int value) => Math.Clamp(value, 1, 5);
 
+    private static string NormalizeDirectoryLayout(string? value) => value switch
+    {
+        DirectoryLayoutJmCompatible => DirectoryLayoutJmCompatible,
+        _ => DirectoryLayoutOrganized,
+    };
+
     private sealed class UserPreferences
     {
         public string StorageRoot { get; set; } = string.Empty;
@@ -209,5 +243,6 @@ public sealed class ApplicationSettingsService
         public int LibraryPageSize { get; set; } = 20;
         public int DownloadConcurrency { get; set; } = 3;
         public int ChapterRetryCount { get; set; } = 3;
+        public string DownloadDirectoryLayout { get; set; } = DirectoryLayoutOrganized;
     }
 }

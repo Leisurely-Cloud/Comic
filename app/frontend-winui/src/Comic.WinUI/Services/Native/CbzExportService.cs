@@ -105,7 +105,7 @@ public sealed class CbzExportService : IDisposable
         };
         _exports[taskId] = state;
         state.Worker = Task.Run(
-            () => ProcessExportAsync(state, resolvedRoot, metadata?.MangaUrl ?? string.Empty, state.Cancellation.Token),
+            () => ProcessExportAsync(state, resolvedRoot, metadata, state.Cancellation.Token),
             CancellationToken.None);
         return Task.FromResult(new ExportCbzResponse { Status = "ok", TaskId = taskId, Message = "导出任务已创建" });
     }
@@ -120,7 +120,7 @@ public sealed class CbzExportService : IDisposable
     private async Task ProcessExportAsync(
         ExportTaskState state,
         string rootDirectory,
-        string mangaUrl,
+        LibraryMetadata? metadata,
         CancellationToken cancellationToken)
     {
         try
@@ -129,6 +129,7 @@ public sealed class CbzExportService : IDisposable
             var chapters = _library.OrderChapterDirectories(_library.EnumerateChapterDirectories(rootDirectory)).ToList();
             if (chapters.Count == 0) throw new InvalidOperationException("当前漫画目录里没有可导出的已完成章节");
             var simplifiedMangaTitle = ToSimplifiedChinese(state.Progress.MangaTitle);
+            var mangaUrl = metadata?.MangaUrl ?? string.Empty;
             var exportDirectory = Path.Combine(Directory.GetParent(rootDirectory)!.FullName, simplifiedMangaTitle + "_CBZ");
             Directory.CreateDirectory(exportDirectory);
             var exported = 0;
@@ -138,15 +139,16 @@ public sealed class CbzExportService : IDisposable
             {
                 state.Progress.TotalChapters = chapters.Count;
                 state.Progress.ExportDir = exportDirectory;
-                state.Progress.CurrentChapter = LibraryStorageService.ChapterTitle(chapters[0].Name);
+                state.Progress.CurrentChapter = LibraryStorageService.ChapterTitle(chapters[0].Name, metadata);
             }
 
             for (var index = 0; index < chapters.Count; index++)
             {
                 var chapter = chapters[index];
+                var chapterTitle = LibraryStorageService.ChapterTitle(chapter.Name, metadata);
                 cancellationToken.ThrowIfCancellationRequested();
                 var images = _library.EnumerateImages(chapter.FullName);
-                lock (state.Gate) state.Progress.CurrentChapter = LibraryStorageService.ChapterTitle(chapter.Name);
+                lock (state.Gate) state.Progress.CurrentChapter = chapterTitle;
                 if (images.Count == 0) skipped.Add(chapter.Name);
                 else
                 {
@@ -154,7 +156,7 @@ public sealed class CbzExportService : IDisposable
                         Path.Combine(exportDirectory, chapter.Name + ".cbz"),
                         images,
                         simplifiedMangaTitle,
-                        LibraryStorageService.ChapterTitle(chapter.Name),
+                        chapterTitle,
                         index + 1,
                         chapters.Count,
                         mangaUrl,
@@ -163,7 +165,7 @@ public sealed class CbzExportService : IDisposable
                 }
                 lock (state.Gate)
                 {
-                    state.Progress.CurrentChapter = LibraryStorageService.ChapterTitle(chapter.Name);
+                    state.Progress.CurrentChapter = chapterTitle;
                     state.Progress.CurrentIndex = index + 1;
                     state.Progress.TotalChapters = chapters.Count;
                     state.Progress.ExportedCount = exported;

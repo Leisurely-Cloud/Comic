@@ -82,6 +82,40 @@ public sealed class ApplicationSettingsServiceTests
     }
 
     [TestMethod]
+    public void DownloadDirectoryLayout_IsPersistedAndInvalidValuesFallBackToOrganized()
+    {
+        var settings = new ApplicationSettingsService(_container);
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderPaged,
+            100,
+            20,
+            3,
+            3,
+            ApplicationSettingsService.DirectoryLayoutJmCompatible);
+
+        Assert.AreEqual(ApplicationSettingsService.DirectoryLayoutJmCompatible, settings.DownloadDirectoryLayout);
+        Assert.AreEqual(
+            ApplicationSettingsService.DirectoryLayoutJmCompatible,
+            new ApplicationSettingsService(_container).DownloadDirectoryLayout);
+
+        settings.UpdatePreferences(
+            ApplicationSettingsService.SystemTheme,
+            ApplicationSettingsService.SelectNone,
+            true,
+            ApplicationSettingsService.ReaderPaged,
+            100,
+            20,
+            3,
+            3,
+            "unknown-layout");
+
+        Assert.AreEqual(ApplicationSettingsService.DirectoryLayoutOrganized, settings.DownloadDirectoryLayout);
+    }
+
+    [TestMethod]
     public void DownloadConcurrencyAndRetry_DefaultToThree()
     {
         var settings = new ApplicationSettingsService(_container);

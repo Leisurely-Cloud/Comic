@@ -187,6 +187,26 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE8B7;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="下载目录格式" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="应用整理格式：标题 [ID]/序号_章节名；JM 兼容格式：本子ID/章节序号。只影响新漫画。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="2" Width="210" HorizontalAlignment="Right"
+                                      ItemsSource="{x:Bind ViewModel.DownloadDirectoryLayoutOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedDownloadDirectoryLayout, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <FontIcon Grid.Column="0" Glyph="&#xE8FD;" FontSize="22" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                 <TextBlock Text="章节默认选择" FontSize="16" FontWeight="SemiBold" />

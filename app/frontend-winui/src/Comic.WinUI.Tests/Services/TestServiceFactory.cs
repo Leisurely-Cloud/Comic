@@ -8,8 +8,11 @@ internal static class TestServiceFactory
 {
     public static LibraryStorageService CreateLibrary(string storageRoot) => new(storageRoot);
 
-    public static DownloadSchedulerService CreateScheduler(JmComicService jmComic, LibraryStorageService library) =>
-        new(jmComic, library);
+    public static DownloadSchedulerService CreateScheduler(
+        JmComicService jmComic,
+        LibraryStorageService library,
+        ApplicationSettingsService? settings = null) =>
+        new(jmComic, library, settings);
 
     public static ReaderService CreateReader(LibraryStorageService library) => new(library);
 
