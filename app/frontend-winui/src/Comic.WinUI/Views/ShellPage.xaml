@@ -37,14 +37,19 @@
                     <FontIcon Glyph="&#xE8A3;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="我的书库" Tag="library">
+            <NavigationViewItem Content="收藏夹" Tag="favorites">
                 <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xE8D1;" />
+                    <FontIcon Glyph="&#xE734;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="每周必看" Tag="weekly">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE787;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="我的书库" Tag="library">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE8D1;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="设置" Tag="settings">

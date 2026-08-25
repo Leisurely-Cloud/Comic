@@ -50,6 +50,8 @@ public sealed partial class App : Application
                 ConnectTimeout = TimeSpan.FromSeconds(5),
                 AutomaticDecompression = System.Net.DecompressionMethods.All,
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                // JM 登录会话由 JmComicService 仅在内存中管理，退出时可立即彻底清除。
+                UseCookies = false,
             }),
             provider.GetRequiredService<JmSiteOptions>(),
             provider.GetRequiredService<ILogger<JmComicService>>()));
@@ -61,11 +63,13 @@ public sealed partial class App : Application
         services.AddSingleton<DownloadEventStream>();
         services.AddSingleton<SearchHistoryService>();
         services.AddSingleton<ApplicationSettingsService>();
+        services.AddSingleton<IJmCredentialStore, WindowsJmCredentialStore>();
         services.AddSingleton<ReadingProgressService>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();
         services.AddTransient<LibraryPageViewModel>();
         services.AddTransient<SettingsPageViewModel>();
+        services.AddSingleton<FavoritesPageViewModel>();
         services.AddTransient<ReaderPageViewModel>();
         services.AddSingleton<RankingPageViewModel>();
         services.AddSingleton<WeeklyPicksPageViewModel>();

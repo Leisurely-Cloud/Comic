@@ -20,6 +20,9 @@ public sealed class BackendClient
     private readonly CbzExportService _export;
     private readonly ReaderService _reader;
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly IJmCredentialStore _jmCredentials;
+    private readonly SemaphoreSlim _restoreLoginGate = new(1, 1);
+    private int _loginGeneration;
 
     public BackendClient(
         JmComicService jmComic,
@@ -27,7 +30,8 @@ public sealed class BackendClient
         LibraryStorageService library,
         CbzExportService export,
         ReaderService reader,
-        ApplicationSettingsService applicationSettings)
+        ApplicationSettingsService applicationSettings,
+        IJmCredentialStore? jmCredentials = null)
     {
         _jmComic = jmComic;
         _downloads = downloads;
@@ -35,10 +39,77 @@ public sealed class BackendClient
         _export = export;
         _reader = reader;
         _applicationSettings = applicationSettings;
+        _jmCredentials = jmCredentials ?? new VolatileJmCredentialStore();
     }
 
     public Task<MangaResolveResponse> ResolveMangaAsync(MangaResolveRequest request, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _jmComic.ResolveAsync(request.Url, cancellationToken), "resolve_failed");
+
+    public JmAccountState GetJmAccountState() => _jmComic.GetAccountState();
+
+    public async Task<JmAccountInfo> LoginJmAsync(
+        string username,
+        string password,
+        bool rememberLogin = false,
+        CancellationToken cancellationToken = default)
+    {
+        var account = await InvokeAsync(
+            () => _jmComic.LoginAsync(username, password, cancellationToken),
+            "jm_login_failed");
+        if (rememberLogin) _jmCredentials.TrySave(username, password);
+        else _jmCredentials.Clear();
+        return account;
+    }
+
+    public bool HasSavedJmLogin => _jmCredentials.HasCredential;
+
+    public async Task<JmAccountState> RestoreJmLoginAsync(CancellationToken cancellationToken = default)
+    {
+        var current = _jmComic.GetAccountState();
+        if (current.IsLoggedIn) return current;
+        if (!_jmCredentials.TryLoad(out var username, out var password)) return current;
+
+        await _restoreLoginGate.WaitAsync(cancellationToken);
+        try
+        {
+            current = _jmComic.GetAccountState();
+            if (current.IsLoggedIn) return current;
+            var generation = Volatile.Read(ref _loginGeneration);
+            var account = await InvokeAsync(
+                () => _jmComic.LoginAsync(username, password, cancellationToken),
+                "jm_login_restore_failed");
+            if (generation != Volatile.Read(ref _loginGeneration))
+            {
+                _jmComic.Logout();
+                return _jmComic.GetAccountState();
+            }
+            return new JmAccountState { IsLoggedIn = true, Account = account };
+        }
+        finally
+        {
+            password = string.Empty;
+            _restoreLoginGate.Release();
+        }
+    }
+
+    public void LogoutJm()
+    {
+        Interlocked.Increment(ref _loginGeneration);
+        _jmComic.Logout();
+        _jmCredentials.Clear();
+    }
+
+    public Task<JmFavoriteResponse> GetJmFavoritesAsync(
+        int page = 1,
+        string folderId = "0",
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.GetFavoritesAsync(page, folderId, cancellationToken: cancellationToken), "jm_favorites_failed");
+
+    public Task<JmFavoriteMutationResult> SetJmFavoriteAsync(
+        string albumId,
+        bool isFavorite,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.SetJmFavoriteAsync(albumId, isFavorite, cancellationToken), "jm_favorite_update_failed");
 
     public Task<DownloadTaskDto> CreateDownloadAsync(DownloadCreateRequest request, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.CreateDownloadAsync(request, cancellationToken), "download_create_failed");

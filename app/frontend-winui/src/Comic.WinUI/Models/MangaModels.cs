@@ -58,6 +58,9 @@ public sealed class MangaResolveResponse
 
     [JsonPropertyName("comment_count")]
     public string CommentCount { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_favorite")]
+    public bool IsFavorite { get; set; }
 }
 
 public sealed class MangaChapterDto

@@ -24,8 +24,9 @@ internal static class TestServiceFactory
         LibraryStorageService library,
         CbzExportService exporter,
         ReaderService reader,
-        ApplicationSettingsService settings) =>
-        new(jmComic, scheduler, library, exporter, reader, settings);
+        ApplicationSettingsService settings,
+        IJmCredentialStore? jmCredentials = null) =>
+        new(jmComic, scheduler, library, exporter, reader, settings, jmCredentials);
 
     public static ApplicationSettingsService CreateSettings(string directory) => new(directory);
 

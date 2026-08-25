@@ -48,6 +48,8 @@ public sealed class JmComicService : IDisposable
     private readonly object _stateLock = new();
     private readonly Dictionary<string, (DateTimeOffset SavedAt, JsonElement Payload)> _albumCache = [];
     private string _preferredApiDomain;
+    private string _sessionCookie = string.Empty;
+    private JmAccountInfo? _currentAccount;
 
     public JmComicService(HttpClient httpClient, JmSiteOptions? options = null, ILogger<JmComicService>? logger = null)
     {
@@ -64,6 +66,164 @@ public sealed class JmComicService : IDisposable
     }
 
     public IReadOnlyDictionary<string, string> GetRankingSections() => RankingSections;
+
+    public JmAccountState GetAccountState()
+    {
+        lock (_stateLock)
+        {
+            return new JmAccountState
+            {
+                IsLoggedIn = _currentAccount is not null && !string.IsNullOrWhiteSpace(_sessionCookie),
+                Account = _currentAccount is null ? null : CloneAccount(_currentAccount),
+            };
+        }
+    }
+
+    public async Task<JmAccountInfo> LoginAsync(
+        string username,
+        string password,
+        CancellationToken cancellationToken = default)
+    {
+        username = (username ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(username)) throw new ArgumentException("请输入 JM 用户名或邮箱");
+        if (string.IsNullOrWhiteSpace(password)) throw new ArgumentException("请输入 JM 密码");
+
+        var result = await RequestApiWithMetadataAsync(
+            "/login",
+            new Dictionary<string, string>(),
+            cancellationToken,
+            HttpMethod.Post,
+            new Dictionary<string, string>
+            {
+                ["username"] = username,
+                ["password"] = password,
+            },
+            includeSession: false);
+
+        var payload = result.Payload;
+        if (payload.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("JM 登录响应结构无效");
+
+        var sessionToken = GetString(payload, "s");
+        if (string.IsNullOrWhiteSpace(sessionToken))
+            throw new InvalidDataException("JM 登录成功但未返回会话令牌");
+
+        var account = new JmAccountInfo
+        {
+            UserId = GetString(payload, "uid"),
+            Username = GetString(payload, "username") is { Length: > 0 } returnedName ? returnedName : username,
+            Email = GetString(payload, "email"),
+            AvatarUrl = GetString(payload, "photo"),
+            LevelName = GetString(payload, "level_name"),
+            Coin = ReadIntProperty(payload, "coin"),
+            FavoriteCount = ReadIntProperty(payload, "album_favorites"),
+        };
+
+        var cookies = new Dictionary<string, string>(result.Cookies, StringComparer.OrdinalIgnoreCase)
+        {
+            ["AVS"] = sessionToken,
+        };
+        lock (_stateLock)
+        {
+            _sessionCookie = string.Join("; ", cookies.Select(pair => $"{pair.Key}={pair.Value}"));
+            _currentAccount = CloneAccount(account);
+            _albumCache.Clear();
+        }
+        return account;
+    }
+
+    public void Logout()
+    {
+        lock (_stateLock)
+        {
+            _sessionCookie = string.Empty;
+            _currentAccount = null;
+            _albumCache.Clear();
+        }
+    }
+
+    public async Task<JmFavoriteResponse> GetFavoritesAsync(
+        int page = 1,
+        string folderId = "0",
+        string sort = "mr",
+        CancellationToken cancellationToken = default)
+    {
+        EnsureLoggedIn();
+        var safePage = Math.Max(page, 1);
+        var payload = await RequestApiAsync(
+            "/favorite",
+            new Dictionary<string, string>
+            {
+                ["page"] = safePage.ToString(),
+                ["folder_id"] = string.IsNullOrWhiteSpace(folderId) ? "0" : folderId,
+                ["o"] = string.IsNullOrWhiteSpace(sort) ? "mr" : sort,
+            },
+            cancellationToken);
+        if (payload.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("JM 收藏夹响应结构无效");
+
+        var items = payload.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object).Select(BuildSearchResult).ToList()
+            : [];
+        var folders = new List<JmFavoriteFolder>();
+        if (payload.TryGetProperty("folder_list", out var folderList) && folderList.ValueKind == JsonValueKind.Array)
+        {
+            folders.AddRange(folderList.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.Object)
+                .Select(item => new JmFavoriteFolder
+                {
+                    Id = GetString(item, "FID"),
+                    Name = ChineseTextConverter.ToSimplified(GetString(item, "name")),
+                })
+                .Where(folder => !string.IsNullOrWhiteSpace(folder.Id)));
+        }
+        return new JmFavoriteResponse
+        {
+            Items = items,
+            Folders = folders,
+            Total = ReadIntProperty(payload, "total"),
+            Page = safePage,
+            PageSize = Math.Max(ReadIntProperty(payload, "count"), items.Count),
+        };
+    }
+
+    public async Task<JmFavoriteMutationResult> SetJmFavoriteAsync(
+        string albumId,
+        bool isFavorite,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureLoggedIn();
+        albumId = (albumId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(albumId)) throw new ArgumentException("漫画编号不能为空");
+        var payload = await RequestApiAsync(
+            "/favorite",
+            // JM 的收藏接口是 POST 切换操作，服务端根据当前状态自动收藏或取消收藏。
+            new Dictionary<string, string>(),
+            cancellationToken,
+            HttpMethod.Post,
+            new Dictionary<string, string> { ["aid"] = albumId });
+        var status = GetString(payload, "status");
+        var success = string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase) ||
+                      string.Equals(status, "success", StringComparison.OrdinalIgnoreCase) ||
+                      status == "1";
+        if (!success)
+        {
+            var message = ChineseTextConverter.ToSimplified(GetString(payload, "msg"));
+            if (string.IsNullOrWhiteSpace(message)) message = ChineseTextConverter.ToSimplified(GetString(payload, "message"));
+            var responsePreview = payload.GetRawText();
+            if (responsePreview.Length > 500) responsePreview = responsePreview[..500] + "...";
+            _logger.LogWarning("JM 收藏切换返回未识别结果: {Payload}", responsePreview);
+            throw new InvalidDataException(string.IsNullOrWhiteSpace(message)
+                ? $"JM {(isFavorite ? "收藏" : "取消收藏")}操作未成功"
+                : message);
+        }
+        lock (_stateLock) _albumCache.Remove(albumId);
+        return new JmFavoriteMutationResult
+        {
+            Success = true,
+            Message = ChineseTextConverter.ToSimplified(GetString(payload, "msg")),
+        };
+    }
 
     public void Dispose() => _httpClient.Dispose();
 
@@ -331,6 +491,7 @@ public sealed class JmComicService : IDisposable
             TotalViews = info.TotalViews,
             Likes = info.Likes,
             CommentCount = info.CommentCount,
+            IsFavorite = info.IsFavorite,
             Chapters = info.Chapters.Select(chapter => new MangaChapterDto
             {
                 Title = chapter.Title,
@@ -682,7 +843,8 @@ public sealed class JmComicService : IDisposable
             GetStringArray(album, "tags"),
             GetString(album, "total_views"),
             GetString(album, "likes"),
-            GetString(album, "comment_total"));
+            GetString(album, "comment_total"),
+            ReadBooleanProperty(album, "is_favorite"));
     }
 
     private async Task<JsonElement> GetAlbumAsync(string mangaId, CancellationToken cancellationToken)
@@ -720,7 +882,23 @@ public sealed class JmComicService : IDisposable
     private async Task<JsonElement> RequestApiAsync(
         string path,
         IReadOnlyDictionary<string, string> parameters,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HttpMethod? method = null,
+        IReadOnlyDictionary<string, string>? form = null,
+        bool includeSession = true)
+    {
+        var result = await RequestApiWithMetadataAsync(
+            path, parameters, cancellationToken, method, form, includeSession);
+        return result.Payload;
+    }
+
+    private async Task<ApiRequestResult> RequestApiWithMetadataAsync(
+        string path,
+        IReadOnlyDictionary<string, string> parameters,
+        CancellationToken cancellationToken,
+        HttpMethod? method = null,
+        IReadOnlyDictionary<string, string>? form = null,
+        bool includeSession = true)
     {
         var errors = new List<string>();
         foreach (var domain in GetOrderedDomains())
@@ -730,8 +908,16 @@ public sealed class JmComicService : IDisposable
             var uri = BuildUri($"https://{domain}{path}", parameters);
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                using var request = new HttpRequestMessage(method ?? HttpMethod.Get, uri);
+                if (form is not null) request.Content = new FormUrlEncodedContent(form);
                 AddTokenHeaders(request, timestamp, false);
+                if (includeSession)
+                {
+                    string cookie;
+                    lock (_stateLock) cookie = _sessionCookie;
+                    if (!string.IsNullOrWhiteSpace(cookie))
+                        request.Headers.TryAddWithoutValidation("Cookie", cookie);
+                }
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
                 response.EnsureSuccessStatusCode();
                 using var envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -750,7 +936,7 @@ public sealed class JmComicService : IDisposable
                 var plaintext = DecryptPayload(timestamp, encrypted, _options.AppDataSecret);
                 using var payload = JsonDocument.Parse(plaintext);
                 PromoteDomain(domain);
-                return payload.RootElement.Clone();
+                return new ApiRequestResult(payload.RootElement.Clone(), ReadResponseCookies(response));
             }
             catch (OperationCanceledException)
             {
@@ -763,6 +949,59 @@ public sealed class JmComicService : IDisposable
             }
         }
         throw new HttpRequestException($"禁漫天堂 API 请求失败: {string.Join(" | ", errors.TakeLast(3))}");
+    }
+
+    private void EnsureLoggedIn()
+    {
+        lock (_stateLock)
+        {
+            if (_currentAccount is null || string.IsNullOrWhiteSpace(_sessionCookie))
+                throw new InvalidOperationException("请先在设置中登录 JM 账号");
+        }
+    }
+
+    private static Dictionary<string, string> ReadResponseCookies(HttpResponseMessage response)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return result;
+        foreach (var value in values)
+        {
+            var pair = value.Split(';', 2)[0];
+            var separator = pair.IndexOf('=');
+            if (separator <= 0) continue;
+            var name = pair[..separator].Trim();
+            var cookieValue = pair[(separator + 1)..].Trim();
+            if (!string.IsNullOrWhiteSpace(name)) result[name] = cookieValue;
+        }
+        return result;
+    }
+
+    private static JmAccountInfo CloneAccount(JmAccountInfo account) => new()
+    {
+        UserId = account.UserId,
+        Username = account.Username,
+        Email = account.Email,
+        AvatarUrl = account.AvatarUrl,
+        LevelName = account.LevelName,
+        Coin = account.Coin,
+        FavoriteCount = account.FavoriteCount,
+    };
+
+    private static int ReadIntProperty(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) ? ReadInt(value) : 0;
+
+    private static bool ReadBooleanProperty(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value)) return false;
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => ReadInt(value) != 0,
+            JsonValueKind.String => value.GetString() is { } text &&
+                (text == "1" || bool.TryParse(text, out var parsed) && parsed),
+            _ => false,
+        };
     }
 
     private async Task<int> GetScrambleIdAsync(int chapterId, CancellationToken cancellationToken)
@@ -1280,6 +1519,7 @@ public sealed class JmComicService : IDisposable
     private string CoverUrl(string id) => $"https://{_options.CoverDomain}/media/albums/{id}.jpg";
 
     private sealed record ImageDownload(string Url, string Destination, int BlockCount);
+    private sealed record ApiRequestResult(JsonElement Payload, IReadOnlyDictionary<string, string> Cookies);
 }
 
 public sealed record JmChapter(int Order, string Id, string Title);
@@ -1296,7 +1536,8 @@ public sealed record JmMangaInfo(
     List<string>? RawTags = null,
     string TotalViews = "",
     string Likes = "",
-    string CommentCount = "")
+    string CommentCount = "",
+    bool IsFavorite = false)
 {
     public List<string> Tags => RawTags ?? [];
 }

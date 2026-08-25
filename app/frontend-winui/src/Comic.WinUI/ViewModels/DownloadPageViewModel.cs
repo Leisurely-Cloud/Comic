@@ -169,6 +169,9 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public partial bool IsResolving { get; set; }
 
     [ObservableProperty]
+    public partial bool IsUpdatingJmFavorite { get; set; }
+
+    [ObservableProperty]
     public partial string PageError { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -252,6 +255,9 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         ? "标签：" + string.Join(" · ", tags.Take(10))
         : string.Empty;
     public string CurrentMangaDescription => CurrentManga?.Description ?? string.Empty;
+    public string JmFavoriteButtonText => CurrentManga?.IsFavorite == true ? "取消收藏" : "收藏";
+    public string JmFavoriteButtonGlyph => CurrentManga?.IsFavorite == true ? "\uE735" : "\uE734";
+    public bool CanToggleJmFavorite => HasManga && !IsUpdatingJmFavorite;
     public bool HasMangaDetails => !string.IsNullOrWhiteSpace(CurrentMangaTagsText)
         || !string.IsNullOrWhiteSpace(CurrentMangaDescription);
     public string CurrentMangaStatsText
@@ -754,6 +760,9 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CurrentMangaAddedAtText));
             OnPropertyChanged(nameof(CurrentMangaTagsText));
             OnPropertyChanged(nameof(CurrentMangaDescription));
+            OnPropertyChanged(nameof(JmFavoriteButtonText));
+            OnPropertyChanged(nameof(JmFavoriteButtonGlyph));
+            OnPropertyChanged(nameof(CanToggleJmFavorite));
             OnPropertyChanged(nameof(HasMangaDetails));
             OnPropertyChanged(nameof(CurrentMangaStatsText));
             AvailableChapters.Clear();
@@ -799,6 +808,48 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
                 _ = RefreshCommentsAsync();
             }
         });
+    }
+
+    [RelayCommand]
+    private async Task ToggleJmFavoriteAsync(CancellationToken cancellationToken = default)
+    {
+        var manga = CurrentManga;
+        if (manga is null) return;
+        var accountState = _backendClient.GetJmAccountState();
+        if (!accountState.IsLoggedIn && _backendClient.HasSavedJmLogin)
+        {
+            try { accountState = await _backendClient.RestoreJmLoginAsync(cancellationToken); }
+            catch { }
+        }
+        if (!accountState.IsLoggedIn)
+        {
+            PageError = "请先在设置中登录 JM 账号，再使用官方收藏夹。";
+            return;
+        }
+
+        IsUpdatingJmFavorite = true;
+        OnPropertyChanged(nameof(CanToggleJmFavorite));
+        PageError = string.Empty;
+        try
+        {
+            var targetState = !manga.IsFavorite;
+            await _backendClient.SetJmFavoriteAsync(manga.MangaId, targetState, cancellationToken);
+            manga.IsFavorite = targetState;
+            OnPropertyChanged(nameof(JmFavoriteButtonText));
+            OnPropertyChanged(nameof(JmFavoriteButtonGlyph));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            PageError = $"更新收藏失败: {ex.Message}";
+        }
+        finally
+        {
+            IsUpdatingJmFavorite = false;
+            OnPropertyChanged(nameof(CanToggleJmFavorite));
+        }
     }
 
     [RelayCommand]

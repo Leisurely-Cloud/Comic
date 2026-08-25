@@ -116,6 +116,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="7"
                                     VerticalAlignment="Center">
@@ -158,10 +159,19 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="无需下载，点开即读"
                                    FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" MinWidth="120"
+                        <Button Grid.Column="1" MinWidth="108" Padding="12,6"
+                                IsEnabled="{x:Bind ViewModel.CanToggleJmFavorite, Mode=OneWay}"
+                                Command="{x:Bind ViewModel.ToggleJmFavoriteCommand, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <FontIcon Glyph="{x:Bind ViewModel.JmFavoriteButtonGlyph, Mode=OneWay}" FontSize="14" />
+                                <TextBlock Text="{x:Bind ViewModel.JmFavoriteButtonText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="2" MinWidth="120"
                                 Padding="14,6"
                                 IsEnabled="{x:Bind ViewModel.HasManga, Mode=OneWay}"
                                 Click="OnOnlineReadClick">
@@ -170,7 +180,7 @@
                                 <TextBlock Text="在线阅读" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="2" MinWidth="150"
+                        <Button Grid.Column="3" MinWidth="150"
                                 Style="{StaticResource AccentButtonStyle}"
                                 IsEnabled="{x:Bind ViewModel.CanStartDownload, Mode=OneWay}"
                                 Click="OnStartDownloadClick">

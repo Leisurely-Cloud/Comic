@@ -104,6 +104,31 @@ public partial class SettingsPageViewModel : ObservableObject
     public partial bool IsSaving { get; set; }
 
     [ObservableProperty]
+    public partial string JmUsername { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsJmLoggedIn { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsJmLoggingIn { get; set; }
+
+    [ObservableProperty]
+    public partial bool RememberJmLogin { get; set; } = true;
+
+    [ObservableProperty]
+    public partial string JmAccountDisplayName { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string JmAccountSummary { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string JmLoginStatus { get; set; } = string.Empty;
+
+    public bool ShowJmLoginForm => !IsJmLoggedIn;
+
+    partial void OnIsJmLoggedInChanged(bool value) => OnPropertyChanged(nameof(ShowJmLoginForm));
+
+    [ObservableProperty]
     public partial SettingOption? SelectedTheme { get; set; }
 
     [ObservableProperty]
@@ -166,6 +191,9 @@ public partial class SettingsPageViewModel : ObservableObject
                 option => option.Key == _applicationSettings.DownloadDirectoryLayout);
             SettingsError = string.Empty;
             SaveStatus = string.Empty;
+            var accountState = await _backendClient.RestoreJmLoginAsync(cancellationToken);
+            ApplyAccountState(accountState);
+            RememberJmLogin = _backendClient.HasSavedJmLogin || !accountState.IsLoggedIn;
         }
         catch (OperationCanceledException)
         {
@@ -174,6 +202,59 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             SettingsError = $"加载设置失败: {ex.Message}";
         }
+    }
+
+    public async Task LoginJmAsync(string password, CancellationToken cancellationToken = default)
+    {
+        IsJmLoggingIn = true;
+        SettingsError = string.Empty;
+        JmLoginStatus = string.Empty;
+        try
+        {
+            var account = await _backendClient.LoginJmAsync(
+                JmUsername,
+                password,
+                RememberJmLogin,
+                cancellationToken);
+            ApplyAccountState(new JmAccountState { IsLoggedIn = true, Account = account });
+            JmLoginStatus = RememberJmLogin && _backendClient.HasSavedJmLogin
+                ? "登录成功，已通过 Windows 凭据库保持登录。"
+                : "登录成功，会话仅在本次运行期间有效。";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SettingsError = $"JM 登录失败: {ex.Message}";
+        }
+        finally
+        {
+            IsJmLoggingIn = false;
+        }
+    }
+
+    [RelayCommand]
+    private void LogoutJm()
+    {
+        _backendClient.LogoutJm();
+        ApplyAccountState(new JmAccountState());
+        JmLoginStatus = "已退出 JM 账号。";
+    }
+
+    private void ApplyAccountState(JmAccountState state)
+    {
+        IsJmLoggedIn = state.IsLoggedIn;
+        var account = state.Account;
+        JmAccountDisplayName = account?.Username ?? string.Empty;
+        JmAccountSummary = account is null
+            ? string.Empty
+            : string.Join(" · ", new[]
+            {
+                string.IsNullOrWhiteSpace(account.LevelName) ? null : account.LevelName,
+                $"收藏 {account.FavoriteCount}",
+                $"金币 {account.Coin}",
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
     [RelayCommand]

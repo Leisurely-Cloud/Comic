@@ -10,10 +10,12 @@ namespace Comic.WinUI.ViewModels;
 public partial class ShellViewModel : ObservableObject
 {
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly BackendClient? _backendClient;
 
-    public ShellViewModel(ApplicationSettingsService applicationSettings)
+    public ShellViewModel(ApplicationSettingsService applicationSettings, BackendClient? backendClient = null)
     {
         _applicationSettings = applicationSettings;
+        _backendClient = backendClient;
         IsNavigationPaneOpen = applicationSettings.ExpandNavigationPane;
     }
 
@@ -40,7 +42,21 @@ public partial class ShellViewModel : ObservableObject
         StorageRoot = _applicationSettings.StorageRoot;
         HasShellError = false;
         ShellErrorSummary = string.Empty;
+        if (_backendClient?.HasSavedJmLogin == true) _ = RestoreJmLoginInBackgroundAsync();
         return Task.CompletedTask;
+    }
+
+    private async Task RestoreJmLoginInBackgroundAsync()
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await _backendClient!.RestoreJmLoginAsync(timeout.Token);
+        }
+        catch
+        {
+            // 自动登录失败不阻塞主页面；进入收藏夹或设置时可再次重试并显示错误。
+        }
     }
 
     [RelayCommand]

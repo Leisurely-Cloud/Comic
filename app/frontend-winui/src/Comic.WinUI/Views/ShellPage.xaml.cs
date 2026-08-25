@@ -1,6 +1,9 @@
 using Comic.WinUI.ViewModels;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
+using PointerUpdateKind = Microsoft.UI.Input.PointerUpdateKind;
 
 namespace Comic.WinUI.Views;
 
@@ -12,6 +15,7 @@ public sealed partial class ShellPage : Page
     {
         InitializeComponent();
         ContentFrame.Navigated += OnContentFrameNavigated;
+        AddHandler(PointerPressedEvent, new PointerEventHandler(OnPointerPressed), true);
         Loaded += OnLoaded;
     }
 
@@ -53,6 +57,7 @@ public sealed partial class ShellPage : Page
             "ranking" => typeof(RankingPage),
             "weekly" => typeof(WeeklyPicksPage),
             "library" => typeof(LibraryPage),
+            "favorites" => typeof(FavoritesPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(DownloadPage),
         };
@@ -72,6 +77,7 @@ public sealed partial class ShellPage : Page
             "ranking" => typeof(RankingPage),
             "weekly" => typeof(WeeklyPicksPage),
             "library" => typeof(LibraryPage),
+            "favorites" => typeof(FavoritesPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(DownloadPage),
         };
@@ -96,5 +102,51 @@ public sealed partial class ShellPage : Page
     private void OnContentFrameNavigated(object sender, NavigationEventArgs e)
     {
         AppNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
+        var tag = e.SourcePageType == typeof(DownloadPage) ? "download"
+            : e.SourcePageType == typeof(RankingPage) ? "ranking"
+            : e.SourcePageType == typeof(WeeklyPicksPage) ? "weekly"
+            : e.SourcePageType == typeof(LibraryPage) ? "library"
+            : e.SourcePageType == typeof(FavoritesPage) ? "favorites"
+            : e.SourcePageType == typeof(SettingsPage) ? "settings"
+            : string.Empty;
+        if (!string.IsNullOrWhiteSpace(tag)) SelectNavigationItem(tag);
+    }
+
+    public bool TryNavigateBack()
+    {
+        if (!ContentFrame.CanGoBack) return false;
+        ContentFrame.GoBack();
+        return true;
+    }
+
+    public bool TryNavigateForward()
+    {
+        if (!ContentFrame.CanGoForward) return false;
+        ContentFrame.GoForward();
+        return true;
+    }
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var updateKind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
+        var handled = updateKind switch
+        {
+            PointerUpdateKind.XButton1Pressed => TryNavigateBack(),
+            PointerUpdateKind.XButton2Pressed => TryNavigateForward(),
+            _ => false,
+        };
+        if (handled) e.Handled = true;
+    }
+
+    private void SelectNavigationItem(string tag)
+    {
+        foreach (var item in AppNavigationView.MenuItems)
+        {
+            if (item is NavigationViewItem navItem && navItem.Tag is string navTag && navTag == tag)
+            {
+                AppNavigationView.SelectedItem = navItem;
+                return;
+            }
+        }
     }
 }

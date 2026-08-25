@@ -299,6 +299,7 @@ public class JmComicServiceTests
                   "total_views": "123456",
                   "likes": "789",
                   "comment_total": "173",
+                  "is_favorite": "1",
                   "addtime": "1700000000",
                   "series": [
                     { "id": "1459797", "name": "第一章" }
@@ -317,6 +318,7 @@ public class JmComicServiceTests
         Assert.AreEqual("123456", result.TotalViews);
         Assert.AreEqual("789", result.Likes);
         Assert.AreEqual("173", result.CommentCount);
+        Assert.IsTrue(result.IsFavorite);
         Assert.AreEqual(1, result.Chapters.Count);
     }
 
@@ -394,6 +396,165 @@ public class JmComicServiceTests
         CollectionAssert.Contains(result.Items[0].CategoryKeys, "hanman");
         CollectionAssert.Contains(result.Items[1].CategoryKeys, "manga");
         CollectionAssert.Contains(result.Items[1].CategoryKeys, "another");
+    }
+
+    [TestMethod]
+    public async Task LoginAsync_PostsCredentialsAndKeepsSessionOnlyInMemory()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            Assert.AreEqual(HttpMethod.Post, request.Method);
+            Assert.AreEqual("/login", request.RequestUri?.AbsolutePath);
+            var form = await request.Content!.ReadAsStringAsync();
+            StringAssert.Contains(form, "username=test%40example.com");
+            StringAssert.Contains(form, "password=secret");
+            var response = BuildEncryptedResponse(request,
+                """
+                {
+                  "uid": "42", "username": "tester", "email": "test@example.com",
+                  "level_name": "LV.5", "coin": "12", "album_favorites": "87",
+                  "s": "session-token"
+                }
+                """);
+            response.Headers.TryAddWithoutValidation("Set-Cookie", "device=desktop; Path=/; HttpOnly");
+            return response;
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+
+        var account = await service.LoginAsync("test@example.com", "secret");
+        var state = service.GetAccountState();
+
+        Assert.AreEqual("tester", account.Username);
+        Assert.AreEqual(87, account.FavoriteCount);
+        Assert.IsTrue(state.IsLoggedIn);
+        Assert.AreEqual("42", state.Account?.UserId);
+    }
+
+    [TestMethod]
+    public async Task GetFavoritesAsync_SendsSessionCookieAndParsesFoldersAndPaging()
+    {
+        var favoriteRequestSeen = false;
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+            {
+                await request.Content!.ReadAsStringAsync();
+                var response = BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+                response.Headers.TryAddWithoutValidation("Set-Cookie", "device=desktop; Path=/");
+                return response;
+            }
+
+            Assert.AreEqual("/favorite", request.RequestUri?.AbsolutePath);
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "page=2");
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "folder_id=7");
+            var cookie = request.Headers.GetValues("Cookie").Single();
+            StringAssert.Contains(cookie, "AVS=session-token");
+            StringAssert.Contains(cookie, "device=desktop");
+            favoriteRequestSeen = true;
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "list": [{"id":"1001","name":"收藏作品","author":["作者甲"]}],
+                  "folder_list": [{"FID":"7","name":"我的收藏"}],
+                  "total":"21", "count":20
+                }
+                """);
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var result = await service.GetFavoritesAsync(2, "7");
+
+        Assert.IsTrue(favoriteRequestSeen);
+        Assert.AreEqual(21, result.Total);
+        Assert.AreEqual(20, result.PageSize);
+        Assert.AreEqual("收藏作品", result.Items.Single().Title);
+        Assert.AreEqual("7", result.Folders.Single().Id);
+    }
+
+    [TestMethod]
+    public async Task Logout_ClearsSessionAndBlocksFavoriteRequests()
+    {
+        var requestCount = 0;
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            requestCount++;
+            return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+        service.Logout();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => service.GetFavoritesAsync());
+
+        Assert.IsFalse(service.GetAccountState().IsLoggedIn);
+        Assert.AreEqual(1, requestCount, "退出后应在发请求前拦截收藏夹访问。");
+    }
+
+    [TestMethod]
+    public async Task SetJmFavoriteAsync_AddsWithPostAndAlbumIdInFormBody()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+                return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+
+            Assert.AreEqual("/favorite", request.RequestUri?.AbsolutePath);
+            Assert.AreEqual(HttpMethod.Post, request.Method);
+            Assert.AreEqual(string.Empty, request.RequestUri?.Query);
+            var form = await request.Content!.ReadAsStringAsync();
+            Assert.AreEqual("aid=1001", form);
+            return BuildEncryptedResponse(request, """{"status":"ok","msg":"操作成功"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var result = await service.SetJmFavoriteAsync("1001", true);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual("操作成功", result.Message);
+    }
+
+    [TestMethod]
+    public async Task SetJmFavoriteAsync_RemovesWithSameToggleRequest()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+                return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+
+            Assert.AreEqual("/favorite", request.RequestUri?.AbsolutePath);
+            Assert.AreEqual(HttpMethod.Post, request.Method);
+            Assert.AreEqual(string.Empty, request.RequestUri?.Query);
+            var form = await request.Content!.ReadAsStringAsync();
+            Assert.AreEqual("aid=1001", form);
+            return BuildEncryptedResponse(request, """{"status":"ok","msg":"取消成功"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var result = await service.SetJmFavoriteAsync("1001", false);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual("取消成功", result.Message);
+    }
+
+    [TestMethod]
+    public async Task SetJmFavoriteAsync_UsesServerMessageWhenMutationFails()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+                return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+            return BuildEncryptedResponse(request, """{"status":"error","msg":"尚未收藏"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(
+            () => service.SetJmFavoriteAsync("1001", false));
+
+        StringAssert.Contains(error.Message, "尚未收藏");
     }
 
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)

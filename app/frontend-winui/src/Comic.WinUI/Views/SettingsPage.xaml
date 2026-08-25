@@ -49,6 +49,12 @@
                       HorizontalScrollBarVisibility="Hidden"
                       HorizontalScrollMode="Disabled">
             <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Tag="AccountSection" Click="OnSectionNavigationClick" Background="Transparent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE77B;" FontSize="14" />
+                        <TextBlock Text="JM 账号" />
+                    </StackPanel>
+                </Button>
                 <Button Tag="GeneralSection" Click="OnSectionNavigationClick" Background="Transparent">
                     <StackPanel Orientation="Horizontal" Spacing="7">
                         <FontIcon Glyph="&#xE713;" FontSize="14" />
@@ -91,6 +97,62 @@
             <StackPanel x:Name="SettingsContentPanel"
                         Spacing="24"
                         HorizontalAlignment="Stretch">
+                <StackPanel x:Name="AccountSection" Spacing="8">
+                    <TextBlock Text="JM 账号" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE77B;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Text="登录 JM 账号" FontSize="16" FontWeight="SemiBold"
+                                           Visibility="{x:Bind ViewModel.ShowJmLoginForm, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <TextBlock Text="登录后可管理官方收藏夹。勾选保持登录时，凭据仅保存到 Windows 系统加密凭据库。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}"
+                                           TextWrapping="Wrap"
+                                           Visibility="{x:Bind ViewModel.ShowJmLoginForm, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <TextBlock Text="{x:Bind ViewModel.JmAccountDisplayName, Mode=OneWay}"
+                                           FontSize="16" FontWeight="SemiBold"
+                                           Visibility="{x:Bind ViewModel.IsJmLoggedIn, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <TextBlock Text="{x:Bind ViewModel.JmAccountSummary, Mode=OneWay}"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}"
+                                           Visibility="{x:Bind ViewModel.IsJmLoggedIn, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <TextBlock Text="{x:Bind ViewModel.JmLoginStatus, Mode=OneWay}"
+                                           FontSize="12" Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                           Visibility="{x:Bind ViewModel.JmLoginStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind ViewModel.ShowJmLoginForm, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <TextBox Width="210" PlaceholderText="用户名或邮箱"
+                                         Text="{x:Bind ViewModel.JmUsername, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <PasswordBox x:Name="JmPasswordBox" Width="210" PlaceholderText="密码"
+                                             PasswordRevealMode="Peek" />
+                                <CheckBox Content="保持登录"
+                                          IsChecked="{x:Bind ViewModel.RememberJmLogin, Mode=TwoWay}" />
+                                <Button MinWidth="90" Style="{StaticResource AccentButtonStyle}"
+                                        Click="OnJmLoginClick"
+                                        IsEnabled="{x:Bind ViewModel.IsJmLoggingIn, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <ProgressRing Width="14" Height="14"
+                                                      IsActive="{x:Bind ViewModel.IsJmLoggingIn, Mode=OneWay}"
+                                                      Visibility="{x:Bind ViewModel.IsJmLoggingIn, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <TextBlock Text="登录" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="退出登录"
+                                    VerticalAlignment="Center"
+                                    Command="{x:Bind ViewModel.LogoutJmCommand, Mode=OneWay}"
+                                    Visibility="{x:Bind ViewModel.IsJmLoggedIn, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
                 <StackPanel x:Name="GeneralSection" Spacing="8">
                     <TextBlock Text="常规设置" Style="{StaticResource SectionHeaderTextBlockStyle}" />
 

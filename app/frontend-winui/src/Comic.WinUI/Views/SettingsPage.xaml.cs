@@ -75,6 +75,7 @@ public sealed partial class SettingsPage : Page
         FrameworkElement? section = sectionName switch
         {
             nameof(GeneralSection) => GeneralSection,
+            nameof(AccountSection) => AccountSection,
             nameof(DownloadSection) => DownloadSection,
             nameof(ReaderSection) => ReaderSection,
             nameof(LibrarySection) => LibrarySection,
@@ -86,6 +87,20 @@ public sealed partial class SettingsPage : Page
             AnimationDesired = true,
             VerticalAlignmentRatio = 0,
         });
+    }
+
+    private async void OnJmLoginClick(object sender, RoutedEventArgs e)
+    {
+        var password = JmPasswordBox.Password;
+        try
+        {
+            await ViewModel.LoginJmAsync(password);
+        }
+        finally
+        {
+            // Password 不进入 ViewModel，也不在界面中保留。
+            JmPasswordBox.Password = string.Empty;
+        }
     }
 
     private async void OnClearSearchHistoryClick(object sender, RoutedEventArgs e)
