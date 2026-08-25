@@ -5,7 +5,6 @@ using System.Xml.Linq;
 using Comic.WinUI.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.VisualBasic;
 
 namespace Comic.WinUI.Services.Native;
 
@@ -128,7 +127,7 @@ public sealed class CbzExportService : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var chapters = _library.OrderChapterDirectories(_library.EnumerateChapterDirectories(rootDirectory)).ToList();
             if (chapters.Count == 0) throw new InvalidOperationException("当前漫画目录里没有可导出的已完成章节");
-            var simplifiedMangaTitle = ToSimplifiedChinese(state.Progress.MangaTitle);
+            var simplifiedMangaTitle = ChineseTextConverter.ToSimplified(state.Progress.MangaTitle);
             var mangaUrl = metadata?.MangaUrl ?? string.Empty;
             var exportDirectory = Path.Combine(Directory.GetParent(rootDirectory)!.FullName, simplifiedMangaTitle + "_CBZ");
             Directory.CreateDirectory(exportDirectory);
@@ -194,19 +193,6 @@ public sealed class CbzExportService : IDisposable
                 state.Progress.Status = "failed";
                 state.Progress.Error = ex.Message;
             }
-        }
-    }
-
-    private static string ToSimplifiedChinese(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return value;
-        try
-        {
-            return Strings.StrConv(value, VbStrConv.SimplifiedChinese, 0x804) ?? value;
-        }
-        catch (ArgumentException)
-        {
-            return value;
         }
     }
 

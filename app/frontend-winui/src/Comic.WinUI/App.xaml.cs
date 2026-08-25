@@ -68,6 +68,7 @@ public sealed partial class App : Application
         services.AddTransient<SettingsPageViewModel>();
         services.AddTransient<ReaderPageViewModel>();
         services.AddSingleton<RankingPageViewModel>();
+        services.AddSingleton<WeeklyPicksPageViewModel>();
 
         return services.BuildServiceProvider();
     }

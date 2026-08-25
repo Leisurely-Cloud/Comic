@@ -4,7 +4,7 @@
 #define MyAppName "Comic Downloader"
 #define MyAppNameCN "漫画下载器"
 #ifndef MyAppVersion
-#define MyAppVersion "2.4.0"
+#define MyAppVersion "2.5.0"
 #endif
 #define MyAppPublisher "Leisurely Cloud"
 #define MyAppURL "https://github.com/Leisurely-Cloud/Comic"

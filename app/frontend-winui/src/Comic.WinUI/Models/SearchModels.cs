@@ -58,6 +58,15 @@ public sealed class SearchResultItem
 
     [JsonPropertyName("update_time")]
     public string UpdateTime { get; set; } = string.Empty;
+
+    [JsonPropertyName("categories")]
+    public List<ContentCategory> Categories { get; set; } = [];
+}
+
+public sealed class ContentCategory
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
 }
 
 public sealed class SearchHistoryEntry
@@ -124,6 +133,9 @@ public sealed class RankingItem
 
     [JsonPropertyName("detail_section_label")]
     public string DetailSectionLabel { get; set; } = string.Empty;
+
+    [JsonPropertyName("categories")]
+    public List<ContentCategory> Categories { get; set; } = [];
 }
 
 public sealed class RankingSectionsResponse

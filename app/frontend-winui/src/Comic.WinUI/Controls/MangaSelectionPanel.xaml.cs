@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Comic.WinUI.Controls;
 
@@ -108,5 +109,32 @@ public sealed partial class MangaSelectionPanel : UserControl
         {
             OnlineReadRequested?.Invoke(this, url);
         }
+    }
+
+    private async void OnCoverClick(object sender, RoutedEventArgs e)
+    {
+        var coverUrl = ViewModel?.CurrentMangaCoverUrl;
+        var title = ViewModel?.CurrentMangaTitle ?? "高清封面";
+        if (string.IsNullOrWhiteSpace(coverUrl) || !Uri.TryCreate(coverUrl, UriKind.Absolute, out var uri))
+        {
+            return;
+        }
+
+        var image = new Image
+        {
+            Source = new BitmapImage(uri),
+            Stretch = Stretch.Uniform,
+            MaxHeight = 720,
+            MinWidth = 360,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = image,
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        await dialog.ShowAsync();
     }
 }

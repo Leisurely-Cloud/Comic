@@ -93,8 +93,8 @@
 
                 <Grid Grid.Row="1" ColumnSpacing="14">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="3*" MinWidth="500" />
-                        <ColumnDefinition Width="2*" MinWidth="460" />
+                        <ColumnDefinition Width="*" MinWidth="460" />
+                        <ColumnDefinition Width="*" MinWidth="460" />
                     </Grid.ColumnDefinitions>
 
                     <controls:SearchResultsList Grid.Column="0"

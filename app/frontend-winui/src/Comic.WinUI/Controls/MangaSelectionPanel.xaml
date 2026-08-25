@@ -41,44 +41,77 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" ColumnSpacing="10">
+                    <Grid Grid.Row="0" ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="68" />
+                            <ColumnDefinition Width="112" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Width="68" Height="88" CornerRadius="8"
-                                Background="{ThemeResource ControlFillColorDefaultBrush}">
-                            <Grid>
-                                <FontIcon Glyph="&#xE8A5;" FontSize="26" Opacity="0.25"
-                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <Image Source="{x:Bind ViewModel.CurrentMangaCoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
-                                       Stretch="UniformToFill" />
-                            </Grid>
-                        </Border>
-                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                        <Button Grid.Column="0" Width="112" Height="150" Padding="0"
+                                Background="Transparent" BorderThickness="0"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Click="OnCoverClick"
+                                ToolTipService.ToolTip="点击查看高清封面">
+                            <Border Width="112" Height="150" CornerRadius="8"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+                                <Grid>
+                                    <FontIcon Glyph="&#xE8A5;" FontSize="30" Opacity="0.25"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Image Source="{x:Bind ViewModel.CurrentMangaCoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                           Stretch="UniformToFill" />
+                                    <Border VerticalAlignment="Bottom" Padding="8,5"
+                                            Background="#99000000">
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="5">
+                                            <FontIcon Glyph="&#xE8A3;" FontSize="11" Foreground="White" />
+                                            <TextBlock Text="查看大图" FontSize="11" Foreground="White" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top">
                             <TextBlock Text="{x:Bind ViewModel.CurrentMangaTitle, Mode=OneWay}"
                                        FontSize="16" FontWeight="SemiBold"
                                        TextWrapping="Wrap"
                                        TextTrimming="CharacterEllipsis"
                                        MaxLines="2" />
-                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaLatestChapter, Mode=OneWay}"
-                                       FontSize="12" Opacity="0.7"
-                                       TextWrapping="Wrap"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxLines="1" />
-                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaDetailHint, Mode=OneWay}"
+                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaIdentityText, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.55" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaAuthorText, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.72" TextTrimming="CharacterEllipsis" MaxLines="1"
+                                       Visibility="{x:Bind ViewModel.CurrentMangaAuthorText, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaStatsText, Mode=OneWay}"
+                                       FontSize="12" Opacity="0.72" TextWrapping="Wrap" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentMangaAddedAtText, Mode=OneWay}"
                                        FontSize="12" Opacity="0.58"
-                                       TextWrapping="Wrap"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxLines="1" />
+                                       Visibility="{x:Bind ViewModel.CurrentMangaAddedAtText, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
                         </StackPanel>
                     </Grid>
 
-                    <Grid Grid.Row="1" ColumnSpacing="8">
+                    <Expander Grid.Row="1" Header="作品详情" IsExpanded="True"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Visibility="{x:Bind ViewModel.HasMangaDetails, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ScrollViewer MaxHeight="150"
+                                      VerticalScrollMode="Auto"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Padding="0,4,8,8" Spacing="8">
+                                <TextBlock Text="{x:Bind ViewModel.CurrentMangaTagsText, Mode=OneWay}"
+                                           FontSize="12" Opacity="0.72" TextWrapping="Wrap"
+                                           Visibility="{x:Bind ViewModel.CurrentMangaTagsText, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+                                <TextBlock Text="{x:Bind ViewModel.CurrentMangaDescription, Mode=OneWay}"
+                                           FontSize="12" Opacity="0.68" TextWrapping="WrapWholeWords"
+                                           IsTextSelectionEnabled="True"
+                                           Visibility="{x:Bind ViewModel.CurrentMangaDescription, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Expander>
+
+                    <Grid Grid.Row="2" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -98,7 +131,7 @@
                                 Command="{x:Bind ViewModel.DeselectAllChaptersCommand, Mode=OneWay}" />
                     </Grid>
 
-                    <Border Grid.Row="2" MinHeight="88" CornerRadius="8"
+                    <Border Grid.Row="3" MinHeight="88" CornerRadius="8"
                             BorderThickness="1"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             Background="{ThemeResource ControlFillColorDefaultBrush}">
@@ -120,7 +153,7 @@
                         </ListView>
                     </Border>
 
-                    <Grid Grid.Row="3" ColumnSpacing="8">
+                    <Grid Grid.Row="4" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />

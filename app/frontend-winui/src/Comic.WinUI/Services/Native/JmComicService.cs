@@ -132,11 +132,129 @@ public sealed class JmComicService : IDisposable
                 UpdateTime = item.UpdateTime,
                 Section = selectedSection,
                 DetailSectionLabel = "站点: 禁漫天堂",
+                Categories = item.Categories,
             }).ToList(),
             Total = result.Total,
             Section = selectedSection,
             AvailableSections = new Dictionary<string, string>(RankingSections),
             IsSinglePage = false,
+        };
+    }
+
+    public async Task<WeeklyPicksIndexResponse> GetWeeklyPicksIndexAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var payload = await RequestApiAsync(
+            "/week",
+            new Dictionary<string, string>(),
+            cancellationToken);
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("JM 每周必看索引结构无效");
+        }
+
+        var issues = new List<WeeklyPickIssue>();
+        if (payload.TryGetProperty("categories", out var categories) &&
+            categories.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in categories.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object))
+            {
+                var id = GetString(item, "id");
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var title = GetString(item, "time");
+                if (string.IsNullOrWhiteSpace(title)) title = GetString(item, "name");
+                issues.Add(new WeeklyPickIssue
+                {
+                    Id = id,
+                    Title = string.IsNullOrWhiteSpace(title) ? $"第 {id} 期" : title,
+                });
+            }
+        }
+
+        var types = new List<WeeklyPickType>();
+        if (payload.TryGetProperty("type", out var typeItems) &&
+            typeItems.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in typeItems.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object))
+            {
+                var id = GetString(item, "id");
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var title = GetString(item, "title");
+                if (string.IsNullOrWhiteSpace(title)) title = GetString(item, "name");
+                types.Add(new WeeklyPickType
+                {
+                    Id = id,
+                    Title = NormalizeWeeklyPickTypeTitle(id, title),
+                });
+            }
+        }
+
+        return new WeeklyPicksIndexResponse
+        {
+            Issues = issues
+                .OrderByDescending(issue => long.TryParse(issue.Id, out var id) ? id : long.MinValue)
+                .ToList(),
+            Types = types,
+        };
+    }
+
+    public Task<WeeklyPicksResponse> GetWeeklyPicksAsync(
+        string issueId,
+        CancellationToken cancellationToken = default) =>
+        GetWeeklyPicksAsync(issueId, string.Empty, cancellationToken);
+
+    public async Task<WeeklyPicksResponse> GetWeeklyPicksAsync(
+        string issueId,
+        string typeId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(issueId))
+            throw new ArgumentException("每周必看期数不能为空", nameof(issueId));
+
+        var parameters = new Dictionary<string, string> { ["id"] = issueId.Trim() };
+        if (!string.IsNullOrWhiteSpace(typeId)) parameters["type"] = typeId.Trim();
+        var payload = await RequestApiAsync("/week/filter", parameters, cancellationToken);
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("JM 每周必看作品结构无效");
+        }
+
+        var items = new List<WeeklyPickItem>();
+        if (payload.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object))
+            {
+                var searchItem = BuildSearchResult(item);
+                var id = GetString(item, "id");
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var categoryKeys = ReadFlatStrings(item, "category")
+                    .Concat(ReadFlatStrings(item, "category_sub"))
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                items.Add(new WeeklyPickItem
+                {
+                    Id = id,
+                    Title = searchItem.Title,
+                    Url = searchItem.Url,
+                    CoverUrl = searchItem.CoverUrl,
+                    Author = searchItem.Author,
+                    Description = SanitizePlainText(GetString(item, "description")),
+                    UpdateTime = searchItem.UpdateTime,
+                    CategoryKeys = categoryKeys,
+                    Categories = searchItem.Categories,
+                });
+            }
+        }
+
+        var total = payload.TryGetProperty("total", out var totalElement)
+            ? ReadInt(totalElement)
+            : items.Count;
+        return new WeeklyPicksResponse
+        {
+            IssueId = issueId.Trim(),
+            Total = Math.Max(total, items.Count),
+            Items = items,
         };
     }
 
@@ -199,12 +317,20 @@ public sealed class JmComicService : IDisposable
         var info = await GetMangaInfoAsync(mangaId, cancellationToken);
         return new MangaResolveResponse
         {
+            MangaId = info.Id,
             Title = info.Title,
             SiteName = SiteCatalog.DisplayName,
             MangaUrl = AlbumUrl(mangaId),
             LatestChapter = info.Chapters.LastOrDefault()?.Title ?? "-",
             CoverUrl = CoverUrl(mangaId),
             DetailHint = BuildDetailHint(info),
+            Author = string.Join("、", info.Authors.Select(ChineseTextConverter.ToSimplified)),
+            Description = ChineseTextConverter.ToSimplified(SanitizePlainText(info.Description)),
+            Tags = info.Tags.Select(ChineseTextConverter.ToSimplified).ToList(),
+            AddedAt = FormatTimestamp(info.AddedAt),
+            TotalViews = info.TotalViews,
+            Likes = info.Likes,
+            CommentCount = info.CommentCount,
             Chapters = info.Chapters.Select(chapter => new MangaChapterDto
             {
                 Title = chapter.Title,
@@ -551,7 +677,12 @@ public sealed class JmComicService : IDisposable
             chapters,
             null,
             GetString(album, "addtime"),
-            GetAuthors(album));
+            GetAuthors(album),
+            GetString(album, "description"),
+            GetStringArray(album, "tags"),
+            GetString(album, "total_views"),
+            GetString(album, "likes"),
+            GetString(album, "comment_total"));
     }
 
     private async Task<JsonElement> GetAlbumAsync(string mangaId, CancellationToken cancellationToken)
@@ -814,6 +945,7 @@ public sealed class JmComicService : IDisposable
             UpdateTime = FormatTimestamp(GetString(item, "update_at") is { Length: > 0 } updated
                 ? updated
                 : GetString(item, "addtime")),
+            Categories = ReadContentCategories(item),
         };
     }
 
@@ -957,7 +1089,7 @@ public sealed class JmComicService : IDisposable
         {
             Id = GetString(element, "CID") is { Length: > 0 } id ? id : GetString(element, "id"),
             UserId = GetString(element, "UID"),
-            Author = author,
+            Author = ChineseTextConverter.ToSimplified(author),
             Content = SanitizeCommentContent(GetString(element, "content")),
             CreatedAt = FormatTimestamp(createdAt),
             Likes = element.TryGetProperty("likes", out var likes) ? Math.Max(ReadInt(likes), 0) : 0,
@@ -974,7 +1106,7 @@ public sealed class JmComicService : IDisposable
         text = Regex.Replace(text, @"<[^>]+>", string.Empty);
         text = WebUtility.HtmlDecode(text).Replace("\r\n", "\n").Replace('\r', '\n');
         text = Regex.Replace(text, @"\n{3,}", "\n\n").Trim();
-        return string.IsNullOrWhiteSpace(text) ? "（无文字内容）" : text;
+        return string.IsNullOrWhiteSpace(text) ? "（无文字内容）" : ChineseTextConverter.ToSimplified(text);
     }
 
     private static List<string> GetStringArray(JsonElement element, string propertyName)
@@ -985,6 +1117,101 @@ public sealed class JmComicService : IDisposable
             ? item.GetString() ?? string.Empty
             : item.GetRawText()).ToList();
     }
+
+    private static List<string> ReadFlatStrings(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value)) return [];
+        var result = new List<string>();
+        AddFlatStrings(value, result);
+        return result;
+    }
+
+    private static List<ContentCategory> ReadContentCategories(JsonElement element)
+    {
+        var categories = new List<ContentCategory>();
+        AddContentCategory(element, "category", categories);
+        AddContentCategory(element, "category_sub", categories);
+        return categories
+            .Where(category => !string.IsNullOrWhiteSpace(category.Title))
+            .GroupBy(category => category.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static void AddContentCategory(
+        JsonElement element,
+        string propertyName,
+        List<ContentCategory> categories)
+    {
+        if (!element.TryGetProperty(propertyName, out var value)) return;
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray()) AddContentCategoryValue(item, categories);
+            return;
+        }
+        AddContentCategoryValue(value, categories);
+    }
+
+    private static void AddContentCategoryValue(JsonElement value, List<ContentCategory> categories)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            var title = GetString(value, "title");
+            if (string.IsNullOrWhiteSpace(title)) title = GetString(value, "name");
+            if (string.IsNullOrWhiteSpace(title)) return;
+            categories.Add(new ContentCategory
+            {
+                Id = GetString(value, "id"),
+                Title = ChineseTextConverter.ToSimplified(title),
+            });
+            return;
+        }
+        if (value.ValueKind is not (JsonValueKind.String or JsonValueKind.Number)) return;
+        var text = ChineseTextConverter.ToSimplified(value.ToString());
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            categories.Add(new ContentCategory { Id = text, Title = text });
+        }
+    }
+
+    private static void AddFlatStrings(JsonElement value, List<string> result)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+            case JsonValueKind.Number:
+                result.Add(value.ToString());
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray()) AddFlatStrings(item, result);
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                {
+                    result.Add(property.Name);
+                    AddFlatStrings(property.Value, result);
+                }
+                break;
+        }
+    }
+
+    private static string SanitizePlainText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var decoded = WebUtility.HtmlDecode(Regex.Replace(value, "<[^>]+>", " "))
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
+        return Regex.Replace(decoded, @"\s+", " ").Trim();
+    }
+
+    private static string NormalizeWeeklyPickTypeTitle(string id, string title) =>
+        id.ToLowerInvariant() switch
+        {
+            "hanman" => "韩漫",
+            "another" => "其他",
+            "manga" => "日漫",
+            _ => string.IsNullOrWhiteSpace(title) ? id : title,
+        };
 
     private static List<string> GetAuthors(JsonElement element)
     {
@@ -1064,7 +1291,15 @@ public sealed record JmMangaInfo(
     List<JmChapter> Chapters,
     string? StartChapterId,
     string AddedAt,
-    List<string> Authors);
+    List<string> Authors,
+    string Description = "",
+    List<string>? RawTags = null,
+    string TotalViews = "",
+    string Likes = "",
+    string CommentCount = "")
+{
+    public List<string> Tags => RawTags ?? [];
+}
 
 public sealed record JmChapterDownloadResult(int ImageCount, string DirectoryName, string ChapterTitle);
 public sealed record JmImageProgress(int CompletedImages, int TotalImages, long DownloadedBytes);

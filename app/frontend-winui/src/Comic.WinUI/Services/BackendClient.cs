@@ -183,6 +183,21 @@ public sealed class BackendClient
         CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _jmComic.GetRankingAsync(section, page, cancellationToken), "ranking_failed");
 
+    public Task<WeeklyPicksIndexResponse> GetWeeklyPicksIndexAsync(
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.GetWeeklyPicksIndexAsync(cancellationToken), "weekly_picks_index_failed");
+
+    public Task<WeeklyPicksResponse> GetWeeklyPicksAsync(
+        string issueId,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.GetWeeklyPicksAsync(issueId, cancellationToken), "weekly_picks_failed");
+
+    public Task<WeeklyPicksResponse> GetWeeklyPicksAsync(
+        string issueId,
+        string typeId,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _jmComic.GetWeeklyPicksAsync(issueId, typeId, cancellationToken), "weekly_picks_failed");
+
     public Task<RankingSectionsResponse> GetRankingSectionsAsync(string site = "jmcomic", CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

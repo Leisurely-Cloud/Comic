@@ -240,16 +240,16 @@ public class JmComicServiceTests
                     {
                       "CID": "88",
                       "UID": "9",
-                      "nickname": "测试用户",
-                      "content": "很好看<br>&lt;继续更新&gt;<b>！</b>",
+                      "nickname": "測試用戶",
+                      "content": "很好看<br>&lt;繼續更新&gt;<b>！媽媽</b>",
                       "addtime": "1700000000",
                       "likes": "3",
                       "spoiler": "2",
                       "replys": [
                         {
                           "CID": "89",
-                          "username": "回复者",
-                          "content": "同感",
+                          "username": "回覆者",
+                          "content": "同感，這期很精彩",
                           "addtime": "2026-08-22"
                         }
                       ]
@@ -274,11 +274,139 @@ public class JmComicServiceTests
         Assert.AreEqual(1, result.Items.Count);
         Assert.AreEqual("88", result.Items[0].Id);
         Assert.AreEqual("测试用户", result.Items[0].AuthorDisplay);
-        Assert.AreEqual("很好看\n<继续更新>！", result.Items[0].Content);
+        Assert.AreEqual("很好看\n<继续更新>！妈妈", result.Items[0].Content);
         Assert.AreEqual(3, result.Items[0].Likes);
         Assert.IsTrue(result.Items[0].IsSpoiler);
         Assert.AreEqual(1, result.Items[0].Replies.Count);
         Assert.AreEqual("回复者", result.Items[0].Replies[0].AuthorDisplay);
+        Assert.AreEqual("同感，这期很精彩", result.Items[0].Replies[0].Content);
+    }
+
+    [TestMethod]
+    public async Task ResolveAsync_ParsesDetailedAlbumMetadataForSelectionPanel()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/album", request.RequestUri?.AbsolutePath);
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "id": "1459797",
+                  "name": "详情测试漫画",
+                  "author": ["測試作者"],
+                  "description": "這是<b>詳細</b>介紹",
+                  "tags": ["全彩", "戀愛"],
+                  "total_views": "123456",
+                  "likes": "789",
+                  "comment_total": "173",
+                  "addtime": "1700000000",
+                  "series": [
+                    { "id": "1459797", "name": "第一章" }
+                  ]
+                }
+                """);
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+
+        var result = await service.ResolveAsync("https://18comic.vip/album/1459797");
+
+        Assert.AreEqual("1459797", result.MangaId);
+        Assert.AreEqual("测试作者", result.Author);
+        Assert.AreEqual("这是 详细 介绍", result.Description);
+        CollectionAssert.AreEqual(new[] { "全彩", "恋爱" }, result.Tags);
+        Assert.AreEqual("123456", result.TotalViews);
+        Assert.AreEqual("789", result.Likes);
+        Assert.AreEqual("173", result.CommentCount);
+        Assert.AreEqual(1, result.Chapters.Count);
+    }
+
+    [TestMethod]
+    public async Task GetWeeklyPicksIndexAsync_ParsesTypesAndSortsNewestIssueFirst()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/week", request.RequestUri?.AbsolutePath);
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "categories": [
+                    { "id": "253", "time": "2026第252期" },
+                    { "id": "254", "time": "2026第253期" }
+                  ],
+                  "type": [
+                    { "id": "hanman", "title": "韓漫" },
+                    { "id": "manga", "title": "日漫" }
+                  ]
+                }
+                """);
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+
+        var result = await service.GetWeeklyPicksIndexAsync();
+
+        Assert.AreEqual(2, result.Issues.Count);
+        Assert.AreEqual("254", result.Issues[0].Id);
+        Assert.AreEqual("2026第253期", result.Issues[0].Title);
+        Assert.AreEqual("hanman", result.Types[0].Id);
+        Assert.AreEqual("韩漫", result.Types[0].Title);
+    }
+
+    [TestMethod]
+    public async Task GetWeeklyPicksAsync_ParsesOfficialItemsAndCategoryShapes()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/week/filter", request.RequestUri?.AbsolutePath);
+            StringAssert.Contains(request.RequestUri?.Query ?? string.Empty, "id=254");
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "total": "2",
+                  "list": [
+                    {
+                      "id": "1001",
+                      "name": "每周作品一",
+                      "author": ["作者甲"],
+                      "description": "简介<br><b>内容</b>",
+                      "category": "hanman",
+                      "update_at": "1700000000"
+                    },
+                    {
+                      "id": "1002",
+                      "name": "每周作品二",
+                      "author": "作者乙",
+                      "category_sub": ["manga", { "another": "其他" }]
+                    }
+                  ]
+                }
+                """);
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+
+        var result = await service.GetWeeklyPicksAsync("254");
+
+        Assert.AreEqual("254", result.IssueId);
+        Assert.AreEqual(2, result.Total);
+        Assert.AreEqual(2, result.Items.Count);
+        Assert.AreEqual("每周作品一", result.Items[0].Title);
+        Assert.AreEqual("作者甲", result.Items[0].Author);
+        Assert.AreEqual("简介 内容", result.Items[0].Description);
+        CollectionAssert.Contains(result.Items[0].CategoryKeys, "hanman");
+        CollectionAssert.Contains(result.Items[1].CategoryKeys, "manga");
+        CollectionAssert.Contains(result.Items[1].CategoryKeys, "another");
+    }
+
+    private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)
+    {
+        var tokenParam = request.Headers.GetValues("tokenparam").Single();
+        var timestamp = long.Parse(tokenParam.Split(',')[0]);
+        var payload = Encoding.UTF8.GetBytes(json);
+        var encrypted = EncryptWithSecret(timestamp, "185Hcomic3PAPP7R", payload);
+        var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(envelope, Encoding.UTF8, "application/json")
+        };
     }
 
     private static string EncryptWithSecret(long timestamp, string secret, byte[] plaintext)

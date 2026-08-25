@@ -51,6 +51,7 @@ public sealed partial class ShellPage : Page
         {
             "download" => typeof(DownloadPage),
             "ranking" => typeof(RankingPage),
+            "weekly" => typeof(WeeklyPicksPage),
             "library" => typeof(LibraryPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(DownloadPage),
@@ -69,6 +70,7 @@ public sealed partial class ShellPage : Page
         {
             "download" => typeof(DownloadPage),
             "ranking" => typeof(RankingPage),
+            "weekly" => typeof(WeeklyPicksPage),
             "library" => typeof(LibraryPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(DownloadPage),
