@@ -67,6 +67,10 @@ public partial class LibraryPageViewModel : ObservableObject
     public partial bool IsDeleting { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImportButtonText))]
+    public partial bool IsImporting { get; set; }
+
+    [ObservableProperty]
     public partial string LibraryStatus { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -110,6 +114,77 @@ public partial class LibraryPageViewModel : ObservableObject
         !IsDeleting;
 
     public string DeleteButtonText => IsDeleting ? "正在处理" : "删除漫画";
+
+    public string ImportButtonText => IsImporting ? "正在导入" : "导入 JM 目录";
+
+    public async Task<JmLibraryImportPreview?> ScanJmImportAsync(
+        string sourceRoot,
+        CancellationToken cancellationToken = default)
+    {
+        PageError = string.Empty;
+        LibraryStatus = "正在扫描 JM 目录...";
+        try
+        {
+            var preview = await _backendClient.ScanJmLibraryImportAsync(sourceRoot, cancellationToken);
+            LibraryStatus = string.Empty;
+            return preview;
+        }
+        catch (OperationCanceledException)
+        {
+            LibraryStatus = string.Empty;
+            return null;
+        }
+        catch (Exception ex)
+        {
+            LibraryStatus = string.Empty;
+            PageError = $"扫描失败：{ex.Message}";
+            return null;
+        }
+    }
+
+    public async Task<JmLibraryImportResult?> ImportJmAsync(
+        string sourceRoot,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsImporting) return null;
+        IsImporting = true;
+        PageError = string.Empty;
+        LibraryStatus = "正在复制缺失章节，源目录不会被修改...";
+        try
+        {
+            var result = await _backendClient.ImportJmLibraryAsync(sourceRoot, cancellationToken);
+            _currentPage = 1;
+            await LoadAsync(cancellationToken);
+            LibraryStatus = BuildImportResultText(result);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            LibraryStatus = "导入已取消，本轮未完成的内容已回滚。";
+            return null;
+        }
+        catch (Exception ex)
+        {
+            LibraryStatus = string.Empty;
+            PageError = $"导入失败：{ex.Message}";
+            return null;
+        }
+        finally
+        {
+            IsImporting = false;
+        }
+    }
+
+    private static string BuildImportResultText(JmLibraryImportResult result)
+    {
+        var completed = result.ImportedMangaCount + result.UpdatedMangaCount;
+        var text = $"导入完成：处理 {completed} 部漫画，新增 {result.ImportedChapterCount} 章";
+        if (result.ExistingChapterCount > 0) text += $"，跳过已有 {result.ExistingChapterCount} 章";
+        if (result.ConflictChapterCount > 0) text += $"，保留冲突 {result.ConflictChapterCount} 章";
+        if (result.SkippedDirectoryCount > 0) text += $"，忽略未识别目录 {result.SkippedDirectoryCount} 个";
+        if (result.FailedMangaCount > 0) text += $"，失败 {result.FailedMangaCount} 部";
+        return text + "。";
+    }
 
     [RelayCommand]
     public async Task LoadAsync(CancellationToken cancellationToken = default)

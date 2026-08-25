@@ -24,6 +24,7 @@ public sealed class LibraryStorageService
 
     private readonly ILogger<LibraryStorageService> _logger;
     private readonly Action<string> _recycleDirectory;
+    private readonly Action<string, string, bool> _copyFile;
     private readonly object _libraryCacheLock = new();
     private IReadOnlyList<LibraryEntry>? _libraryCache;
     private DateTime _libraryCacheAtUtc;
@@ -37,10 +38,12 @@ public sealed class LibraryStorageService
     internal LibraryStorageService(
         string storageRoot,
         ILogger<LibraryStorageService>? logger = null,
-        Action<string>? recycleDirectory = null)
+        Action<string>? recycleDirectory = null,
+        Action<string, string, bool>? copyFile = null)
     {
         _logger = logger ?? NullLogger<LibraryStorageService>.Instance;
         _recycleDirectory = recycleDirectory ?? MoveDirectoryToRecycleBin;
+        _copyFile = copyFile ?? File.Copy;
         var requestedStorageRoot = Path.GetFullPath(storageRoot);
         Directory.CreateDirectory(requestedStorageRoot);
         StorageRoot = ResolveExistingDirectoryPath(requestedStorageRoot);
@@ -330,6 +333,390 @@ public sealed class LibraryStorageService
         return deletedCount;
     }
 
+    // ---- JM 目录导入 ----
+
+    /// <summary>
+    /// 扫描外部 JM 下载目录。扫描只读取直接子目录，不修改源目录或当前书库。
+    /// 已存在但图片数量不同的同序号章节视为冲突，导入时不会覆盖。
+    /// </summary>
+    public JmLibraryImportPreview ScanJmImportDirectory(
+        string sourceRoot,
+        CancellationToken cancellationToken = default)
+    {
+        var scan = BuildJmImportScan(sourceRoot, cancellationToken);
+        return new JmLibraryImportPreview
+        {
+            SourceRoot = scan.SourceRoot,
+            DetectedMangaCount = scan.Plans.Count,
+            NewMangaCount = scan.Plans.Count(plan => plan.TargetRoot is null),
+            ExistingMangaCount = scan.Plans.Count(plan => plan.TargetRoot is not null),
+            ImportableChapterCount = scan.Plans.Sum(plan => plan.Importable.Count),
+            ExistingChapterCount = scan.Plans.Sum(plan => plan.ExistingCount),
+            ConflictChapterCount = scan.Plans.Sum(plan => plan.ConflictCount),
+            SkippedDirectoryCount = scan.SkippedDirectoryCount,
+            ImportableImageCount = scan.Plans.Sum(plan => plan.Importable.Sum(chapter => chapter.Images.Count)),
+            ImportableBytes = scan.Plans.Sum(plan => plan.Importable.Sum(chapter => chapter.TotalBytes)),
+        };
+    }
+
+    /// <summary>
+    /// 将外部 JM 目录中的缺失章节复制进当前书库。已有章节和冲突章节均不覆盖；
+    /// 每部漫画先复制到临时目录，再以目录移动完成提交，失败时删除本轮新增内容。
+    /// </summary>
+    public JmLibraryImportResult ImportJmDirectory(
+        string sourceRoot,
+        CancellationToken cancellationToken = default)
+    {
+        var scan = BuildJmImportScan(sourceRoot, cancellationToken);
+        var importedMangaCount = 0;
+        var updatedMangaCount = 0;
+        var importedChapterCount = 0;
+        var failedMangaCount = 0;
+        var failures = new List<string>();
+
+        foreach (var plan in scan.Plans)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (plan.Importable.Count == 0) continue;
+
+            try
+            {
+                var targetRoot = plan.TargetRoot ?? Path.Combine(StorageRoot, plan.MangaId);
+                if (!Directory.Exists(targetRoot))
+                {
+                    ImportNewManga(plan, targetRoot, cancellationToken);
+                    importedMangaCount++;
+                    importedChapterCount += plan.Importable.Count;
+                }
+                else
+                {
+                    importedChapterCount += ImportMissingChapters(plan, targetRoot, cancellationToken);
+                    UpdateImportedMetadata(plan, targetRoot);
+                    updatedMangaCount++;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                failedMangaCount++;
+                failures.Add($"JM{plan.MangaId}: {ex.Message}");
+                _logger.LogWarning(ex, "导入 JM 漫画失败: {MangaId}", plan.MangaId);
+            }
+        }
+
+        InvalidateLibraryCache();
+        return new JmLibraryImportResult
+        {
+            ImportedMangaCount = importedMangaCount,
+            UpdatedMangaCount = updatedMangaCount,
+            ImportedChapterCount = importedChapterCount,
+            ExistingChapterCount = scan.Plans.Sum(plan => plan.ExistingCount),
+            ConflictChapterCount = scan.Plans.Sum(plan => plan.ConflictCount),
+            SkippedDirectoryCount = scan.SkippedDirectoryCount,
+            FailedMangaCount = failedMangaCount,
+            Failures = failures,
+        };
+    }
+
+    private JmImportScan BuildJmImportScan(string sourceRoot, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRoot)) throw new ArgumentException("请选择 JM 下载目录。");
+        if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("选择的 JM 下载目录不存在。");
+
+        var source = ResolveExistingDirectoryPath(sourceRoot);
+        if (SamePath(source, StorageRoot) || IsDirectoryInside(source, StorageRoot))
+            throw new InvalidOperationException("选择的目录已经位于当前书库中，无需重复导入。");
+        if (IsDirectoryInside(StorageRoot, source))
+            throw new InvalidOperationException("不能选择包含当前书库的上级目录，请选择具体的 JM 下载目录。");
+
+        var sourceDirectories = new List<DirectoryInfo>();
+        var selectedDirectory = new DirectoryInfo(source);
+        if (TryResolveImportMangaId(selectedDirectory, out _) && EnumerateChapterDirectories(source).Count > 0)
+        {
+            sourceDirectories.Add(selectedDirectory);
+        }
+        else
+        {
+            sourceDirectories.AddRange(selectedDirectory.EnumerateDirectories()
+                .Where(directory => !directory.Name.StartsWith(".", StringComparison.Ordinal)));
+        }
+
+        var candidates = new List<JmImportCandidate>();
+        var skippedDirectoryCount = 0;
+        foreach (var directory in sourceDirectories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryResolveImportMangaId(directory, out var mangaId))
+            {
+                skippedDirectoryCount++;
+                continue;
+            }
+
+            var chapters = EnumerateChapterContents(directory.FullName)
+                .Select(content => CreateImportChapter(content, cancellationToken))
+                .Where(chapter => chapter.Order > 0 && chapter.Images.Count > 0)
+                .ToList();
+            if (chapters.Count == 0)
+            {
+                skippedDirectoryCount++;
+                continue;
+            }
+
+            candidates.Add(new JmImportCandidate(mangaId, directory, LoadLibraryMetadata(directory.FullName), chapters));
+        }
+
+        var plans = candidates
+            .GroupBy(candidate => candidate.MangaId, StringComparer.Ordinal)
+            .Select(group => BuildImportPlan(group.Key, group.ToList()))
+            .OrderBy(plan => long.TryParse(plan.MangaId, out var id) ? id : long.MaxValue)
+            .ToList();
+        return new JmImportScan(source, plans, skippedDirectoryCount);
+    }
+
+    private JmImportPlan BuildImportPlan(string mangaId, IReadOnlyList<JmImportCandidate> candidates)
+    {
+        var representative = candidates
+            .OrderByDescending(candidate => candidate.Metadata?.MangaTitle.Length ?? 0)
+            .ThenByDescending(candidate => candidate.Chapters.Count)
+            .First();
+        var sourceChapters = candidates
+            .SelectMany(candidate => candidate.Chapters)
+            .GroupBy(chapter => chapter.Order)
+            .Select(group => group.OrderByDescending(chapter => chapter.Images.Count).First())
+            .OrderBy(chapter => chapter.Order)
+            .ToList();
+        var targetRoot = FindExistingMangaRoot(mangaId, representative.Metadata?.MangaTitle);
+        var targetChapters = targetRoot is null
+            ? new Dictionary<int, ChapterContent>()
+            : EnumerateChapterContents(targetRoot)
+                .Where(chapter => ChapterOrder(chapter.Directory.Name) > 0)
+                .GroupBy(chapter => ChapterOrder(chapter.Directory.Name))
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(chapter => chapter.Images.Count).First());
+
+        var importable = new List<JmImportChapter>();
+        var existingCount = 0;
+        var conflictCount = 0;
+        foreach (var sourceChapter in sourceChapters)
+        {
+            if (!targetChapters.TryGetValue(sourceChapter.Order, out var targetChapter))
+            {
+                importable.Add(sourceChapter);
+            }
+            else if (targetChapter.Images.Count == sourceChapter.Images.Count)
+            {
+                existingCount++;
+            }
+            else
+            {
+                conflictCount++;
+            }
+        }
+
+        return new JmImportPlan(
+            mangaId,
+            representative.Directory,
+            representative.Metadata,
+            targetRoot,
+            importable,
+            existingCount,
+            conflictCount);
+    }
+
+    private string? FindExistingMangaRoot(string mangaId, string? title)
+    {
+        return new DirectoryInfo(StorageRoot).EnumerateDirectories()
+            .Where(directory => !directory.Name.StartsWith(".", StringComparison.Ordinal))
+            .Select(directory => new
+            {
+                Directory = directory,
+                Metadata = LoadLibraryMetadata(directory.FullName),
+                Chapters = EnumerateChapterDirectories(directory.FullName).Count,
+            })
+            .Where(candidate =>
+            {
+                var candidateId = ResolveMangaId(candidate.Metadata, candidate.Directory.Name);
+                return string.Equals(candidateId, mangaId, StringComparison.Ordinal) ||
+                    (candidateId is null && !string.IsNullOrWhiteSpace(title) &&
+                        string.Equals(candidate.Metadata?.MangaTitle, title, StringComparison.OrdinalIgnoreCase));
+            })
+            .OrderByDescending(candidate => candidate.Metadata?.Completed ?? false)
+            .ThenByDescending(candidate => candidate.Chapters)
+            .ThenByDescending(candidate => candidate.Directory.LastWriteTime)
+            .Select(candidate => candidate.Directory.FullName)
+            .FirstOrDefault();
+    }
+
+    private void ImportNewManga(JmImportPlan plan, string targetRoot, CancellationToken cancellationToken)
+    {
+        if (Directory.Exists(targetRoot)) throw new IOException("目标目录已存在但无法识别，请手动处理后重试。");
+        var stagingParent = Path.Combine(StorageRoot, ".comic_import");
+        var stagingRoot = Path.Combine(stagingParent, $"{plan.MangaId}_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(stagingRoot);
+        try
+        {
+            foreach (var chapter in plan.Importable)
+            {
+                CopyChapter(chapter, Path.Combine(stagingRoot, chapter.Directory.Name), cancellationToken);
+            }
+
+            CopyRootImages(plan.SourceDirectory.FullName, stagingRoot, cancellationToken);
+            UpdateImportedMetadata(plan, stagingRoot);
+            Directory.Move(stagingRoot, targetRoot);
+        }
+        catch
+        {
+            if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, true);
+            throw;
+        }
+        finally
+        {
+            TryDeleteEmptyDirectory(stagingParent);
+        }
+    }
+
+    private int ImportMissingChapters(JmImportPlan plan, string targetRoot, CancellationToken cancellationToken)
+    {
+        var committed = new List<string>();
+        try
+        {
+            foreach (var chapter in plan.Importable)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var destination = Path.Combine(targetRoot, chapter.Directory.Name);
+                if (Directory.Exists(destination))
+                    throw new IOException($"章节目录“{chapter.Directory.Name}”已存在，未执行覆盖。");
+
+                var temporary = Path.Combine(targetRoot, $".importing_{Guid.NewGuid():N}");
+                try
+                {
+                    CopyChapter(chapter, temporary, cancellationToken);
+                    Directory.Move(temporary, destination);
+                    committed.Add(destination);
+                }
+                catch
+                {
+                    if (Directory.Exists(temporary)) Directory.Delete(temporary, true);
+                    throw;
+                }
+            }
+
+            return committed.Count;
+        }
+        catch
+        {
+            foreach (var directory in committed.Where(Directory.Exists)) Directory.Delete(directory, true);
+            throw;
+        }
+    }
+
+    private void CopyChapter(JmImportChapter chapter, string destination, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var image in chapter.Images)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _copyFile(image, Path.Combine(destination, Path.GetFileName(image)), false);
+        }
+    }
+
+    private void CopyRootImages(string sourceRoot, string targetRoot, CancellationToken cancellationToken)
+    {
+        foreach (var image in EnumerateImages(sourceRoot))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var destination = Path.Combine(targetRoot, Path.GetFileName(image));
+            if (!File.Exists(destination)) _copyFile(image, destination, false);
+        }
+    }
+
+    private void UpdateImportedMetadata(JmImportPlan plan, string targetRoot)
+    {
+        var existing = LoadLibraryMetadata(targetRoot);
+        var source = plan.Metadata;
+        var downloaded = EnumerateChapterContents(targetRoot)
+            .Select(chapter => new DownloadedChapterRecord
+            {
+                Order = ChapterOrder(chapter.Directory.Name),
+                DirName = chapter.Directory.Name,
+                Title = ChapterTitle(chapter.Directory.Name, source ?? existing),
+                ImageCount = chapter.Images.Count,
+            })
+            .Where(chapter => chapter.Order > 0)
+            .OrderBy(chapter => chapter.Order)
+            .ToList();
+        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        var sourceTitle = source?.MangaTitle;
+        var fallbackTitle = plan.SourceDirectory.Name == plan.MangaId ? $"JM{plan.MangaId}" : plan.SourceDirectory.Name;
+        var metadata = new LibraryMetadata
+        {
+            SchemaVersion = Math.Max(existing?.SchemaVersion ?? 0, 1),
+            SiteKey = SiteCatalog.Key,
+            SiteName = SiteCatalog.DisplayName,
+            MangaTitle = !string.IsNullOrWhiteSpace(existing?.MangaTitle) ? existing.MangaTitle :
+                !string.IsNullOrWhiteSpace(sourceTitle) ? sourceTitle : fallbackTitle,
+            Authors = existing?.Authors.Count > 0 ? existing.Authors : source?.Authors ?? [],
+            MangaUrl = $"https://18comic.vip/album/{plan.MangaId}",
+            RootDirectory = targetRoot,
+            CoverUrl = !string.IsNullOrWhiteSpace(existing?.CoverUrl) ? existing.CoverUrl : source?.CoverUrl ?? string.Empty,
+            TotalChapters = Math.Max(existing?.TotalChapters ?? 0, downloaded.Count),
+            DownloadedChapterCount = downloaded.Count,
+            LastDownloadedChapterTitle = downloaded.LastOrDefault()?.Title ?? string.Empty,
+            LastDownloadedChapterOrder = downloaded.LastOrDefault()?.Order,
+            DownloadedChapters = downloaded,
+            Completed = existing?.Completed ?? false,
+            IsFavorite = existing?.IsFavorite ?? source?.IsFavorite ?? false,
+            CreatedAt = !string.IsNullOrWhiteSpace(existing?.CreatedAt) ? existing.CreatedAt :
+                !string.IsNullOrWhiteSpace(source?.CreatedAt) ? source.CreatedAt : now,
+            SavedAt = now,
+            LastFailedChapterRecords = existing?.LastFailedChapterRecords ?? [],
+            LastFailedChapterCount = existing?.LastFailedChapterCount ?? 0,
+        };
+        WriteJsonAtomically(Path.Combine(targetRoot, "元数据.json"), metadata);
+    }
+
+    private JmImportChapter CreateImportChapter(ChapterContent content, CancellationToken cancellationToken)
+    {
+        long totalBytes = 0;
+        foreach (var image in content.Images)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { totalBytes += new FileInfo(image).Length; }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        return new JmImportChapter(ChapterOrder(content.Directory.Name), content.Directory, content.Images, totalBytes);
+    }
+
+    private bool TryResolveImportMangaId(DirectoryInfo directory, out string mangaId)
+    {
+        var metadata = LoadLibraryMetadata(directory.FullName);
+        mangaId = ResolveMangaId(metadata, directory.Name) ?? string.Empty;
+        return mangaId.Length > 0;
+    }
+
+    private static bool IsDirectoryInside(string candidate, string parent)
+    {
+        var relative = Path.GetRelativePath(Path.GetFullPath(parent), Path.GetFullPath(candidate));
+        return relative != "." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+            !Path.IsPathRooted(relative);
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any()) Directory.Delete(path);
+        }
+        catch
+        {
+            // 临时目录清理失败不影响已完成的导入。
+        }
+    }
+
     // ---- 目录与文件工具 ----
 
     public List<DirectoryInfo> EnumerateChapterDirectories(string rootDirectory)
@@ -592,6 +979,29 @@ public sealed record LibraryEntry(
     int DuplicateDirectoryCount);
 
 internal sealed record ChapterContent(DirectoryInfo Directory, IReadOnlyList<string> Images);
+
+internal sealed record JmImportScan(string SourceRoot, IReadOnlyList<JmImportPlan> Plans, int SkippedDirectoryCount);
+
+internal sealed record JmImportCandidate(
+    string MangaId,
+    DirectoryInfo Directory,
+    LibraryMetadata? Metadata,
+    IReadOnlyList<JmImportChapter> Chapters);
+
+internal sealed record JmImportPlan(
+    string MangaId,
+    DirectoryInfo SourceDirectory,
+    LibraryMetadata? Metadata,
+    string? TargetRoot,
+    IReadOnlyList<JmImportChapter> Importable,
+    int ExistingCount,
+    int ConflictCount);
+
+internal sealed record JmImportChapter(
+    int Order,
+    DirectoryInfo Directory,
+    IReadOnlyList<string> Images,
+    long TotalBytes);
 
 public sealed class LibraryMetadata
 {

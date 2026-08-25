@@ -24,6 +24,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Width="170" Spacing="1" VerticalAlignment="Center">
                         <TextBlock Text="我的书库" Style="{StaticResource TitleTextBlockStyle}" />
@@ -42,6 +43,14 @@
                         </StackPanel>
                     </Button>
                     <Button Grid.Column="3" VerticalAlignment="Center"
+                            IsEnabled="{x:Bind ViewModel.IsImporting, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}"
+                            Click="OnImportJmClick">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE898;" FontSize="14" />
+                            <TextBlock Text="{x:Bind ViewModel.ImportButtonText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="4" VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.RefreshLibraryCommand, Mode=OneWay}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon Glyph="&#xE72C;" FontSize="14" />

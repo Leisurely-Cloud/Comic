@@ -120,6 +120,24 @@ public sealed class BackendClient
             return _library.DeleteManga(rootDir);
         }, cancellationToken), "library_delete_failed");
 
+    public Task<JmLibraryImportPreview> ScanJmLibraryImportAsync(
+        string sourceRoot,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => Task.Run(
+            () => _library.ScanJmImportDirectory(sourceRoot, cancellationToken),
+            cancellationToken), "library_import_scan_failed");
+
+    public Task<JmLibraryImportResult> ImportJmLibraryAsync(
+        string sourceRoot,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_downloads.HasActiveTasks())
+                throw new InvalidOperationException("存在未结束的下载任务，请停止或等待任务完成后再导入。");
+            return _library.ImportJmDirectory(sourceRoot, cancellationToken);
+        }, cancellationToken), "library_import_failed");
+
     public Task<SettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _library.GetSettingsAsync(cancellationToken), "settings_failed");
 

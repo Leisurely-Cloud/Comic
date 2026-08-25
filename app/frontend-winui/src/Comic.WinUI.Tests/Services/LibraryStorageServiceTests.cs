@@ -237,4 +237,98 @@ public sealed class LibraryStorageServiceTests
         Assert.IsFalse(recycleCalled);
         Assert.IsTrue(Directory.Exists(outsideRoot));
     }
+
+    [TestMethod]
+    public void JmImport_ScansAndCopiesNewMangaWithoutChangingSource()
+    {
+        var source = Path.Combine(_container, "jm-source");
+        var sourceManga = Path.Combine(source, "456");
+        Directory.CreateDirectory(Path.Combine(sourceManga, "1"));
+        Directory.CreateDirectory(Path.Combine(sourceManga, "2"));
+        Directory.CreateDirectory(Path.Combine(source, "无法识别"));
+        File.WriteAllBytes(Path.Combine(sourceManga, "1", "00001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(sourceManga, "2", "00001.jpg"), [2]);
+        File.WriteAllBytes(Path.Combine(sourceManga, "2", "00002.jpg"), [3]);
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+
+        var preview = service.ScanJmImportDirectory(source);
+
+        Assert.AreEqual(1, preview.DetectedMangaCount);
+        Assert.AreEqual(1, preview.NewMangaCount);
+        Assert.AreEqual(2, preview.ImportableChapterCount);
+        Assert.AreEqual(3, preview.ImportableImageCount);
+        Assert.AreEqual(1, preview.SkippedDirectoryCount);
+
+        var result = service.ImportJmDirectory(source);
+        var target = Path.Combine(_storageRoot, "456");
+
+        Assert.AreEqual(1, result.ImportedMangaCount);
+        Assert.AreEqual(2, result.ImportedChapterCount);
+        Assert.IsTrue(File.Exists(Path.Combine(target, "1", "00001.jpg")));
+        Assert.IsTrue(File.Exists(Path.Combine(target, "2", "00002.jpg")));
+        Assert.IsTrue(File.Exists(Path.Combine(sourceManga, "2", "00002.jpg")), "导入不得移动或删除源文件");
+        var metadata = service.LoadLibraryMetadata(target);
+        Assert.IsNotNull(metadata);
+        Assert.AreEqual("https://18comic.vip/album/456", metadata.MangaUrl);
+        Assert.AreEqual(2, metadata.DownloadedChapterCount);
+    }
+
+    [TestMethod]
+    public void JmImport_MergesMissingChaptersAndDoesNotOverwriteConflicts()
+    {
+        var target = Path.Combine(_storageRoot, "789");
+        Directory.CreateDirectory(Path.Combine(target, "1"));
+        Directory.CreateDirectory(Path.Combine(target, "3"));
+        File.WriteAllBytes(Path.Combine(target, "1", "00001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(target, "3", "00001.jpg"), [3]);
+        File.WriteAllBytes(Path.Combine(target, "3", "00002.jpg"), [3]);
+
+        var source = Path.Combine(_container, "jm-source");
+        var sourceManga = Path.Combine(source, "789");
+        Directory.CreateDirectory(Path.Combine(sourceManga, "1"));
+        Directory.CreateDirectory(Path.Combine(sourceManga, "2"));
+        Directory.CreateDirectory(Path.Combine(sourceManga, "3"));
+        File.WriteAllBytes(Path.Combine(sourceManga, "1", "00001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(sourceManga, "2", "00001.jpg"), [2]);
+        File.WriteAllBytes(Path.Combine(sourceManga, "3", "00001.jpg"), [9]);
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+
+        var preview = service.ScanJmImportDirectory(source);
+        Assert.AreEqual(1, preview.ExistingMangaCount);
+        Assert.AreEqual(1, preview.ImportableChapterCount);
+        Assert.AreEqual(1, preview.ExistingChapterCount);
+        Assert.AreEqual(1, preview.ConflictChapterCount);
+
+        var result = service.ImportJmDirectory(source);
+
+        Assert.AreEqual(1, result.UpdatedMangaCount);
+        Assert.AreEqual(1, result.ImportedChapterCount);
+        Assert.IsTrue(File.Exists(Path.Combine(target, "2", "00001.jpg")));
+        Assert.AreEqual(2, Directory.GetFiles(Path.Combine(target, "3")).Length, "冲突章节不应被覆盖");
+    }
+
+    [TestMethod]
+    public void JmImport_CopyFailureRollsBackNewManga()
+    {
+        var source = Path.Combine(_container, "jm-source");
+        var sourceChapter = Path.Combine(source, "999", "1");
+        Directory.CreateDirectory(sourceChapter);
+        File.WriteAllBytes(Path.Combine(sourceChapter, "00001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(sourceChapter, "00002.jpg"), [2]);
+        var copied = 0;
+        var service = new LibraryStorageService(
+            _storageRoot,
+            copyFile: (from, to, overwrite) =>
+            {
+                if (++copied == 2) throw new IOException("模拟复制失败");
+                File.Copy(from, to, overwrite);
+            });
+
+        var result = service.ImportJmDirectory(source);
+
+        Assert.AreEqual(1, result.FailedMangaCount);
+        Assert.IsFalse(Directory.Exists(Path.Combine(_storageRoot, "999")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(_storageRoot, ".comic_import")));
+        Assert.IsTrue(File.Exists(Path.Combine(sourceChapter, "00002.jpg")));
+    }
 }

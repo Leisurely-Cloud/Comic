@@ -57,6 +57,34 @@ public sealed class LibraryCheckUpdatesResponse
     public List<LibraryUpdateItem> Items { get; set; } = [];
 }
 
+public sealed class JmLibraryImportPreview
+{
+    public string SourceRoot { get; init; } = string.Empty;
+    public int DetectedMangaCount { get; init; }
+    public int NewMangaCount { get; init; }
+    public int ExistingMangaCount { get; init; }
+    public int ImportableChapterCount { get; init; }
+    public int ExistingChapterCount { get; init; }
+    public int ConflictChapterCount { get; init; }
+    public int SkippedDirectoryCount { get; init; }
+    public int ImportableImageCount { get; init; }
+    public long ImportableBytes { get; init; }
+
+    public bool HasImportableContent => ImportableChapterCount > 0;
+}
+
+public sealed class JmLibraryImportResult
+{
+    public int ImportedMangaCount { get; init; }
+    public int UpdatedMangaCount { get; init; }
+    public int ImportedChapterCount { get; init; }
+    public int ExistingChapterCount { get; init; }
+    public int ConflictChapterCount { get; init; }
+    public int SkippedDirectoryCount { get; init; }
+    public int FailedMangaCount { get; init; }
+    public List<string> Failures { get; init; } = [];
+}
+
 public sealed class LibraryUpdateItem
 {
     [JsonPropertyName("title")]
