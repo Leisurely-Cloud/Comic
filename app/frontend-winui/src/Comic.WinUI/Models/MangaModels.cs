@@ -14,6 +14,9 @@ public sealed class MangaResolveRequest
 
 public sealed class MangaResolveResponse
 {
+    [JsonPropertyName("id")]
+    public string MangaId { get; set; } = string.Empty;
+
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
@@ -34,6 +37,27 @@ public sealed class MangaResolveResponse
 
     [JsonPropertyName("detail_hint")]
     public string DetailHint { get; set; } = string.Empty;
+
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("tags")]
+    public List<string> Tags { get; set; } = [];
+
+    [JsonPropertyName("added_at")]
+    public string AddedAt { get; set; } = string.Empty;
+
+    [JsonPropertyName("total_views")]
+    public string TotalViews { get; set; } = string.Empty;
+
+    [JsonPropertyName("likes")]
+    public string Likes { get; set; } = string.Empty;
+
+    [JsonPropertyName("comment_count")]
+    public string CommentCount { get; set; } = string.Empty;
 }
 
 public sealed class MangaChapterDto

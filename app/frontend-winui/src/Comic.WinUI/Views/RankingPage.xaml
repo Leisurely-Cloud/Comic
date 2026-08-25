@@ -19,6 +19,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                     <TextBlock Text="排行榜" Style="{StaticResource TitleTextBlockStyle}" />
@@ -32,6 +33,13 @@
                               SelectedItem="{x:Bind ViewModel.SelectedSectionItem, Mode=TwoWay}"
                               DisplayMemberPath="DisplayName"
                               MinWidth="170" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                    <TextBlock Text="内容分类" FontSize="12" Opacity="0.65" />
+                    <ComboBox ItemsSource="{x:Bind ViewModel.Categories, Mode=OneWay}"
+                              SelectedItem="{x:Bind ViewModel.SelectedCategory, Mode=TwoWay}"
+                              DisplayMemberPath="Title"
+                              MinWidth="130" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -110,10 +118,25 @@
                                            Stretch="UniformToFill" />
                                 </Border>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="{x:Bind Title, Mode=OneWay}"
-                                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                                               FontSize="16"
-                                               TextTrimming="CharacterEllipsis" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{x:Bind Title, Mode=OneWay}"
+                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                   FontSize="16"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <Border Grid.Column="1" Padding="7,2" CornerRadius="9"
+                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                Visibility="{x:Bind HasCategory, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <TextBlock Text="{x:Bind CategoryDisplay, Mode=OneWay}"
+                                                       FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </Border>
+                                    </Grid>
                                     <TextBlock Text="{x:Bind AuthorDisplay, Mode=OneWay}"
                                                Visibility="{x:Bind AuthorDisplay, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
                                                Opacity="0.65" FontSize="12"

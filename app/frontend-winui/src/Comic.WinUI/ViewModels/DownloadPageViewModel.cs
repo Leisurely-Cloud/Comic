@@ -239,6 +239,40 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public string CurrentMangaLatestChapter => CurrentManga?.LatestChapter ?? string.Empty;
     public string CurrentMangaCoverUrl => CurrentManga?.CoverUrl ?? string.Empty;
     public string CurrentMangaDetailHint => CurrentManga?.DetailHint ?? string.Empty;
+    public string CurrentMangaIdentityText => CurrentManga is null
+        ? string.Empty
+        : $"JM {CurrentManga.MangaId} · {CurrentManga.SiteName}";
+    public string CurrentMangaAuthorText => string.IsNullOrWhiteSpace(CurrentManga?.Author)
+        ? string.Empty
+        : $"作者：{CurrentManga.Author}";
+    public string CurrentMangaAddedAtText => string.IsNullOrWhiteSpace(CurrentManga?.AddedAt)
+        ? string.Empty
+        : $"发布：{CurrentManga.AddedAt}";
+    public string CurrentMangaTagsText => CurrentManga?.Tags is { Count: > 0 } tags
+        ? "标签：" + string.Join(" · ", tags.Take(10))
+        : string.Empty;
+    public string CurrentMangaDescription => CurrentManga?.Description ?? string.Empty;
+    public bool HasMangaDetails => !string.IsNullOrWhiteSpace(CurrentMangaTagsText)
+        || !string.IsNullOrWhiteSpace(CurrentMangaDescription);
+    public string CurrentMangaStatsText
+    {
+        get
+        {
+            if (CurrentManga is null) return string.Empty;
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(CurrentManga.TotalViews))
+                parts.Add($"浏览 {FormatMetric(CurrentManga.TotalViews)}");
+            if (!string.IsNullOrWhiteSpace(CurrentManga.Likes))
+                parts.Add($"点赞 {FormatMetric(CurrentManga.Likes)}");
+            if (!string.IsNullOrWhiteSpace(CurrentManga.CommentCount))
+                parts.Add($"评论 {FormatMetric(CurrentManga.CommentCount)}");
+            parts.Add($"章节 {CurrentManga.Chapters.Count}");
+            return string.Join("  ·  ", parts);
+        }
+    }
+
+    private static string FormatMetric(string value) =>
+        long.TryParse(value, out var number) ? number.ToString("N0") : value;
 
     public bool HasChapters => AvailableChapters.Count > 0;
 
@@ -539,6 +573,9 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(url)) return;
 
+        var input = url.Trim();
+        SearchKeyword = input;
+
         _resolveCts?.Cancel();
         _resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _resolveCts.Token;
@@ -551,11 +588,25 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             var detail = await _backendClient.ResolveMangaAsync(
                 new MangaResolveRequest
                 {
-                    Url = url.Trim(),
+                    Url = input,
                     SiteKey = SiteCatalog.Key,
                 },
                 token);
             CurrentManga = detail;
+
+            // 排行榜、每周必看等页面会直接把链接带到这里。此前只更新右侧选章面板，
+            // 左侧仍保留“还没有搜索结果”，所以同一漫画在点击一次搜索后界面才恢复正常。
+            // 直接跳转与手动输入 JM 编号应呈现相同的搜索结果状态。
+            SearchResults.Clear();
+            SearchResults.Add(SearchResultItemViewModel.FromResolved(detail));
+            HasSearchResults = true;
+            SearchStatusText = $"已定位漫画: {detail.Title}";
+            SelectedSearchResult = null;
+            _searchPage = 1;
+            _lastSearchPageSize = 0;
+            _searchHistoryService.Add(input, SiteCatalog.Key, SiteCatalog.DisplayName, 1);
+            LoadSearchHistory();
+            OnPropertyChanged(nameof(CanLoadMoreSearchResults));
         }
         catch (OperationCanceledException)
         {
@@ -698,6 +749,13 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CurrentMangaLatestChapter));
             OnPropertyChanged(nameof(CurrentMangaCoverUrl));
             OnPropertyChanged(nameof(CurrentMangaDetailHint));
+            OnPropertyChanged(nameof(CurrentMangaIdentityText));
+            OnPropertyChanged(nameof(CurrentMangaAuthorText));
+            OnPropertyChanged(nameof(CurrentMangaAddedAtText));
+            OnPropertyChanged(nameof(CurrentMangaTagsText));
+            OnPropertyChanged(nameof(CurrentMangaDescription));
+            OnPropertyChanged(nameof(HasMangaDetails));
+            OnPropertyChanged(nameof(CurrentMangaStatsText));
             AvailableChapters.Clear();
             if (value?.Chapters is { Count: > 0 })
             {

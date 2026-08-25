@@ -22,7 +22,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>preview</LangVersion>
-    <Version>2.4.0</Version>
+    <Version>2.5.0</Version>
     <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
 
@@ -49,6 +49,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.8" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.8" />
+    <PackageReference Include="OpenccNetLib" Version="1.6.1" />
   </ItemGroup>
 
   <ItemGroup>

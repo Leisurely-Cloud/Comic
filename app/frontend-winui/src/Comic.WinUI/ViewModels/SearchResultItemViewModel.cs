@@ -45,6 +45,7 @@ public partial class SearchResultItemViewModel : ObservableObject
             MangaUrl = detail.MangaUrl,
             CoverUrl = detail.CoverUrl,
             LatestChapter = detail.LatestChapter,
+            Author = detail.Author,
             UpdateTime = string.Empty,
         };
     }

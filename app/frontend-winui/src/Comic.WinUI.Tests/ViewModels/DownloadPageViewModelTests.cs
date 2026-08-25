@@ -1,4 +1,8 @@
 using System.Collections.Generic;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Comic.WinUI.Models;
 using Comic.WinUI.Services;
 using Comic.WinUI.Services.Native;
@@ -167,6 +171,88 @@ public sealed class DownloadPageViewModelTests
         Assert.AreEqual("第 3 / 3 页", viewModel.CommentPageSummary);
         Assert.IsTrue(viewModel.CanGoPreviousComments);
         Assert.IsFalse(viewModel.CanGoNextComments);
+    }
+
+    [TestMethod]
+    public void MangaDetails_FormatsIdentityStatisticsAndTags()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.CurrentManga = new MangaResolveResponse
+        {
+            MangaId = "1459797",
+            SiteName = "禁漫天堂",
+            Author = "测试作者",
+            AddedAt = "2026-08-25",
+            TotalViews = "123456",
+            Likes = "789",
+            CommentCount = "173",
+            Tags = ["全彩", "恋爱"],
+            Description = "漫画简介",
+            Chapters = [new MangaChapterDto { Title = "第1话" }],
+        };
+
+        Assert.AreEqual("JM 1459797 · 禁漫天堂", viewModel.CurrentMangaIdentityText);
+        Assert.AreEqual("作者：测试作者", viewModel.CurrentMangaAuthorText);
+        Assert.AreEqual("发布：2026-08-25", viewModel.CurrentMangaAddedAtText);
+        Assert.AreEqual("标签：全彩 · 恋爱", viewModel.CurrentMangaTagsText);
+        Assert.AreEqual("浏览 123,456  ·  点赞 789  ·  评论 173  ·  章节 1", viewModel.CurrentMangaStatsText);
+        Assert.AreEqual("漫画简介", viewModel.CurrentMangaDescription);
+    }
+
+    [TestMethod]
+    public async Task ResolveDirectUrl_PopulatesSearchResultAndChapterPanelsConsistently()
+    {
+        _handler.Dispose();
+        _handler = new FakeHttpMessageHandler(request =>
+        {
+            var payload = request.RequestUri?.AbsolutePath switch
+            {
+                "/album" =>
+                    """
+                    {
+                      "id": "1460139",
+                      "name": "Sage's Healing [AI Generated]",
+                      "author": [],
+                      "series": []
+                    }
+                    """,
+                "/forum" => """{ "total": "0", "list": [] }""",
+                _ => throw new AssertFailedException($"未预期的请求：{request.RequestUri}"),
+            };
+            return BuildEncryptedResponse(request, payload);
+        });
+        var viewModel = CreateViewModel();
+
+        await viewModel.ResolveDirectUrlAsync(" https://18comic.vip/album/1460139 ");
+
+        Assert.IsNotNull(viewModel.CurrentManga);
+        Assert.IsTrue(viewModel.HasSearchResults);
+        Assert.AreEqual(1, viewModel.SearchResults.Count);
+        Assert.AreEqual("Sage's Healing [AI Generated]", viewModel.SearchResults[0].Title);
+        Assert.AreEqual("已定位漫画: Sage's Healing [AI Generated]", viewModel.SearchStatusText);
+        Assert.AreEqual("https://18comic.vip/album/1460139", viewModel.SearchKeyword);
+        Assert.IsFalse(viewModel.CanLoadMoreSearchResults);
+    }
+
+    private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)
+    {
+        var tokenParam = request.Headers.GetValues("tokenparam").Single();
+        var timestamp = long.Parse(tokenParam.Split(',')[0]);
+        var keyText = Convert.ToHexString(MD5.HashData(
+            Encoding.UTF8.GetBytes(timestamp + "185Hcomic3PAPP7R"))).ToLowerInvariant();
+        using var aes = Aes.Create();
+        aes.Key = Encoding.ASCII.GetBytes(keyText);
+        aes.Mode = CipherMode.ECB;
+        aes.Padding = PaddingMode.PKCS7;
+        using var encryptor = aes.CreateEncryptor();
+        var plaintext = Encoding.UTF8.GetBytes(json);
+        var encrypted = Convert.ToBase64String(
+            encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length));
+        var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(envelope, Encoding.UTF8, "application/json"),
+        };
     }
 
     private DownloadPageViewModel CreateViewModel()

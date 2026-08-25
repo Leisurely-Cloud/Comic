@@ -68,6 +68,25 @@ public sealed class RankingPageViewModelTests
         Assert.AreEqual(20, viewModel.RankingItems.Count);
     }
 
+    [TestMethod]
+    public async Task ContentCategory_FiltersLoadedRankingAndUsesSimplifiedTitle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SelectedSection = "最多点赞";
+        await WaitUntilAsync(() => !viewModel.IsLoading && viewModel.RankingItems.Count == 20);
+
+        Assert.IsTrue(viewModel.Categories.Any(category => category.Title == "同人"));
+        Assert.IsTrue(viewModel.Categories.Any(category => category.Title == "单本"));
+        Assert.AreEqual("同人", viewModel.RankingItems[0].CategoryDisplay);
+        Assert.IsTrue(viewModel.RankingItems[0].HasCategory);
+
+        viewModel.SelectedCategory = viewModel.Categories.Single(category => category.Title == "单本");
+        await WaitUntilAsync(() => !viewModel.IsLoading && viewModel.RankingItems.Count == 12);
+
+        Assert.IsTrue(viewModel.RankingItems.All(item =>
+            int.Parse(item.Title.Split(' ')[^1]) % 2 == 0));
+    }
+
     private RankingPageViewModel CreateViewModel()
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
@@ -97,6 +116,11 @@ public sealed class RankingPageViewModelTests
                 name = $"测试作品 {index}",
                 author = new[] { "测试作者" },
                 update_at = "1700000000",
+                category = new
+                {
+                    id = index % 2 == 0 ? "2" : "1",
+                    title = index % 2 == 0 ? "單本" : "同人",
+                },
             }).ToArray()
             : [];
         var payload = JsonSerializer.SerializeToUtf8Bytes(new { content = items });

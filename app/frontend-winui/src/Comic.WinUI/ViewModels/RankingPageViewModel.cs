@@ -21,10 +21,12 @@ public partial class RankingPageViewModel : ObservableObject
     private CancellationTokenSource? _rankingCts;
     private int _loadedServerPage;
     private bool _serverHasMore;
+    private bool _suppressFilterChanges;
 
     public const int PageSize = 20;
 
     public ObservableCollection<RankingItemViewModel> RankingItems { get; } = new();
+    public ObservableCollection<ContentCategory> Categories { get; } = new();
 
     [ObservableProperty]
     public partial string SelectedSection { get; set; } = "";
@@ -34,6 +36,9 @@ public partial class RankingPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial SectionItem? SelectedSectionItem { get; set; }
+
+    [ObservableProperty]
+    public partial ContentCategory? SelectedCategory { get; set; }
 
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
@@ -53,7 +58,7 @@ public partial class RankingPageViewModel : ObservableObject
     public bool CanGoPrevious => CurrentPage > 1 && !IsLoading;
 
     public bool CanGoNext => !IsLoading &&
-        (CurrentPage * PageSize < _loadedItems.Count || _serverHasMore);
+        (CurrentPage * PageSize < FilteredItems().Count || _serverHasMore);
 
     public string PageSummary => $"第 {CurrentPage} 页 · 每页 {PageSize} 部";
 
@@ -69,12 +74,25 @@ public partial class RankingPageViewModel : ObservableObject
     {
         _client = client;
         _dispatcher = dispatcher;
+        _suppressFilterChanges = true;
+        Categories.Add(new ContentCategory { Title = "全部分类" });
+        SelectedCategory = Categories[0];
+        _suppressFilterChanges = false;
         RankingItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
     }
 
     partial void OnSelectedSectionChanged(string value)
     {
+        ResetCategoryFilter();
         _ = LoadRankingPageAsync(1, reset: true);
+    }
+
+    partial void OnSelectedCategoryChanged(ContentCategory? value)
+    {
+        if (!_suppressFilterChanges)
+        {
+            _ = LoadRankingPageAsync(1, reset: false);
+        }
     }
 
     partial void OnSelectedSectionItemChanged(SectionItem? value)
@@ -223,7 +241,7 @@ public partial class RankingPageViewModel : ObservableObject
             ErrorMessage = "";
             var token = source.Token;
             var requiredItemCount = Math.Max(targetPage, 1) * PageSize;
-            while (_loadedItems.Count < requiredItemCount && _serverHasMore)
+            while (FilteredItems().Count < requiredItemCount && _serverHasMore)
             {
                 var serverPage = _loadedServerPage + 1;
                 var result = await _client.GetRankingAsync(
@@ -241,7 +259,7 @@ public partial class RankingPageViewModel : ObservableObject
                 _loadedItems.AddRange(incoming);
             }
 
-            var pageItems = _loadedItems
+            var pageItems = FilteredItems()
                 .Skip((Math.Max(targetPage, 1) - 1) * PageSize)
                 .Take(PageSize)
                 .ToList();
@@ -258,6 +276,7 @@ public partial class RankingPageViewModel : ObservableObject
             CurrentPage = Math.Max(targetPage, 1);
             _dispatcher.TryEnqueue(() =>
             {
+                UpdateCategories();
                 RankingItems.Clear();
                 var index = (CurrentPage - 1) * PageSize;
                 foreach (var item in pageItems)
@@ -298,6 +317,56 @@ public partial class RankingPageViewModel : ObservableObject
         current.Dispose();
     }
 
+    private List<RankingItem> FilteredItems()
+    {
+        var selected = SelectedCategory;
+        return string.IsNullOrWhiteSpace(selected?.Id)
+            ? [.. _loadedItems]
+            : _loadedItems.Where(item => item.Categories.Any(category =>
+                string.Equals(category.Title, selected.Title, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    private void UpdateCategories()
+    {
+        var previousTitle = SelectedCategory?.Title;
+        _suppressFilterChanges = true;
+        try
+        {
+            Categories.Clear();
+            Categories.Add(new ContentCategory { Title = "全部分类" });
+            foreach (var title in _loadedItems
+                         .SelectMany(item => item.Categories)
+                         .Select(category => category.Title)
+                         .Where(title => !string.IsNullOrWhiteSpace(title))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(title => title, StringComparer.CurrentCulture))
+            {
+                Categories.Add(new ContentCategory { Id = title, Title = title });
+            }
+            SelectedCategory = Categories.FirstOrDefault(category =>
+                string.Equals(category.Title, previousTitle, StringComparison.OrdinalIgnoreCase)) ?? Categories[0];
+        }
+        finally
+        {
+            _suppressFilterChanges = false;
+        }
+    }
+
+    private void ResetCategoryFilter()
+    {
+        _suppressFilterChanges = true;
+        try
+        {
+            Categories.Clear();
+            Categories.Add(new ContentCategory { Title = "全部分类" });
+            SelectedCategory = Categories[0];
+        }
+        finally
+        {
+            _suppressFilterChanges = false;
+        }
+    }
+
 }
 
 public class SectionItem
@@ -320,6 +389,12 @@ public partial class RankingItemViewModel : ObservableObject
     public string Section => _item.Section ?? "";
     public string DetailHint => _item.DetailHint ?? "";
     public string DetailSectionLabel => _item.DetailSectionLabel ?? "";
+    public string CategoryDisplay => string.Join(" · ", _item.Categories
+        .Select(category => category.Title)
+        .Where(title => !string.IsNullOrWhiteSpace(title))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(2));
+    public bool HasCategory => !string.IsNullOrWhiteSpace(CategoryDisplay);
 
     public int Index { get; }
 
