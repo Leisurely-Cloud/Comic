@@ -243,13 +243,24 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
-                                HorizontalAlignment="Center" Margin="0,8,0,0">
-                        <Button Content="上一页"
+                    <Grid Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,0" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="上一页" Padding="14,6"
+                                IsEnabled="{x:Bind ViewModel.CanGoPrevious, Mode=OneWay}"
                                 Command="{x:Bind ViewModel.PreviousPageCommand, Mode=OneWay}" />
-                        <Button Content="下一页"
+                        <Border Grid.Column="1" MinWidth="250" Padding="14,7" CornerRadius="6"
+                                Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                            <TextBlock Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
+                                       HorizontalAlignment="Center" FontSize="12" />
+                        </Border>
+                        <Button Grid.Column="2" Content="下一页" Padding="14,6"
+                                IsEnabled="{x:Bind ViewModel.CanGoNext, Mode=OneWay}"
                                 Command="{x:Bind ViewModel.NextPageCommand, Mode=OneWay}" />
-                    </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
 

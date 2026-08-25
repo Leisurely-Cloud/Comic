@@ -17,11 +17,22 @@ public sealed partial class MainWindow : Window
 {
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
+    private const uint WmXButtonDown = 0x020B;
+    private const uint WmAppCommand = 0x0319;
+    private const ushort XButton1 = 1;
+    private const ushort XButton2 = 2;
+    private const int AppCommandBrowserBackward = 1;
+    private const int AppCommandBrowserForward = 2;
+    private static readonly UIntPtr MouseNavigationSubclassId = new(0x434F4D49);
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly SubclassProc _mouseNavigationSubclassProc;
+    private IntPtr _windowHandle;
+    private bool _mouseNavigationHookInstalled;
 
     public MainWindow()
     {
         InitializeComponent();
+        _mouseNavigationSubclassProc = MouseNavigationWindowProc;
         ApplyWindowIcon();
         ApplyInitialWindowBounds();
         _applicationSettings = ((App)Application.Current).Services.GetRequiredService<ApplicationSettingsService>();
@@ -31,9 +42,61 @@ public sealed partial class MainWindow : Window
         RootGrid.Loaded += (_, _) => ApplyTitleBarTheme();
         RootGrid.ActualThemeChanged += (_, _) => ApplyTitleBarTheme();
         ApplyTitleBarTheme();
+        Activated += OnWindowActivated;
+        Closed += OnMainWindowClosed;
 
         // 延迟加载主内容
         _ = InitializeAsync();
+    }
+
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (_mouseNavigationHookInstalled) return;
+        _windowHandle = WindowNative.GetWindowHandle(this);
+        _mouseNavigationHookInstalled = SetWindowSubclass(
+            _windowHandle,
+            _mouseNavigationSubclassProc,
+            MouseNavigationSubclassId,
+            UIntPtr.Zero);
+    }
+
+    private void OnMainWindowClosed(object sender, WindowEventArgs args)
+    {
+        if (!_mouseNavigationHookInstalled || _windowHandle == IntPtr.Zero) return;
+        RemoveWindowSubclass(_windowHandle, _mouseNavigationSubclassProc, MouseNavigationSubclassId);
+        _mouseNavigationHookInstalled = false;
+    }
+
+    private IntPtr MouseNavigationWindowProc(
+        IntPtr windowHandle,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
+        UIntPtr subclassId,
+        UIntPtr referenceData)
+    {
+        if (MainFrame.Content is ShellPage shellPage)
+        {
+            var handled = message switch
+            {
+                WmXButtonDown => ((ushort)((wParam.ToUInt64() >> 16) & 0xFFFF)) switch
+                {
+                    XButton1 => shellPage.TryNavigateBack(),
+                    XButton2 => shellPage.TryNavigateForward(),
+                    _ => false,
+                },
+                WmAppCommand => ((int)((lParam.ToInt64() >> 16) & 0x0FFF)) switch
+                {
+                    AppCommandBrowserBackward => shellPage.TryNavigateBack(),
+                    AppCommandBrowserForward => shellPage.TryNavigateForward(),
+                    _ => false,
+                },
+                _ => false,
+            };
+            if (handled) return IntPtr.Zero;
+        }
+
+        return DefSubclassProc(windowHandle, message, wParam, lParam);
     }
 
     private void ApplyWindowIcon()
@@ -108,4 +171,35 @@ public sealed partial class MainWindow : Window
         int attribute,
         ref int attributeValue,
         int attributeSize);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate IntPtr SubclassProc(
+        IntPtr windowHandle,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
+        UIntPtr subclassId,
+        UIntPtr referenceData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowSubclass(
+        IntPtr windowHandle,
+        SubclassProc subclassProc,
+        UIntPtr subclassId,
+        UIntPtr referenceData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RemoveWindowSubclass(
+        IntPtr windowHandle,
+        SubclassProc subclassProc,
+        UIntPtr subclassId);
+
+    [DllImport("comctl32.dll")]
+    private static extern IntPtr DefSubclassProc(
+        IntPtr windowHandle,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam);
 }

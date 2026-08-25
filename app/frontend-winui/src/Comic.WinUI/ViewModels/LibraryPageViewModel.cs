@@ -90,7 +90,13 @@ public partial class LibraryPageViewModel : ObservableObject
 
     public bool HasItems => Items.Count > 0;
 
-    public string PageSummary => $"第 {_currentPage} 页 / 共 {_totalItems} 部";
+    public int TotalPages => Math.Max(1, (_totalItems + _pageSize - 1) / _pageSize);
+
+    public bool CanGoPrevious => _currentPage > 1;
+
+    public bool CanGoNext => _currentPage < TotalPages;
+
+    public string PageSummary => $"每页 {_pageSize} 部 · 第 {_currentPage} / {TotalPages} 页 · 共 {_totalItems} 部";
 
     public string SelectedTitle => SelectedItem?.Title ?? string.Empty;
 
@@ -205,6 +211,9 @@ public partial class LibraryPageViewModel : ObservableObject
 
             _totalItems = result.Total;
             SelectedItem = Items.FirstOrDefault();
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
             OnPropertyChanged(nameof(PageSummary));
         }
         catch (OperationCanceledException)
