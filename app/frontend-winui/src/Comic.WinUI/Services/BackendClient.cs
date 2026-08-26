@@ -111,6 +111,21 @@ public sealed class BackendClient
         CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _jmComic.SetJmFavoriteAsync(albumId, isFavorite, cancellationToken), "jm_favorite_update_failed");
 
+    public Task<JmFavoriteMutationResult> ManageJmFavoriteFolderAsync(
+        JmFavoriteFolderOperation operation,
+        string folderId = "",
+        string folderName = "",
+        string albumId = "",
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync(
+            () => _jmComic.ManageFavoriteFolderAsync(
+                operation,
+                folderId,
+                folderName,
+                albumId,
+                cancellationToken),
+            "jm_favorite_folder_update_failed");
+
     public Task<DownloadTaskDto> CreateDownloadAsync(DownloadCreateRequest request, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.CreateDownloadAsync(request, cancellationToken), "download_create_failed");
 
@@ -125,6 +140,9 @@ public sealed class BackendClient
 
     public Task<DownloadActionResponse> ResumeDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.ResumeDownloadAsync(taskId, cancellationToken), "download_resume_failed");
+
+    public Task<DownloadActionResponse> RetryDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _downloads.RetryDownloadAsync(taskId, cancellationToken), "download_retry_failed");
 
     public Task<DownloadActionResponse> StopDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.StopDownloadAsync(taskId, cancellationToken), "download_stop_failed");
@@ -233,27 +251,76 @@ public sealed class BackendClient
 
     public async Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default)
     {
-        var response = new LibraryCheckUpdatesResponse();
-        foreach (var entry in _library.EnumerateLibraryEntries().Where(entry => !string.IsNullOrWhiteSpace(entry.MangaUrl)))
+        var entries = _library.EnumerateLibraryEntries()
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.MangaUrl))
+            .ToList();
+        using var concurrencyGate = new SemaphoreSlim(3, 3);
+        var checks = entries.Select(async entry =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            await concurrencyGate.WaitAsync(cancellationToken);
             try
             {
                 var detail = await _jmComic.ResolveAsync(entry.MangaUrl, cancellationToken);
-                response.Items.Add(new LibraryUpdateItem
+                var localOrders = _library.EnumerateChapterContents(entry.RootDirectory)
+                    .Select(chapter => LibraryStorageService.ChapterOrder(chapter.Directory.Name))
+                    .Where(order => order != int.MaxValue)
+                    .ToHashSet();
+                var remoteChapters = detail.Chapters
+                    .Select((chapter, index) => new MangaChapterDto
+                    {
+                        Order = chapter.Order > 0 ? chapter.Order : index + 1,
+                        Title = chapter.Title,
+                        Url = chapter.Url,
+                    })
+                    .ToList();
+                var missingChapters = remoteChapters
+                    .Where(chapter => !localOrders.Contains(chapter.Order))
+                    .ToList();
+                return new LibraryUpdateItem
+                {
+                    Title = string.IsNullOrWhiteSpace(detail.Title) ? entry.Title : detail.Title,
+                    MangaUrl = detail.MangaUrl,
+                    CoverUrl = string.IsNullOrWhiteSpace(detail.CoverUrl) ? entry.CoverUrl : detail.CoverUrl,
+                    Author = string.IsNullOrWhiteSpace(detail.Author) ? entry.Author : detail.Author,
+                    RootDir = entry.RootDirectory,
+                    LocalChapterCount = entry.DownloadedChapterCount,
+                    RemoteChapterCount = remoteChapters.Count,
+                    MissingChapters = missingChapters,
+                    LatestChapter = detail.LatestChapter,
+                    HasUpdate = missingChapters.Count > 0,
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new LibraryUpdateItem
                 {
                     Title = entry.Title,
+                    MangaUrl = entry.MangaUrl,
+                    CoverUrl = entry.CoverUrl,
+                    Author = entry.Author,
+                    RootDir = entry.RootDirectory,
                     LocalChapterCount = entry.DownloadedChapterCount,
-                    RemoteChapterCount = detail.Chapters.Count,
-                    HasUpdate = detail.Chapters.Count > entry.DownloadedChapterCount,
-                });
+                    CheckFailed = true,
+                    ErrorMessage = ex.Message,
+                };
             }
-            catch
+            finally
             {
-                response.Items.Add(new LibraryUpdateItem { Title = entry.Title, LocalChapterCount = entry.DownloadedChapterCount });
+                concurrencyGate.Release();
             }
-        }
-        return response;
+        }).ToArray();
+
+        var results = await Task.WhenAll(checks);
+        return new LibraryCheckUpdatesResponse
+        {
+            Items = results.ToList(),
+            CheckedCount = results.Length,
+            FailedCount = results.Count(item => item.CheckFailed),
+        };
     }
 
     public Task<ExportCbzResponse> ExportCbzAsync(string rootDir, CancellationToken cancellationToken = default) =>

@@ -249,6 +249,45 @@ public sealed class DownloadSchedulerService : IDisposable
         return new DownloadActionResponse { Status = CloneTask(state).Status };
     }
 
+    public async Task<DownloadActionResponse> RetryDownloadAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var state = RequireTask(taskId);
+        Task? completedWorker;
+        lock (state.Gate)
+        {
+            if (state.Dto.Status is not ("failed" or "partial"))
+            {
+                return new DownloadActionResponse { Status = state.Dto.Status };
+            }
+            completedWorker = state.Worker;
+        }
+
+        if (completedWorker is not null)
+        {
+            await completedWorker.WaitAsync(cancellationToken);
+        }
+
+        lock (state.Gate)
+        {
+            if (state.Dto.Status is "failed" or "partial")
+            {
+                state.ReplaceStopSource();
+                state.PauseRequested = false;
+                state.HistoryRecorded = false;
+                state.Dto.Status = "running";
+                state.Dto.StatusText = "正在重试失败章节，检查本地进度";
+                state.Dto.TaskError = null;
+                ResetDownloadSpeedLocked(state);
+                RemoveHistoryRecord(state.Dto.Id);
+                AppendLog(state, "info", "手动重试失败章节");
+                state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+            }
+        }
+
+        return new DownloadActionResponse { Status = CloneTask(state).Status };
+    }
+
     public Task<DownloadActionResponse> StopDownloadAsync(string taskId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1190,6 +1229,18 @@ public sealed class DownloadSchedulerService : IDisposable
         }
 
         var metadata = _library.LoadLibraryMetadata(item.RootDir);
+        if (item.FailureDetails.Count == 0 && metadata?.LastFailedChapterRecords.Count > 0)
+        {
+            item.FailureDetails = metadata.LastFailedChapterRecords
+                .Select(failure => new DownloadFailureDetail
+                {
+                    ChapterId = failure.Slug,
+                    Title = failure.Title,
+                    Reason = failure.Reason,
+                })
+                .ToList();
+            changed = true;
+        }
         var localChapterCount = _library.EnumerateChapterDirectories(item.RootDir).Count;
         if (item.DownloadedThisRunChapterCount == 0 && item.Status == "completed" && item.TotalChapterCount > 0)
         {
@@ -1309,6 +1360,15 @@ public sealed class DownloadSchedulerService : IDisposable
                 DownloadedThisRunChapterCount = state.CompletedChapterCount,
                 RootDir = state.RootDirectory,
                 TaskError = state.Dto.TaskError is null ? null : new ApiError { Code = state.Dto.TaskError.Code, Message = state.Dto.TaskError.Message },
+                FailureDetails = state.Dto.Chapters
+                    .Where(chapter => chapter.Status == "failed")
+                    .Select(chapter => new DownloadFailureDetail
+                    {
+                        ChapterId = chapter.Id,
+                        Title = chapter.Title,
+                        Reason = chapter.Error,
+                    })
+                    .ToList(),
                 FinishedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             };
         }
@@ -1416,6 +1476,12 @@ public sealed class DownloadSchedulerService : IDisposable
         DownloadedThisRunChapterCount = item.DownloadedThisRunChapterCount,
         RootDir = item.RootDir,
         TaskError = item.TaskError is null ? null : new ApiError { Code = item.TaskError.Code, Message = item.TaskError.Message },
+        FailureDetails = item.FailureDetails.Select(detail => new DownloadFailureDetail
+        {
+            ChapterId = detail.ChapterId,
+            Title = detail.Title,
+            Reason = detail.Reason,
+        }).ToList(),
         FinishedAt = item.FinishedAt,
     };
 

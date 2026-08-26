@@ -55,6 +55,12 @@ public sealed class LibraryCheckUpdatesResponse
 {
     [JsonPropertyName("items")]
     public List<LibraryUpdateItem> Items { get; set; } = [];
+
+    [JsonPropertyName("checked_count")]
+    public int CheckedCount { get; set; }
+
+    [JsonPropertyName("failed_count")]
+    public int FailedCount { get; set; }
 }
 
 public sealed class JmLibraryImportPreview
@@ -90,6 +96,18 @@ public sealed class LibraryUpdateItem
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
+    [JsonPropertyName("manga_url")]
+    public string MangaUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("cover_url")]
+    public string CoverUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = string.Empty;
+
+    [JsonPropertyName("root_dir")]
+    public string RootDir { get; set; } = string.Empty;
+
     [JsonPropertyName("has_update")]
     public bool HasUpdate { get; set; }
 
@@ -98,6 +116,18 @@ public sealed class LibraryUpdateItem
 
     [JsonPropertyName("local_chapter_count")]
     public int LocalChapterCount { get; set; }
+
+    [JsonPropertyName("missing_chapters")]
+    public List<MangaChapterDto> MissingChapters { get; set; } = [];
+
+    [JsonPropertyName("latest_chapter")]
+    public string LatestChapter { get; set; } = string.Empty;
+
+    [JsonPropertyName("check_failed")]
+    public bool CheckFailed { get; set; }
+
+    [JsonPropertyName("error_message")]
+    public string ErrorMessage { get; set; } = string.Empty;
 }
 
 public sealed class ExportCbzResponse

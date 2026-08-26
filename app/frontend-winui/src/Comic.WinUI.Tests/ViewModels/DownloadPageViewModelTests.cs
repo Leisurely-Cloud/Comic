@@ -232,6 +232,8 @@ public sealed class DownloadPageViewModelTests
         Assert.AreEqual("已定位漫画: Sage's Healing [AI Generated]", viewModel.SearchStatusText);
         Assert.AreEqual("https://18comic.vip/album/1460139", viewModel.SearchKeyword);
         Assert.IsFalse(viewModel.CanLoadMoreSearchResults);
+        Assert.IsTrue(viewModel.IsDirectMangaSelection);
+        Assert.IsFalse(viewModel.ShowSearchResultsSection);
     }
 
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)

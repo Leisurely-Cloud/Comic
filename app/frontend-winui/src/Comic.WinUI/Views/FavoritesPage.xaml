@@ -11,16 +11,17 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource HeaderCardBorderStyle}">
-            <Grid ColumnSpacing="16">
+        <Border Style="{StaticResource HeaderCardBorderStyle}">
+            <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="4">
                     <TextBlock Text="收藏夹" Style="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock Text="查看官方账号收藏；每页 20 部，可直接进入选章或取消收藏。"
+                    <TextBlock Text="管理官方账号收藏；支持文件夹、批量移动和批量取消收藏。"
                                Style="{StaticResource PageDescriptionTextBlockStyle}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center"
@@ -43,16 +44,33 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="{x:Bind ViewModel.SelectedFolderName, Mode=OneWay}"
-                                       VerticalAlignment="Center" />
-                            <FontIcon Grid.Column="1" Glyph="&#xE70D;" FontSize="11"
-                                      VerticalAlignment="Center" Opacity="0.72" />
+                            <TextBlock Text="{x:Bind ViewModel.SelectedFolderName, Mode=OneWay}" VerticalAlignment="Center" />
+                            <FontIcon Grid.Column="1" Glyph="&#xE70D;" FontSize="11" VerticalAlignment="Center" Opacity="0.72" />
                         </Grid>
                     </Button>
                 </StackPanel>
                 <Button Grid.Column="2" Width="40" Height="40" Padding="0"
-                        VerticalAlignment="Bottom"
-                        Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}"
+                        VerticalAlignment="Bottom" ToolTipService.ToolTip="管理收藏夹">
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="新建收藏夹" Click="OnCreateFolderClick">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem Text="重命名当前收藏夹" Click="OnRenameFolderClick"
+                                            IsEnabled="{x:Bind ViewModel.CanManageSelectedFolder, Mode=OneWay}">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="删除当前收藏夹" Click="OnDeleteFolderClick"
+                                            IsEnabled="{x:Bind ViewModel.CanManageSelectedFolder, Mode=OneWay}">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                    <FontIcon Glyph="&#xE713;" />
+                </Button>
+                <Button Grid.Column="3" Width="40" Height="40" Padding="0"
+                        VerticalAlignment="Bottom" Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}"
                         ToolTipService.ToolTip="刷新收藏夹">
                     <FontIcon Glyph="&#xE72C;" />
                 </Button>
@@ -64,59 +82,90 @@
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
                             Visibility="{x:Bind ViewModel.ShowLoginPrompt, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <FontIcon Glyph="&#xE77B;" FontSize="48" Opacity="0.45" />
-                    <TextBlock Text="登录后查看收藏夹"
-                               Style="{StaticResource SubtitleTextBlockStyle}"
-                               HorizontalAlignment="Center"
-                               TextAlignment="Center" />
-                    <TextBlock Text="账号会话只在当前软件运行期间保留。"
+                    <TextBlock Text="登录后查看收藏夹" Style="{StaticResource SubtitleTextBlockStyle}"
+                               HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock Text="可在设置中登录并选择记住登录。"
                                Style="{StaticResource PageDescriptionTextBlockStyle}"
-                               HorizontalAlignment="Center"
-                               TextAlignment="Center" />
+                               HorizontalAlignment="Center" TextAlignment="Center" />
                     <Button Content="前往登录" Style="{StaticResource AccentButtonStyle}"
-                            HorizontalAlignment="Center"
-                            Command="{x:Bind ViewModel.OpenSettingsCommand, Mode=OneWay}" />
+                            HorizontalAlignment="Center" Command="{x:Bind ViewModel.OpenSettingsCommand, Mode=OneWay}" />
                 </StackPanel>
 
                 <Grid Visibility="{x:Bind ViewModel.ShowContent, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" Margin="4,0,4,10">
+                    <Grid Margin="4,0,4,10" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock Text="{x:Bind ViewModel.AccountName, Mode=OneWay}" FontWeight="SemiBold" />
-                        <TextBlock HorizontalAlignment="Right" Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
-                                   FontSize="12" Opacity="0.62" />
+                        <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.PageSummary, Mode=OneWay}"
+                                   FontSize="12" Opacity="0.62" VerticalAlignment="Center" />
+                        <ToggleButton Grid.Column="2" Content="批量管理" Padding="12,5"
+                                      IsChecked="{x:Bind ViewModel.IsBatchMode, Mode=OneWay}"
+                                      Command="{x:Bind ViewModel.ToggleBatchModeCommand, Mode=OneWay}" />
                     </Grid>
 
-                    <Grid Grid.Row="1">
+                    <Grid Grid.Row="1" Margin="4,0,4,10" ColumnSpacing="8"
+                          Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{x:Bind ViewModel.SelectionSummary, Mode=OneWay}"
+                                   VerticalAlignment="Center" FontSize="12" Opacity="0.68" />
+                        <Button Grid.Column="1" Content="全选本页" Padding="12,5"
+                                Command="{x:Bind ViewModel.SelectAllPageCommand, Mode=OneWay}" />
+                        <Button Grid.Column="2" Content="清除选择" Padding="12,5"
+                                Command="{x:Bind ViewModel.ClearSelectionCommand, Mode=OneWay}" />
+                        <Button Grid.Column="3" Content="移动到…" Padding="12,5"
+                                IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Click="OnMoveSelectedClick" />
+                        <Button Grid.Column="4" Content="取消收藏" Padding="12,5"
+                                IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Click="OnRemoveSelectedClick" />
+                    </Grid>
+
+                    <Grid Grid.Row="2">
                         <ListView ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
                                   SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnItemClick"
                                   Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="vm:FavoriteItemViewModel">
-                                    <Grid Padding="12,10" MinHeight="112" ColumnSpacing="14">
+                                    <Grid Padding="12,10" MinHeight="112" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="72" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="72" Height="96" CornerRadius="6">
+                                        <CheckBox Width="32" MinWidth="0"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                                  Visibility="{x:Bind IsBatchMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <Border Grid.Column="1" Width="72" Height="96" CornerRadius="6">
                                             <Image Source="{x:Bind CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
                                                    Stretch="UniformToFill" />
                                         </Border>
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="5">
                                             <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontSize="16" FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{x:Bind AuthorText, Mode=OneWay}" FontSize="12" Opacity="0.65"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{x:Bind UpdateTime, Mode=OneWay}" FontSize="11" Opacity="0.5" />
                                         </StackPanel>
-                                        <Button Grid.Column="2" VerticalAlignment="Center" Padding="12,6"
-                                                Command="{x:Bind RemoveCommand, Mode=OneWay}"
-                                                CommandParameter="{x:Bind}"
+                                        <Button Grid.Column="3" VerticalAlignment="Center" Padding="12,6"
+                                                Command="{x:Bind RemoveCommand, Mode=OneWay}" CommandParameter="{x:Bind}"
                                                 IsEnabled="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}"
+                                                Visibility="{x:Bind IsBatchMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}"
                                                 ToolTipService.ToolTip="从官方收藏夹移除">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <FontIcon Glyph="&#xE735;" FontSize="13" />
@@ -133,22 +182,27 @@
                             <FontIcon Glyph="&#xE734;" FontSize="44" Opacity="0.4" />
                             <TextBlock Text="这个收藏夹暂时是空的" />
                         </StackPanel>
-
                         <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                 Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                             <ProgressRing IsActive="True" Width="40" Height="40"
                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
+                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                Visibility="{x:Bind ViewModel.IsMutating, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                                <ProgressRing IsActive="True" Width="36" Height="36" />
+                                <TextBlock Text="正在更新收藏夹…" />
+                            </StackPanel>
+                        </Border>
                     </Grid>
 
-                    <Grid Grid.Row="2" Margin="0,10,0,0" HorizontalAlignment="Center" ColumnSpacing="10">
+                    <Grid Grid.Row="3" Margin="0,10,0,0" HorizontalAlignment="Center" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="上一页" Padding="14,6"
-                                IsEnabled="{x:Bind ViewModel.CanGoPrevious, Mode=OneWay}"
+                        <Button Content="上一页" Padding="14,6" IsEnabled="{x:Bind ViewModel.CanGoPrevious, Mode=OneWay}"
                                 Command="{x:Bind ViewModel.PreviousPageCommand, Mode=OneWay}" />
                         <Border Grid.Column="1" MinWidth="150" Padding="14,7" CornerRadius="6"
                                 Background="{ThemeResource ControlFillColorSecondaryBrush}">
@@ -160,9 +214,12 @@
                     </Grid>
                 </Grid>
 
-                <InfoBar IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
-                         Severity="Error" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
-                         VerticalAlignment="Top" Margin="8" />
+                <StackPanel VerticalAlignment="Top" Margin="8" Spacing="6">
+                    <InfoBar IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                             Severity="Error" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
+                    <InfoBar IsOpen="{x:Bind ViewModel.HasStatus, Mode=OneWay}"
+                             Severity="Success" Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

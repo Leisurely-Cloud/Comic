@@ -65,6 +65,9 @@ public sealed class MangaResolveResponse
 
 public sealed class MangaChapterDto
 {
+    [JsonPropertyName("order")]
+    public int Order { get; set; }
+
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 

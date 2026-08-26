@@ -41,3 +41,11 @@ public sealed class JmFavoriteMutationResult
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
 }
+
+public enum JmFavoriteFolderOperation
+{
+    Add,
+    Edit,
+    Move,
+    Delete,
+}

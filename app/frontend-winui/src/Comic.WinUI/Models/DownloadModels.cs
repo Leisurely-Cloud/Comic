@@ -115,6 +115,7 @@ public sealed class DownloadActionResponse
 public sealed class DownloadHistoryItem : ObservableObject
 {
     private bool _isSelected;
+    private bool _isRetrying;
 
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -157,6 +158,9 @@ public sealed class DownloadHistoryItem : ObservableObject
 
     [JsonPropertyName("task_error")]
     public ApiError? TaskError { get; set; }
+
+    [JsonPropertyName("failure_details")]
+    public List<DownloadFailureDetail> FailureDetails { get; set; } = [];
 
     [JsonPropertyName("finished_at")]
     public string FinishedAt { get; set; } = string.Empty;
@@ -233,11 +237,59 @@ public sealed class DownloadHistoryItem : ObservableObject
     public string ErrorText => TaskError?.Message ?? string.Empty;
 
     [JsonIgnore]
+    public bool HasFailureDetails => FailureDetails.Count > 0;
+
+    [JsonIgnore]
+    public string FailureDetailsText
+    {
+        get
+        {
+            var visible = FailureDetails.Take(3)
+                .Select(detail => $"{detail.Title}：{detail.Reason}")
+                .ToList();
+            if (FailureDetails.Count > visible.Count)
+            {
+                visible.Add($"另有 {FailureDetails.Count - visible.Count} 章失败");
+            }
+            return string.Join("；", visible);
+        }
+    }
+
+    [JsonIgnore]
+    public bool IsRetryable => Status is "failed" or "partial";
+
+    [JsonIgnore]
+    public bool CanRetry => !_isRetrying && IsRetryable && !string.IsNullOrWhiteSpace(Url);
+
+    [JsonIgnore]
+    public bool IsRetrying
+    {
+        get => _isRetrying;
+        set
+        {
+            if (!SetProperty(ref _isRetrying, value)) return;
+            OnPropertyChanged(nameof(CanRetry));
+        }
+    }
+
+    [JsonIgnore]
     public bool IsSelected
     {
         get => _isSelected;
         set => SetProperty(ref _isSelected, value);
     }
+}
+
+public sealed class DownloadFailureDetail
+{
+    [JsonPropertyName("chapter_id")]
+    public string ChapterId { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public sealed class DownloadHistoryResponse

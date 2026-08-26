@@ -111,6 +111,40 @@ public sealed partial class MangaSelectionPanel : UserControl
         }
     }
 
+    private async void OnFavoriteClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.CurrentManga is null) return;
+        if (ViewModel.CurrentManga.IsFavorite)
+        {
+            await ViewModel.ToggleJmFavoriteCommand.ExecuteAsync(null);
+            return;
+        }
+
+        var folders = await ViewModel.GetJmFavoriteFolderTargetsAsync();
+        if (folders.Count == 0) return;
+        var picker = new ComboBox
+        {
+            ItemsSource = folders,
+            DisplayMemberPath = "DisplayName",
+            SelectedIndex = 0,
+            MinWidth = 300,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "收藏到",
+            Content = picker,
+            PrimaryButtonText = "收藏",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary &&
+            picker.SelectedItem is Comic.WinUI.Models.JmFavoriteFolder folder)
+        {
+            await ViewModel.AddCurrentMangaToFavoriteAsync(folder);
+        }
+    }
+
     private async void OnCoverClick(object sender, RoutedEventArgs e)
     {
         var coverUrl = ViewModel?.CurrentMangaCoverUrl;

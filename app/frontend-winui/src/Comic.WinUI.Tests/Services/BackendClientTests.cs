@@ -108,6 +108,66 @@ public sealed class BackendClientTests
         Assert.IsFalse(credentials.HasCredential);
     }
 
+    [TestMethod]
+    public async Task LibraryUpdates_DetectsMissingChapterByOrderInsteadOfOnlyComparingCounts()
+    {
+        var mangaRoot = Path.Combine(_storageRoot, "1001");
+        Directory.CreateDirectory(mangaRoot);
+        foreach (var order in new[] { 1, 3, 4 })
+        {
+            var chapterRoot = Path.Combine(mangaRoot, order.ToString("000"));
+            Directory.CreateDirectory(chapterRoot);
+            await File.WriteAllBytesAsync(Path.Combine(chapterRoot, "001.jpg"), [1, 2, 3]);
+        }
+        await File.WriteAllTextAsync(Path.Combine(mangaRoot, "元数据.json"),
+            """
+            {
+              "schema_version": 1,
+              "site_key": "jmcomic",
+              "site_name": "禁漫天堂",
+              "manga_title": "追更测试",
+              "manga_url": "https://18comic.vip/album/1001"
+            }
+            """);
+
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/album", request.RequestUri?.AbsolutePath);
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "id": "1001",
+                  "name": "追更测试",
+                  "author": ["作者"],
+                  "series": [
+                    { "id": "2001", "name": "第1话" },
+                    { "id": "2002", "name": "第2话" },
+                    { "id": "2003", "name": "第3话" }
+                  ]
+                }
+                """);
+        });
+        using var jmComic = new JmComicService(new HttpClient(handler));
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jmComic, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var reader = TestServiceFactory.CreateReader(library);
+        var client = TestServiceFactory.CreateClient(jmComic, scheduler, library, exporter, reader, settings);
+
+        var response = await client.CheckLibraryUpdatesAsync();
+
+        Assert.AreEqual(1, response.CheckedCount);
+        Assert.AreEqual(0, response.FailedCount);
+        Assert.AreEqual(1, response.Items.Count);
+        Assert.IsTrue(response.Items[0].HasUpdate);
+        Assert.AreEqual(3, response.Items[0].LocalChapterCount);
+        Assert.AreEqual(3, response.Items[0].RemoteChapterCount);
+        Assert.AreEqual(1, response.Items[0].MissingChapters.Count);
+        Assert.AreEqual(2, response.Items[0].MissingChapters[0].Order);
+        StringAssert.EndsWith(response.Items[0].MissingChapters[0].Url, "/photo/2002");
+    }
+
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)
     {
         var timestamp = long.Parse(request.Headers.GetValues("tokenparam").Single().Split(',')[0]);

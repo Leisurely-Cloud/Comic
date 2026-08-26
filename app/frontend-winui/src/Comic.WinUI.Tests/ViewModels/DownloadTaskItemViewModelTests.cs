@@ -59,6 +59,26 @@ public sealed class DownloadTaskItemViewModelTests
     }
 
     [TestMethod]
+    public void FailedTask_ExposesRetryAndExactChapterReason()
+    {
+        var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto
+        {
+            Id = "task-failed",
+            Status = "partial",
+            TaskError = new ApiError { Code = "download_failed", Message = "完成 1/2 章，失败章节 1 个" },
+            Chapters =
+            [
+                new DownloadChapterProgressDto { Id = "65", Title = "第65话", Status = "failed", Error = "没有可下载图片" },
+                new DownloadChapterProgressDto { Id = "66", Title = "第66话", Status = "completed" },
+            ],
+        });
+
+        Assert.IsTrue(viewModel.CanRetryFailures);
+        Assert.IsTrue(viewModel.HasFailureReasonSummary);
+        Assert.AreEqual("第65话：没有可下载图片", viewModel.FailureReasonSummary);
+    }
+
+    [TestMethod]
     public void UpdateFrom_PreservesLiveChapterItemAndRemovesStaleItems()
     {
         var viewModel = DownloadTaskItemViewModel.FromDto(new DownloadTaskDto

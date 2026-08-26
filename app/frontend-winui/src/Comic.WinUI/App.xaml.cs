@@ -70,6 +70,7 @@ public sealed partial class App : Application
         services.AddTransient<LibraryPageViewModel>();
         services.AddTransient<SettingsPageViewModel>();
         services.AddSingleton<FavoritesPageViewModel>();
+        services.AddSingleton<UpdateCenterPageViewModel>();
         services.AddTransient<ReaderPageViewModel>();
         services.AddSingleton<RankingPageViewModel>();
         services.AddSingleton<WeeklyPicksPageViewModel>();

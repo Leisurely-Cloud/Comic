@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Comic.WinUI.Models;
 using Comic.WinUI.Services.Native;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -320,6 +321,7 @@ public class JmComicServiceTests
         Assert.AreEqual("173", result.CommentCount);
         Assert.IsTrue(result.IsFavorite);
         Assert.AreEqual(1, result.Chapters.Count);
+        Assert.AreEqual(1, result.Chapters[0].Order);
     }
 
     [TestMethod]
@@ -555,6 +557,76 @@ public class JmComicServiceTests
             () => service.SetJmFavoriteAsync("1001", false));
 
         StringAssert.Contains(error.Message, "尚未收藏");
+    }
+
+    [TestMethod]
+    public async Task ManageFavoriteFolderAsync_AddsFolderWithOfficialFields()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+                return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+
+            Assert.AreEqual("/favorite_folder", request.RequestUri?.AbsolutePath);
+            Assert.AreEqual(HttpMethod.Post, request.Method);
+            var form = await request.Content!.ReadAsStringAsync();
+            StringAssert.Contains(form, "type=add");
+            StringAssert.Contains(form, "folder_id=0");
+            StringAssert.Contains(form, "folder_name=%E8%BF%BD%E6%9B%B4");
+            return BuildEncryptedResponse(request, """{"status":"ok","msg":"新增成功"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var result = await service.ManageFavoriteFolderAsync(
+            JmFavoriteFolderOperation.Add,
+            folderName: "追更");
+
+        Assert.IsTrue(result.Success);
+    }
+
+    [TestMethod]
+    public async Task ManageFavoriteFolderAsync_MovesAlbumWithOfficialFields()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/login")
+                return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+
+            Assert.AreEqual("/favorite_folder", request.RequestUri?.AbsolutePath);
+            var form = await request.Content!.ReadAsStringAsync();
+            StringAssert.Contains(form, "type=move");
+            StringAssert.Contains(form, "folder_id=7");
+            StringAssert.Contains(form, "aid=1001");
+            return BuildEncryptedResponse(request, """{"status":"ok","msg":"移动成功"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        var result = await service.ManageFavoriteFolderAsync(
+            JmFavoriteFolderOperation.Move,
+            folderId: "7",
+            albumId: "1001");
+
+        Assert.IsTrue(result.Success);
+    }
+
+    [TestMethod]
+    public async Task ManageFavoriteFolderAsync_RejectsDefaultFolderDeletionBeforeRequest()
+    {
+        var requestCount = 0;
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            requestCount++;
+            return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+        await service.LoginAsync("tester", "secret");
+
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() =>
+            service.ManageFavoriteFolderAsync(JmFavoriteFolderOperation.Delete, folderId: "0"));
+
+        Assert.AreEqual(1, requestCount);
     }
 
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)

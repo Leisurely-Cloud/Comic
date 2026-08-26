@@ -36,7 +36,7 @@ public sealed class DownloadSchedulerServiceTests
     {
         File.WriteAllText(
             Path.Combine(_mangaRoot, "元数据.json"),
-            """{"manga_title":"测试漫画","site_name":"禁漫天堂","authors":["作者甲","作者乙"],"manga_url":"https://18comic.vip/album/123","cover_url":"https://example.test/history-cover.jpg"}""");
+            """{"manga_title":"测试漫画","site_name":"禁漫天堂","authors":["作者甲","作者乙"],"manga_url":"https://18comic.vip/album/123","cover_url":"https://example.test/history-cover.jpg","last_failed_chapter_records":[{"order":65,"slug":"650","title":"第65话","reason":"没有可下载图片"}]}""");
         var stateDirectory = Path.Combine(_storageRoot, ".comic_state");
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(
@@ -67,6 +67,9 @@ public sealed class DownloadSchedulerServiceTests
         Assert.AreEqual("禁漫天堂", item.SiteName);
         Assert.AreEqual("https://example.test/history-cover.jpg", item.CoverUrl);
         Assert.AreEqual("https://18comic.vip/album/123", item.Url);
+        Assert.AreEqual(1, item.FailureDetails.Count);
+        Assert.AreEqual("650", item.FailureDetails[0].ChapterId);
+        Assert.AreEqual("没有可下载图片", item.FailureDetails[0].Reason);
     }
 
     [TestMethod]
@@ -560,6 +563,37 @@ public sealed class DownloadSchedulerServiceTests
             Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(5), "正在停止时点击继续后没有重新发起请求。");
             await Task.Delay(10);
         }
+    }
+
+    [TestMethod]
+    public async Task RetryDownload_RestartsAFailedTask()
+    {
+        var requestCount = 0;
+        using var handler = new FakeHttpMessageHandler((_, _) =>
+        {
+            Interlocked.Increment(ref requestCount);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        });
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/5",
+        });
+        var failed = await WaitUntilTerminalAsync(service, task.Id);
+        var requestsBeforeRetry = Volatile.Read(ref requestCount);
+
+        await service.RetryDownloadAsync(task.Id);
+
+        var timeout = Stopwatch.StartNew();
+        while (Volatile.Read(ref requestCount) <= requestsBeforeRetry)
+        {
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(5), "重试后没有重新发起下载请求。");
+            await Task.Delay(10);
+        }
+        Assert.AreEqual("failed", failed.Status);
     }
 
     private static async Task<DownloadTaskDto> WaitUntilTerminalAsync(

@@ -32,6 +32,11 @@
                     <FontIcon Glyph="&#xE721;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="下载任务" Tag="tasks">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE896;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="排行榜" Tag="ranking">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE8A3;" />
@@ -40,6 +45,11 @@
             <NavigationViewItem Content="收藏夹" Tag="favorites">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE734;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="追更中心" Tag="updates">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE895;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="每周必看" Tag="weekly">

@@ -225,6 +225,60 @@ public sealed class JmComicService : IDisposable
         };
     }
 
+    public async Task<JmFavoriteMutationResult> ManageFavoriteFolderAsync(
+        JmFavoriteFolderOperation operation,
+        string folderId = "",
+        string folderName = "",
+        string albumId = "",
+        CancellationToken cancellationToken = default)
+    {
+        EnsureLoggedIn();
+        folderId = (folderId ?? string.Empty).Trim();
+        folderName = (folderName ?? string.Empty).Trim();
+        albumId = (albumId ?? string.Empty).Trim();
+        if (operation == JmFavoriteFolderOperation.Add && string.IsNullOrWhiteSpace(folderId)) folderId = "0";
+
+        var type = operation switch
+        {
+            JmFavoriteFolderOperation.Add => "add",
+            JmFavoriteFolderOperation.Edit => "edit",
+            JmFavoriteFolderOperation.Move => "move",
+            JmFavoriteFolderOperation.Delete => "del",
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
+        if (operation == JmFavoriteFolderOperation.Add && string.IsNullOrWhiteSpace(folderName))
+            throw new ArgumentException("收藏夹名称不能为空", nameof(folderName));
+        if (operation is JmFavoriteFolderOperation.Edit or JmFavoriteFolderOperation.Delete &&
+            (string.IsNullOrWhiteSpace(folderId) || folderId == "0"))
+            throw new ArgumentException("不能修改或删除默认收藏夹", nameof(folderId));
+        if (operation == JmFavoriteFolderOperation.Edit && string.IsNullOrWhiteSpace(folderName))
+            throw new ArgumentException("收藏夹名称不能为空", nameof(folderName));
+        if (operation == JmFavoriteFolderOperation.Move && string.IsNullOrWhiteSpace(albumId))
+            throw new ArgumentException("漫画编号不能为空", nameof(albumId));
+
+        var form = new Dictionary<string, string> { ["type"] = type };
+        if (!string.IsNullOrWhiteSpace(folderId)) form["folder_id"] = folderId;
+        if (!string.IsNullOrWhiteSpace(folderName)) form["folder_name"] = folderName;
+        if (!string.IsNullOrWhiteSpace(albumId)) form["aid"] = albumId;
+        var payload = await RequestApiAsync(
+            "/favorite_folder",
+            new Dictionary<string, string>(),
+            cancellationToken,
+            HttpMethod.Post,
+            form);
+
+        var status = GetString(payload, "status");
+        var message = ChineseTextConverter.ToSimplified(GetString(payload, "msg"));
+        if (!string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(string.IsNullOrWhiteSpace(message) ? "JM 收藏夹操作未成功" : message);
+
+        if (!string.IsNullOrWhiteSpace(albumId))
+        {
+            lock (_stateLock) _albumCache.Remove(albumId);
+        }
+        return new JmFavoriteMutationResult { Success = true, Message = message };
+    }
+
     public void Dispose() => _httpClient.Dispose();
 
     public async Task<SearchResponse> SearchAsync(
@@ -494,6 +548,7 @@ public sealed class JmComicService : IDisposable
             IsFavorite = info.IsFavorite,
             Chapters = info.Chapters.Select(chapter => new MangaChapterDto
             {
+                Order = chapter.Order,
                 Title = chapter.Title,
                 Url = $"https://{_options.PublicSiteDomain}/photo/{chapter.Id}",
             }).ToList(),

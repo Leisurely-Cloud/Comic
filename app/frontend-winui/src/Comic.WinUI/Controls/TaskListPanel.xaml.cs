@@ -223,6 +223,15 @@ public sealed partial class TaskListPanel : UserControl
         }
     }
 
+    private async void OnRetryHistoryItemClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || sender is not Button { Tag: string historyId }) return;
+        if (await ViewModel.RetryHistoryItemAsync(historyId))
+        {
+            SetHistoryView(false);
+        }
+    }
+
     private void OnHistoryOpenSourceClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string url } ||

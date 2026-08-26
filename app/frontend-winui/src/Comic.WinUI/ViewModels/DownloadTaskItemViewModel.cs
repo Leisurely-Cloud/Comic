@@ -65,6 +65,23 @@ public partial class DownloadTaskItemViewModel : ObservableObject
 
     public string ErrorSummary => TaskError?.Message ?? string.Empty;
 
+    public bool CanRetryFailures => Status is "failed" or "partial" &&
+                                    (HasTaskError || Chapters.Any(chapter => chapter.Status == "failed"));
+
+    public string FailureReasonSummary
+    {
+        get
+        {
+            var chapterReasons = string.Join("；", Chapters
+                .Where(chapter => chapter.Status == "failed" && chapter.HasError)
+                .Take(3)
+                .Select(chapter => $"{chapter.Title}：{chapter.Error}"));
+            return string.IsNullOrWhiteSpace(chapterReasons) ? ErrorSummary : chapterReasons;
+        }
+    }
+
+    public bool HasFailureReasonSummary => !string.IsNullOrWhiteSpace(FailureReasonSummary);
+
     public string SiteLabel => string.IsNullOrWhiteSpace(SiteKey) ? "-" : SiteCatalog.GetDisplayName(SiteKey);
 
     public string LatestLogMessage => Logs.LastOrDefault()?.Message ?? "暂无日志";
@@ -149,6 +166,9 @@ public partial class DownloadTaskItemViewModel : ObservableObject
         OnPropertyChanged(nameof(StatusLabel));
         OnPropertyChanged(nameof(HasTaskError));
         OnPropertyChanged(nameof(ErrorSummary));
+        OnPropertyChanged(nameof(CanRetryFailures));
+        OnPropertyChanged(nameof(FailureReasonSummary));
+        OnPropertyChanged(nameof(HasFailureReasonSummary));
         OnPropertyChanged(nameof(SiteLabel));
         OnPropertyChanged(nameof(LatestLogMessage));
         OnPropertyChanged(nameof(HasChapters));

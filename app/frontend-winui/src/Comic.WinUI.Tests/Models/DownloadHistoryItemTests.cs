@@ -56,4 +56,28 @@ public sealed class DownloadHistoryItemTests
         Assert.IsTrue(item.IsSelected);
         Assert.AreEqual(nameof(DownloadHistoryItem.IsSelected), changedProperty);
     }
+
+    [TestMethod]
+    public void FailureDetails_ShowChapterReasonsAndEnableRetry()
+    {
+        var item = new DownloadHistoryItem
+        {
+            Url = "https://18comic.vip/album/123",
+            Status = "partial",
+            FailureDetails =
+            [
+                new DownloadFailureDetail { ChapterId = "65", Title = "第65话", Reason = "没有可下载图片" },
+                new DownloadFailureDetail { ChapterId = "69", Title = "第69话", Reason = "请求超时" },
+            ],
+        };
+
+        Assert.IsTrue(item.HasFailureDetails);
+        Assert.IsTrue(item.IsRetryable);
+        Assert.IsTrue(item.CanRetry);
+        Assert.AreEqual("第65话：没有可下载图片；第69话：请求超时", item.FailureDetailsText);
+
+        item.IsRetrying = true;
+
+        Assert.IsFalse(item.CanRetry);
+    }
 }

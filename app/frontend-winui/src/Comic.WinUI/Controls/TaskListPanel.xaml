@@ -144,12 +144,21 @@
                             <TextBlock Text="{x:Bind ViewModel.CurrentTask.StatusText, Mode=OneWay}"
                                        FontSize="12" Opacity="0.68"
                                        TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind ViewModel.CurrentTask.FailureReasonSummary, Mode=OneWay}"
+                                       FontSize="11"
+                                       Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                       TextWrapping="Wrap"
+                                       MaxLines="2"
+                                       Visibility="{x:Bind ViewModel.CurrentTask.HasFailureReasonSummary, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                             <Button Content="暂停" Padding="10,4"
                                     Command="{x:Bind ViewModel.PauseCommand, Mode=OneWay}" />
                             <Button Content="继续" Padding="10,4"
                                     Command="{x:Bind ViewModel.ResumeCommand, Mode=OneWay}" />
+                            <Button Content="重试失败章节" Padding="10,4"
+                                    Command="{x:Bind ViewModel.RetryCurrentTaskCommand, Mode=OneWay}"
+                                    Visibility="{x:Bind ViewModel.CurrentTask.CanRetryFailures, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Content="停止" Padding="10,4"
                                     Command="{x:Bind ViewModel.StopCommand, Mode=OneWay}" />
                         </StackPanel>
@@ -349,7 +358,7 @@
                                         <ColumnDefinition Width="28" />
                                         <ColumnDefinition Width="72" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="210" />
+                                        <ColumnDefinition Width="270" />
                                     </Grid.ColumnDefinitions>
 
                                     <CheckBox Grid.Column="0"
@@ -386,8 +395,15 @@
                                         <TextBlock Text="{x:Bind ErrorText, Mode=OneWay}"
                                                    FontSize="11"
                                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="Wrap"
+                                                   MaxLines="2"
                                                    Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <TextBlock Text="{x:Bind FailureDetailsText, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   TextWrapping="Wrap"
+                                                   MaxLines="3"
+                                                   Visibility="{x:Bind HasFailureDetails, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                                         <TextBlock Text="{x:Bind Url, Mode=OneWay}"
                                                    FontSize="11" Opacity="0.55"
                                                    TextTrimming="CharacterEllipsis" />
@@ -424,6 +440,16 @@
                                                    FontSize="11" Opacity="0.58"
                                                    TextAlignment="Right" />
                                         <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                            <Button Padding="9,4"
+                                                    Tag="{x:Bind Id, Mode=OneWay}"
+                                                    Click="OnRetryHistoryItemClick"
+                                                    IsEnabled="{x:Bind CanRetry, Mode=OneWay}"
+                                                    Visibility="{x:Bind IsRetryable, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <FontIcon Glyph="&#xE72C;" FontSize="12" />
+                                                    <TextBlock Text="重试" FontSize="12" />
+                                                </StackPanel>
+                                            </Button>
                                             <Button Padding="9,4"
                                                     Tag="{x:Bind RootDir, Mode=OneWay}"
                                                     Click="OnHistoryOpenDirectoryClick"

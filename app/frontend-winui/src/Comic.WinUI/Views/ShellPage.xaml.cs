@@ -54,8 +54,10 @@ public sealed partial class ShellPage : Page
         var pageType = tag switch
         {
             "download" => typeof(DownloadPage),
+            "tasks" => typeof(DownloadPage),
             "ranking" => typeof(RankingPage),
             "weekly" => typeof(WeeklyPicksPage),
+            "updates" => typeof(UpdateCenterPage),
             "library" => typeof(LibraryPage),
             "favorites" => typeof(FavoritesPage),
             "settings" => typeof(SettingsPage),
@@ -66,7 +68,8 @@ public sealed partial class ShellPage : Page
         {
             Effect = Microsoft.UI.Xaml.Media.Animation.SlideNavigationTransitionEffect.FromRight
         };
-        ContentFrame.Navigate(pageType, null, transition);
+        object? parameter = tag == "tasks" ? DownloadPageNavigationTarget.Tasks : null;
+        ContentFrame.Navigate(pageType, parameter, transition);
     }
 
     public void NavigateToPageWithUrl(string tag, string url)
@@ -74,8 +77,10 @@ public sealed partial class ShellPage : Page
         var pageType = tag switch
         {
             "download" => typeof(DownloadPage),
+            "tasks" => typeof(DownloadPage),
             "ranking" => typeof(RankingPage),
             "weekly" => typeof(WeeklyPicksPage),
+            "updates" => typeof(UpdateCenterPage),
             "library" => typeof(LibraryPage),
             "favorites" => typeof(FavoritesPage),
             "settings" => typeof(SettingsPage),
@@ -99,12 +104,16 @@ public sealed partial class ShellPage : Page
         }
     }
 
+    public void NavigateToDownloadTasks() => NavigateToPage("tasks");
+
     private void OnContentFrameNavigated(object sender, NavigationEventArgs e)
     {
         AppNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        var tag = e.SourcePageType == typeof(DownloadPage) ? "download"
+        var tag = e.SourcePageType == typeof(DownloadPage) && e.Parameter is DownloadPageNavigationTarget.Tasks ? "tasks"
+            : e.SourcePageType == typeof(DownloadPage) ? "download"
             : e.SourcePageType == typeof(RankingPage) ? "ranking"
             : e.SourcePageType == typeof(WeeklyPicksPage) ? "weekly"
+            : e.SourcePageType == typeof(UpdateCenterPage) ? "updates"
             : e.SourcePageType == typeof(LibraryPage) ? "library"
             : e.SourcePageType == typeof(FavoritesPage) ? "favorites"
             : e.SourcePageType == typeof(SettingsPage) ? "settings"
@@ -138,7 +147,7 @@ public sealed partial class ShellPage : Page
         if (handled) e.Handled = true;
     }
 
-    private void SelectNavigationItem(string tag)
+    public void SelectNavigationItem(string tag)
     {
         foreach (var item in AppNavigationView.MenuItems)
         {

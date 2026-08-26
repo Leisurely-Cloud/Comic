@@ -187,6 +187,12 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public partial bool HasSearchResults { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSearchResultsSection))]
+    public partial bool IsDirectMangaSelection { get; set; }
+
+    public bool ShowSearchResultsSection => !IsDirectMangaSelection;
+
+    [ObservableProperty]
     public partial bool IsLoadingMore { get; set; }
 
     [ObservableProperty]
@@ -258,6 +264,66 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public string JmFavoriteButtonText => CurrentManga?.IsFavorite == true ? "取消收藏" : "收藏";
     public string JmFavoriteButtonGlyph => CurrentManga?.IsFavorite == true ? "\uE735" : "\uE734";
     public bool CanToggleJmFavorite => HasManga && !IsUpdatingJmFavorite;
+
+    public async Task<IReadOnlyList<JmFavoriteFolder>> GetJmFavoriteFolderTargetsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!await EnsureJmLoginAsync(cancellationToken)) return [];
+        try
+        {
+            var response = await _backendClient.GetJmFavoritesAsync(1, cancellationToken: cancellationToken);
+            return [new JmFavoriteFolder { Id = "0", Name = "默认收藏夹" },
+                    .. response.Folders.Where(folder => folder.Id != "0")];
+        }
+        catch (Exception ex)
+        {
+            PageError = $"获取收藏夹失败: {ex.Message}";
+            return [];
+        }
+    }
+
+    public async Task AddCurrentMangaToFavoriteAsync(
+        JmFavoriteFolder targetFolder,
+        CancellationToken cancellationToken = default)
+    {
+        var manga = CurrentManga;
+        if (manga is null || manga.IsFavorite || !await EnsureJmLoginAsync(cancellationToken)) return;
+        IsUpdatingJmFavorite = true;
+        OnPropertyChanged(nameof(CanToggleJmFavorite));
+        PageError = string.Empty;
+        DownloadNotice = string.Empty;
+        var added = false;
+        try
+        {
+            await _backendClient.SetJmFavoriteAsync(manga.MangaId, true, cancellationToken);
+            added = true;
+            manga.IsFavorite = true;
+            NotifyJmFavoriteStateChanged();
+            if (!string.IsNullOrWhiteSpace(targetFolder.Id) && targetFolder.Id != "0")
+            {
+                await _backendClient.ManageJmFavoriteFolderAsync(
+                    JmFavoriteFolderOperation.Move,
+                    folderId: targetFolder.Id,
+                    albumId: manga.MangaId,
+                    cancellationToken: cancellationToken);
+            }
+            DownloadNotice = $"已收藏到“{targetFolder.DisplayName}”";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            PageError = added
+                ? $"已收藏到默认收藏夹，但移动到“{targetFolder.DisplayName}”失败: {ex.Message}"
+                : $"更新收藏失败: {ex.Message}";
+        }
+        finally
+        {
+            IsUpdatingJmFavorite = false;
+            OnPropertyChanged(nameof(CanToggleJmFavorite));
+        }
+    }
     public bool HasMangaDetails => !string.IsNullOrWhiteSpace(CurrentMangaTagsText)
         || !string.IsNullOrWhiteSpace(CurrentMangaDescription);
     public string CurrentMangaStatsText
@@ -375,6 +441,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         var token = _searchCts.Token;
 
         IsSearching = true;
+        IsDirectMangaSelection = false;
         PageError = string.Empty;
         SearchResults.Clear();
         HasSearchResults = false;
@@ -438,6 +505,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         var token = _searchCts.Token;
 
         IsSearching = true;
+        IsDirectMangaSelection = false;
         PageError = string.Empty;
         SearchResults.Clear();
         HasSearchResults = false;
@@ -458,6 +526,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             CurrentManga = detail;
             SearchResults.Add(SearchResultItemViewModel.FromResolved(detail));
             HasSearchResults = true;
+            IsDirectMangaSelection = true;
             SearchStatusText = $"已定位漫画: {detail.Title}";
             _searchHistoryService.Add(input, SiteCatalog.Key, SiteCatalog.DisplayName, 1);
             LoadSearchHistory();
@@ -587,6 +656,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         var token = _resolveCts.Token;
 
         IsResolving = true;
+        IsDirectMangaSelection = false;
         PageError = string.Empty;
 
         try
@@ -606,6 +676,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             SearchResults.Clear();
             SearchResults.Add(SearchResultItemViewModel.FromResolved(detail));
             HasSearchResults = true;
+            IsDirectMangaSelection = true;
             SearchStatusText = $"已定位漫画: {detail.Title}";
             SelectedSearchResult = null;
             _searchPage = 1;
@@ -815,17 +886,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     {
         var manga = CurrentManga;
         if (manga is null) return;
-        var accountState = _backendClient.GetJmAccountState();
-        if (!accountState.IsLoggedIn && _backendClient.HasSavedJmLogin)
-        {
-            try { accountState = await _backendClient.RestoreJmLoginAsync(cancellationToken); }
-            catch { }
-        }
-        if (!accountState.IsLoggedIn)
-        {
-            PageError = "请先在设置中登录 JM 账号，再使用官方收藏夹。";
-            return;
-        }
+        if (!await EnsureJmLoginAsync(cancellationToken)) return;
 
         IsUpdatingJmFavorite = true;
         OnPropertyChanged(nameof(CanToggleJmFavorite));
@@ -835,8 +896,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             var targetState = !manga.IsFavorite;
             await _backendClient.SetJmFavoriteAsync(manga.MangaId, targetState, cancellationToken);
             manga.IsFavorite = targetState;
-            OnPropertyChanged(nameof(JmFavoriteButtonText));
-            OnPropertyChanged(nameof(JmFavoriteButtonGlyph));
+            NotifyJmFavoriteStateChanged();
+            DownloadNotice = targetState ? "已收藏到默认收藏夹" : "已取消收藏";
         }
         catch (OperationCanceledException)
         {
@@ -850,6 +911,25 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             IsUpdatingJmFavorite = false;
             OnPropertyChanged(nameof(CanToggleJmFavorite));
         }
+    }
+
+    private async Task<bool> EnsureJmLoginAsync(CancellationToken cancellationToken)
+    {
+        var accountState = _backendClient.GetJmAccountState();
+        if (!accountState.IsLoggedIn && _backendClient.HasSavedJmLogin)
+        {
+            try { accountState = await _backendClient.RestoreJmLoginAsync(cancellationToken); }
+            catch { }
+        }
+        if (accountState.IsLoggedIn) return true;
+        PageError = "请先在设置中登录 JM 账号，再使用官方收藏夹。";
+        return false;
+    }
+
+    private void NotifyJmFavoriteStateChanged()
+    {
+        OnPropertyChanged(nameof(JmFavoriteButtonText));
+        OnPropertyChanged(nameof(JmFavoriteButtonGlyph));
     }
 
     [RelayCommand]
@@ -976,9 +1056,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
             _lastEventId = 0;
             OnPropertyChanged(nameof(TaskCountSummary));
 
-            _subscriptionCts?.Cancel();
-            _subscriptionCts = new CancellationTokenSource();
-            _ = SubscribeToTaskAsync(CurrentTaskId, _subscriptionCts.Token);
+            StartTaskSubscription(CurrentTaskId);
         }
         catch (OperationCanceledException)
         {
@@ -1400,6 +1478,86 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     public Task ResumeAsync(CancellationToken cancellationToken = default)
         => ExecuteTaskMutationAsync(() => _backendClient.ResumeDownloadAsync(CurrentTaskId, cancellationToken));
 
+    [RelayCommand(CanExecute = nameof(CanRetryCurrentTask))]
+    public async Task RetryCurrentTaskAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(CurrentTaskId)) return;
+        PageError = string.Empty;
+        try
+        {
+            await _backendClient.RetryDownloadAsync(CurrentTaskId, cancellationToken);
+            var refreshed = await _backendClient.GetDownloadAsync(CurrentTaskId, cancellationToken);
+            UpsertTask(refreshed);
+            CurrentTask = Tasks.FirstOrDefault(item => item.Id == refreshed.Id) ?? SelectPreferredTask();
+            StartTaskSubscription(CurrentTaskId);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = $"重试失败：{ex.Error.Message}";
+        }
+        catch (Exception ex)
+        {
+            PageError = $"重试失败：{ex.Message}";
+        }
+    }
+
+    public async Task<bool> RetryHistoryItemAsync(string historyId, CancellationToken cancellationToken = default)
+    {
+        var history = HistoryItems.FirstOrDefault(item => item.Id == historyId);
+        if (history?.CanRetry != true) return false;
+
+        history.IsRetrying = true;
+        PageError = string.Empty;
+        try
+        {
+            var failedChapters = history.FailureDetails
+                .Select(detail => string.IsNullOrWhiteSpace(detail.ChapterId) ? detail.Title : detail.ChapterId)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var task = await _backendClient.CreateDownloadAsync(
+                new DownloadCreateRequest
+                {
+                    Url = history.Url,
+                    SiteKey = string.IsNullOrWhiteSpace(history.SiteKey) ? SiteCatalog.Key : history.SiteKey,
+                    Source = "history-retry",
+                    Chapters = failedChapters.Count > 0 ? failedChapters : null,
+                },
+                cancellationToken);
+
+            UpsertTask(task);
+            CurrentTask = Tasks.FirstOrDefault(item => item.Id == task.Id) ?? SelectPreferredTask();
+            CurrentTaskId = task.Id;
+            OnPropertyChanged(nameof(TaskCountSummary));
+            DownloadNotice = failedChapters.Count > 0
+                ? $"正在重试《{history.DisplayTitle}》的 {failedChapters.Count} 个失败章节。"
+                : $"正在重新检查《{history.DisplayTitle}》的缺失章节。";
+            StartTaskSubscription(CurrentTaskId);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (BackendApiException ex)
+        {
+            PageError = $"重试失败：{ex.Error.Message}";
+            return false;
+        }
+        catch (Exception ex)
+        {
+            PageError = $"重试失败：{ex.Message}";
+            return false;
+        }
+        finally
+        {
+            history.IsRetrying = false;
+        }
+    }
+
     [RelayCommand(CanExecute = nameof(CanStop))]
     public Task StopAsync(CancellationToken cancellationToken = default)
         => ExecuteTaskMutationAsync(() => _backendClient.StopDownloadAsync(CurrentTaskId, cancellationToken));
@@ -1409,6 +1567,9 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
 
     private bool CanResume()
         => CurrentTask is not null && CurrentTask.Status is "paused" or "pausing" or "stopping" or "stopped";
+
+    private bool CanRetryCurrentTask()
+        => CurrentTask?.CanRetryFailures == true;
 
     private bool CanStop()
         => CurrentTask is not null && CurrentTask.Status is "pending" or "running" or "paused" or "pausing" or "dispatched";
@@ -1424,7 +1585,17 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     {
         PauseCommand.NotifyCanExecuteChanged();
         ResumeCommand.NotifyCanExecuteChanged();
+        RetryCurrentTaskCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
+    }
+
+    private void StartTaskSubscription(string taskId)
+    {
+        if (string.IsNullOrWhiteSpace(taskId)) return;
+        CancelAndDispose(ref _subscriptionCts);
+        _lastEventId = 0;
+        _subscriptionCts = new CancellationTokenSource();
+        _ = SubscribeToTaskAsync(taskId, _subscriptionCts.Token);
     }
 
     private async Task ExecuteTaskMutationAsync(Func<Task> mutation)

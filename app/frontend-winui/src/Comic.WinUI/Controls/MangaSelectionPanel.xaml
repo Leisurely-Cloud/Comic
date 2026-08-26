@@ -165,7 +165,7 @@
                                    FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
                         <Button Grid.Column="1" MinWidth="108" Padding="12,6"
                                 IsEnabled="{x:Bind ViewModel.CanToggleJmFavorite, Mode=OneWay}"
-                                Command="{x:Bind ViewModel.ToggleJmFavoriteCommand, Mode=OneWay}">
+                                Click="OnFavoriteClick">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <FontIcon Glyph="{x:Bind ViewModel.JmFavoriteButtonGlyph, Mode=OneWay}" FontSize="14" />
                                 <TextBlock Text="{x:Bind ViewModel.JmFavoriteButtonText, Mode=OneWay}" />
