@@ -181,6 +181,9 @@ public sealed partial class ReaderPage : Page
     /// <summary>按视口计算 100% 缩放尺寸；双页模式下每页各占一半可用宽度。</summary>
     private void UpdatePagedBaseSizes()
     {
+        // InitializeComponent can raise SizeChanged before OnNavigatedTo injects the view model.
+        if (ViewModel is null) return;
+
         var viewportWidth = Math.Max(1, PagedScrollViewer.ViewportWidth > 0
             ? PagedScrollViewer.ViewportWidth
             : PagedScrollViewer.ActualWidth);
