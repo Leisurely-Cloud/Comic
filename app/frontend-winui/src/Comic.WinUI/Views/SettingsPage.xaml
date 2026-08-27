@@ -450,10 +450,12 @@
                                        Text="{x:Bind ViewModel.AppUpdateStatus, Mode=OneWay}" TextWrapping="Wrap" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" MaxHeight="180"
                                        Text="{x:Bind ViewModel.AppUpdateNotes, Mode=OneWay}" TextWrapping="Wrap"
-                                       Opacity="0.75" />
+                                       Opacity="0.75"
+                                       Visibility="{x:Bind ViewModel.HasAppUpdateNotes, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <ProgressBar Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0"
                                          VerticalAlignment="Bottom" Maximum="100"
-                                         Value="{x:Bind ViewModel.AppUpdateDownloadProgress, Mode=OneWay}" />
+                                         Value="{x:Bind ViewModel.AppUpdateDownloadProgress, Mode=OneWay}"
+                                         Visibility="{x:Bind ViewModel.IsDownloadingAppUpdate, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                         </Grid>
                     </Border>
 

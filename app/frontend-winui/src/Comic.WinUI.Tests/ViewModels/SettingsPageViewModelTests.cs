@@ -27,6 +27,28 @@ public sealed class SettingsPageViewModelTests
     }
 
     [TestMethod]
+    public void InitialUpdateState_ShowsGuidanceWithoutEmptyDetailsOrProgress()
+    {
+        using var httpClient = new HttpClient();
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(new JmComicService(httpClient), library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var backendClient = TestServiceFactory.CreateClient(
+            new JmComicService(httpClient), scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings);
+        var pageViewModel = new SettingsPageViewModel(
+            backendClient,
+            settings,
+            new ShellViewModel(settings),
+            new SearchHistoryService(Path.Combine(_container, "history")));
+
+        Assert.IsTrue(pageViewModel.AppUpdateStatus.Contains("尚未检查更新", StringComparison.Ordinal));
+        Assert.IsFalse(pageViewModel.HasAppUpdateNotes);
+        Assert.IsFalse(pageViewModel.IsDownloadingAppUpdate);
+    }
+
+    [TestMethod]
     public async Task SaveAsync_KeepsOtherSettings_WhenStorageRootUpdateFails()
     {
         using var httpClient = new HttpClient();

@@ -184,16 +184,22 @@ public partial class SettingsPageViewModel : ObservableObject
     public partial bool CheckUpdatesOnStartup { get; set; }
 
     [ObservableProperty]
-    public partial string AppUpdateStatus { get; set; } = string.Empty;
+    public partial string AppUpdateStatus { get; set; } = "尚未检查更新。点击“立即检查”获取最新版本信息。";
 
     [ObservableProperty]
     public partial string AppUpdateNotes { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool HasAppUpdateNotes { get; set; }
 
     [ObservableProperty]
     public partial bool IsCheckingAppUpdate { get; set; }
 
     [ObservableProperty]
     public partial double AppUpdateDownloadProgress { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsDownloadingAppUpdate { get; set; }
 
     [ObservableProperty]
     public partial bool CanDownloadAppUpdate { get; set; }
@@ -458,6 +464,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             _availableUpdate = await _appUpdateService.CheckAsync(cancellationToken);
             AppUpdateNotes = _availableUpdate.ReleaseNotes;
+            HasAppUpdateNotes = !string.IsNullOrWhiteSpace(AppUpdateNotes);
             CanDownloadAppUpdate = _availableUpdate.IsUpdateAvailable && !string.IsNullOrWhiteSpace(_availableUpdate.AssetDownloadUrl);
             AppUpdateStatus = _availableUpdate.IsUpdateAvailable
                 ? $"发现新版本 {_availableUpdate.LatestVersion}（当前 {_availableUpdate.CurrentVersion}）"
@@ -472,6 +479,8 @@ public partial class SettingsPageViewModel : ObservableObject
     {
         if (_availableUpdate is null) return;
         CanDownloadAppUpdate = false;
+        IsDownloadingAppUpdate = true;
+        AppUpdateDownloadProgress = 0;
         try
         {
             var progress = new Progress<double>(value => AppUpdateDownloadProgress = value);
@@ -480,5 +489,6 @@ public partial class SettingsPageViewModel : ObservableObject
             Process.Start("explorer.exe", $"/select,\"{path}\"");
         }
         catch (Exception ex) { AppUpdateStatus = $"下载失败：{ex.Message}"; CanDownloadAppUpdate = true; }
+        finally { IsDownloadingAppUpdate = false; }
     }
 }
