@@ -239,6 +239,37 @@ public sealed class LibraryStorageServiceTests
     }
 
     [TestMethod]
+    public void DuplicateCleanup_RequiresExactPreviewAndPreservesPrimaryDirectory()
+    {
+        File.WriteAllText(Path.Combine(_mangaRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
+        var duplicateRoot = Path.Combine(_storageRoot, "测试漫画 [123]");
+        var duplicateChapter = Path.Combine(duplicateRoot, "001_第一话");
+        Directory.CreateDirectory(duplicateChapter);
+        File.WriteAllBytes(Path.Combine(duplicateChapter, "001.jpg"), [1, 2]);
+        File.WriteAllText(Path.Combine(duplicateRoot, "元数据.json"),
+            """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
+        var recycled = new List<string>();
+        var service = new LibraryStorageService(_storageRoot, recycleDirectory: path =>
+        {
+            recycled.Add(path);
+            Directory.Delete(path, true);
+        });
+
+        var preview = service.PreviewDuplicateCleanup(_mangaRoot);
+
+        Assert.AreEqual(1, preview.Items.Count);
+        Assert.IsGreaterThanOrEqualTo(2, preview.TotalBytes);
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            service.CleanupDuplicateDirectories(_mangaRoot, []));
+        Assert.AreEqual(1, service.CleanupDuplicateDirectories(
+            _mangaRoot, preview.Items.Select(item => item.Directory).ToList()));
+        Assert.IsTrue(Directory.Exists(_mangaRoot));
+        Assert.IsFalse(Directory.Exists(duplicateRoot));
+        CollectionAssert.AreEqual(new[] { Path.GetFullPath(duplicateRoot) }, recycled);
+    }
+
+    [TestMethod]
     public void JmImport_ScansAndCopiesNewMangaWithoutChangingSource()
     {
         var source = Path.Combine(_container, "jm-source");

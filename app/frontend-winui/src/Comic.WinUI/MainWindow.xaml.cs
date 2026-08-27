@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -25,6 +26,7 @@ public sealed partial class MainWindow : Window
     private const int AppCommandBrowserForward = 2;
     private static readonly UIntPtr MouseNavigationSubclassId = new(0x434F4D49);
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly AppUpdateService _appUpdateService;
     private readonly SubclassProc _mouseNavigationSubclassProc;
     private IntPtr _windowHandle;
     private bool _mouseNavigationHookInstalled;
@@ -36,6 +38,7 @@ public sealed partial class MainWindow : Window
         ApplyWindowIcon();
         ApplyInitialWindowBounds();
         _applicationSettings = ((App)Application.Current).Services.GetRequiredService<ApplicationSettingsService>();
+        _appUpdateService = ((App)Application.Current).Services.GetRequiredService<AppUpdateService>();
         _applicationSettings.ThemeChanged += OnThemeChanged;
         ApplyApplicationTheme();
         Title = "漫画下载器";
@@ -163,6 +166,46 @@ public sealed partial class MainWindow : Window
         // 隐藏启动画面，显示主内容
         SplashScreen.Visibility = Visibility.Collapsed;
         MainFrame.Visibility = Visibility.Visible;
+        if (_applicationSettings.CheckUpdatesOnStartup) _ = CheckForUpdateOnStartupAsync();
+    }
+
+    private async Task CheckForUpdateOnStartupAsync()
+    {
+        try
+        {
+            var update = await _appUpdateService.CheckAsync();
+            if (!update.IsUpdateAvailable) return;
+            var notes = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(update.ReleaseNotes) ? "此版本没有更新说明。" : update.ReleaseNotes,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 620,
+            };
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootGrid.XamlRoot,
+                Title = $"发现新版本 {update.LatestVersion}",
+                Content = new ScrollViewer { Content = notes, MaxHeight = 420 },
+                PrimaryButtonText = string.IsNullOrWhiteSpace(update.AssetDownloadUrl) ? string.Empty : "下载安装包",
+                CloseButtonText = "稍后",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            var path = await _appUpdateService.DownloadInstallerAsync(update);
+            Process.Start("explorer.exe", $"/select,\"{path}\"");
+            var completed = new ContentDialog
+            {
+                XamlRoot = RootGrid.XamlRoot,
+                Title = "安装包已下载",
+                Content = $"已保存到：\n{path}\n\n请手动运行安装包。应用不会自动安装或重启。",
+                CloseButtonText = "知道了",
+            };
+            await completed.ShowAsync();
+        }
+        catch
+        {
+            // 启动检查失败不打断应用；用户可在设置页手动检查并查看错误。
+        }
     }
 
     [DllImport("dwmapi.dll")]

@@ -596,6 +596,65 @@ public sealed class DownloadSchedulerServiceTests
         Assert.AreEqual("failed", failed.Status);
     }
 
+    [TestMethod]
+    public async Task DynamicTaskGate_RespectsLimitAndReleasesWaitingTask()
+    {
+        var gate = new DynamicDownloadTaskGate();
+        await gate.WaitAsync(() => 1, CancellationToken.None);
+        var secondEntered = false;
+        var second = Task.Run(async () =>
+        {
+            await gate.WaitAsync(() => 1, CancellationToken.None);
+            secondEntered = true;
+            gate.Release();
+        });
+        await Task.Delay(50);
+        Assert.IsFalse(secondEntered);
+        gate.Release();
+        await second.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsTrue(secondEntered);
+    }
+
+    [TestMethod]
+    public async Task BandwidthLimiter_DelaysFollowingChunksWhenLimitEnabled()
+    {
+        var limiter = new DownloadBandwidthLimiter();
+        await limiter.WaitAsync(1024, () => 1024, CancellationToken.None);
+        var stopwatch = Stopwatch.StartNew();
+        await limiter.WaitAsync(128, () => 1024, CancellationToken.None);
+        Assert.IsGreaterThanOrEqualTo(700, stopwatch.ElapsedMilliseconds);
+    }
+
+    [TestMethod]
+    public async Task ScheduledTask_CanBeStoppedBeforeNetworkRequestStarts()
+    {
+        using var handler = FakeHttpMessageHandler.BlocksUntilCancelled();
+        var settings = new ApplicationSettingsService(Path.Combine(_container, "schedule-settings"));
+        settings.UpdateDownloadPlan(1, 0, true, DateTime.Now.AddMinutes(5).TimeOfDay);
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), library, settings);
+
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest
+        {
+            Url = "https://18comic.vip/album/99",
+        });
+        var timeout = Stopwatch.StartNew();
+        DownloadTaskDto snapshot;
+        do
+        {
+            snapshot = await service.GetDownloadAsync(task.Id);
+            if (snapshot.Status == "scheduled") break;
+            await Task.Delay(10);
+        } while (timeout.Elapsed < TimeSpan.FromSeconds(2));
+
+        Assert.AreEqual("scheduled", snapshot.Status);
+        await service.StopDownloadAsync(task.Id);
+        var stopped = await WaitUntilTerminalAsync(service, task.Id);
+        Assert.AreEqual("stopped", stopped.Status);
+        Assert.AreEqual(0, handler.RequestedUris.Count);
+    }
+
     private static async Task<DownloadTaskDto> WaitUntilTerminalAsync(
         DownloadSchedulerService service,
         string taskId)

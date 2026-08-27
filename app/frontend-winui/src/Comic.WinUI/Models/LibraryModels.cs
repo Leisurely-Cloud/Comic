@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 namespace Comic.WinUI.Models;
@@ -34,6 +36,21 @@ public sealed class LibraryItemDto
 
     [JsonPropertyName("duplicate_directory_count")]
     public int DuplicateDirectoryCount { get; set; }
+
+    [JsonPropertyName("manga_id")]
+    public string MangaId { get; set; } = string.Empty;
+
+    [JsonPropertyName("completed")]
+    public bool Completed { get; set; }
+
+    [JsonPropertyName("disk_usage_bytes")]
+    public long DiskUsageBytes { get; set; }
+
+    [JsonPropertyName("saved_at")]
+    public DateTime SavedAt { get; set; }
+
+    [JsonPropertyName("last_read_at")]
+    public DateTimeOffset? LastReadAt { get; set; }
 }
 
 public sealed class LibraryListResponse
@@ -49,6 +66,23 @@ public sealed class LibraryListResponse
 
     [JsonPropertyName("page_size")]
     public int PageSize { get; set; }
+}
+
+public enum LibraryCompletionFilter { All, Completed, Incomplete }
+public enum LibrarySort { RecentRead, DownloadedAt, ChapterCount }
+
+public sealed class DuplicateCleanupPreview
+{
+    public string PrimaryRoot { get; init; } = string.Empty;
+    public List<DuplicateCleanupItem> Items { get; init; } = [];
+    public long TotalBytes => Items.Sum(item => item.SizeBytes);
+}
+
+public sealed class DuplicateCleanupItem
+{
+    public string Directory { get; init; } = string.Empty;
+    public int ChapterCount { get; init; }
+    public long SizeBytes { get; init; }
 }
 
 public sealed class LibraryCheckUpdatesResponse

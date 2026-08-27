@@ -9,6 +9,7 @@ using Comic.WinUI.Services;
 using Comic.WinUI.Services.Native;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Comic.WinUI.ViewModels;
@@ -23,6 +24,9 @@ public partial class ReaderPageViewModel : ObservableObject
     private readonly BackendClient _backendClient;
     private readonly IDispatcher _dispatcherQueue;
     private readonly ReadingProgressService _readingProgressService;
+    private readonly ReaderPreferenceService _readerPreferences;
+    private readonly string _defaultReaderMode;
+    private readonly int _defaultStripZoom;
 
     private CancellationTokenSource? _imageCts;
     private CancellationTokenSource? _preloadCts;
@@ -38,11 +42,15 @@ public partial class ReaderPageViewModel : ObservableObject
         BackendClient backendClient,
         ApplicationSettingsService applicationSettings,
         ReadingProgressService readingProgressService,
+        ReaderPreferenceService readerPreferences,
         IDispatcher dispatcher)
     {
         _backendClient = backendClient;
         _dispatcherQueue = dispatcher;
         _readingProgressService = readingProgressService;
+        _readerPreferences = readerPreferences;
+        _defaultReaderMode = applicationSettings.DefaultReaderMode;
+        _defaultStripZoom = applicationSettings.DefaultStripZoomPercent;
         IsStripMode = applicationSettings.DefaultReaderMode == ApplicationSettingsService.ReaderStrip;
         StripZoomPercent = applicationSettings.DefaultStripZoomPercent;
     }
@@ -69,6 +77,9 @@ public partial class ReaderPageViewModel : ObservableObject
     public partial BitmapImage? CurrentImage { get; set; }
 
     [ObservableProperty]
+    public partial BitmapImage? SecondaryImage { get; set; }
+
+    [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
     [ObservableProperty]
@@ -76,6 +87,27 @@ public partial class ReaderPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool IsStripMode { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsDoublePage { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsRightToLeft { get; set; }
+
+    public int ReaderModeIndex
+    {
+        get => IsStripMode ? 2 : IsDoublePage ? 1 : 0;
+        set
+        {
+            IsStripMode = value == 2;
+            IsDoublePage = value == 1;
+            OnPropertyChanged();
+            SaveReaderPreference();
+        }
+    }
+
+    public ReaderShortcutPreference Shortcuts => _readerPreferences.Shortcuts;
+    public FlowDirection PageFlowDirection => IsRightToLeft ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
     [ObservableProperty]
     public partial int StripZoomPercent { get; set; } = ApplicationSettingsService.DefaultStripZoom;
@@ -99,7 +131,11 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public bool HasNextImage => CurrentImageIndex < TotalImages - 1;
 
-    public string PageIndicator => TotalImages > 0 ? $"{CurrentImageIndex + 1} / {TotalImages}" : "";
+    public string PageIndicator => TotalImages > 0
+        ? IsDoublePage && CurrentImageIndex + 1 < TotalImages
+            ? $"{CurrentImageIndex + 1}-{CurrentImageIndex + 2} / {TotalImages}"
+            : $"{CurrentImageIndex + 1} / {TotalImages}"
+        : "";
 
     public bool CanToggleReaderMode => true;
 
@@ -141,6 +177,7 @@ public partial class ReaderPageViewModel : ObservableObject
     {
         _rootDir = rootDir;
         _isOnlineMode = false;
+        ApplyReaderPreference(rootDir);
         OnPropertyChanged(nameof(CanToggleReaderMode));
         IsLoading = true;
         PageError = string.Empty;
@@ -205,6 +242,7 @@ public partial class ReaderPageViewModel : ObservableObject
     {
         _rootDir = mangaUrl;
         _isOnlineMode = true;
+        ApplyReaderPreference(mangaUrl);
         OnPropertyChanged(nameof(CanToggleReaderMode));
         IsLoading = true;
         PageError = string.Empty;
@@ -298,6 +336,8 @@ public partial class ReaderPageViewModel : ObservableObject
 
     partial void OnIsStripModeChanged(bool value)
     {
+        OnPropertyChanged(nameof(ReaderModeIndex));
+        SaveReaderPreference();
         if (CurrentImageCount == 0) return;
 
         if (value)
@@ -315,11 +355,26 @@ public partial class ReaderPageViewModel : ObservableObject
         }
     }
 
+    partial void OnIsDoublePageChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ReaderModeIndex));
+        SaveReaderPreference();
+        if (!IsStripMode && CurrentImageCount > 0)
+            _ = ShowImageAsync(CurrentImageIndex, _imageCts?.Token ?? CancellationToken.None);
+    }
+
+    partial void OnIsRightToLeftChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PageFlowDirection));
+        SaveReaderPreference();
+    }
+
     partial void OnStripZoomPercentChanged(int value)
     {
         OnPropertyChanged(nameof(StripZoomText));
         OnPropertyChanged(nameof(CanZoomStripOut));
         OnPropertyChanged(nameof(CanZoomStripIn));
+        SaveReaderPreference();
     }
 
     partial void OnPagedZoomPercentChanged(int value)
@@ -327,6 +382,7 @@ public partial class ReaderPageViewModel : ObservableObject
         OnPropertyChanged(nameof(PagedZoomText));
         OnPropertyChanged(nameof(CanZoomPagedOut));
         OnPropertyChanged(nameof(CanZoomPagedIn));
+        SaveReaderPreference();
     }
 
     public void ChangeStripZoom(int delta)
@@ -365,6 +421,7 @@ public partial class ReaderPageViewModel : ObservableObject
         TotalImages = 0;
         CurrentImageIndex = 0;
         CurrentImage = null;
+        SecondaryImage = null;
 
         try
         {
@@ -425,7 +482,7 @@ public partial class ReaderPageViewModel : ObservableObject
     {
         if (CurrentImageIndex > 0)
         {
-            await ShowImageAsync(CurrentImageIndex - 1, cancellationToken);
+            await ShowImageAsync(Math.Max(0, CurrentImageIndex - (IsDoublePage ? 2 : 1)), cancellationToken);
         }
         else if (SelectedChapter is not null)
         {
@@ -443,7 +500,7 @@ public partial class ReaderPageViewModel : ObservableObject
     {
         if (CurrentImageIndex < TotalImages - 1)
         {
-            await ShowImageAsync(CurrentImageIndex + 1, cancellationToken);
+            await ShowImageAsync(Math.Min(TotalImages - 1, CurrentImageIndex + (IsDoublePage ? 2 : 1)), cancellationToken);
         }
         else if (SelectedChapter is not null)
         {
@@ -526,6 +583,9 @@ public partial class ReaderPageViewModel : ObservableObject
                 bytes = await GetImageBytesAtAsync(index, cancellationToken);
             }
 
+            var secondaryBytes = IsDoublePage && index + 1 < totalCount
+                ? await GetImageBytesAtAsync(index + 1, cancellationToken)
+                : null;
             _dispatcherQueue.TryEnqueue(() =>
             {
                 // 回调是排队执行的:排队期间用户可能已切章(LoadChapterImagesAsync 会取消
@@ -534,12 +594,20 @@ public partial class ReaderPageViewModel : ObservableObject
 
                 var bitmap = new BitmapImage();
                 CurrentImage = bitmap;
+                SecondaryImage = null;
                 CurrentImageIndex = index;
                 NotifyImageNavigationChanged();
 
                 using var stream = new MemoryStream(bytes);
                 stream.Position = 0;
                 bitmap.SetSource(stream.AsRandomAccessStream());
+                if (secondaryBytes is not null)
+                {
+                    var secondary = new BitmapImage();
+                    using var secondaryStream = new MemoryStream(secondaryBytes);
+                    secondary.SetSource(secondaryStream.AsRandomAccessStream());
+                    SecondaryImage = secondary;
+                }
                 SaveReadingProgress(index);
             });
 
@@ -693,6 +761,29 @@ public partial class ReaderPageViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNextImageOrChapter));
         PreviousImageCommand.NotifyCanExecuteChanged();
         NextImageCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ApplyReaderPreference(string mangaKey)
+    {
+        var preference = _readerPreferences.Get(mangaKey, _defaultReaderMode, _defaultStripZoom);
+        IsStripMode = preference.Mode == "strip";
+        IsDoublePage = preference.Mode == "spread";
+        IsRightToLeft = preference.RightToLeft;
+        StripZoomPercent = Math.Clamp(preference.StripZoomPercent, StripZoomMinimum, StripZoomMaximum);
+        PagedZoomPercent = Math.Clamp(preference.PagedZoomPercent, PagedZoomMinimum, PagedZoomMaximum);
+    }
+
+    private void SaveReaderPreference()
+    {
+        if (string.IsNullOrWhiteSpace(_rootDir)) return;
+        var mode = IsStripMode ? "strip" : IsDoublePage ? "spread" : "paged";
+        _readerPreferences.Save(_rootDir, new ReaderPreference(mode, IsRightToLeft, StripZoomPercent, PagedZoomPercent));
+    }
+
+    public void SaveShortcuts(ReaderShortcutPreference shortcuts)
+    {
+        _readerPreferences.SaveShortcuts(shortcuts);
+        OnPropertyChanged(nameof(Shortcuts));
     }
 }
 

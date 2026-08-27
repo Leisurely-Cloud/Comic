@@ -168,6 +168,40 @@ public sealed class BackendClientTests
         StringAssert.EndsWith(response.Items[0].MissingChapters[0].Url, "/photo/2002");
     }
 
+    [TestMethod]
+    public async Task LibraryQuery_SearchesJmIdFiltersAndSortsByReadingTime()
+    {
+        var first = Path.Combine(_storageRoot, "100");
+        var second = Path.Combine(_storageRoot, "200");
+        Directory.CreateDirectory(Path.Combine(first, "1"));
+        Directory.CreateDirectory(Path.Combine(second, "1"));
+        await File.WriteAllBytesAsync(Path.Combine(first, "1", "001.jpg"), [1]);
+        await File.WriteAllBytesAsync(Path.Combine(second, "1", "001.jpg"), [2]);
+        await File.WriteAllTextAsync(Path.Combine(first, "元数据.json"),
+            """{"manga_title":"甲","manga_url":"https://18comic.vip/album/100","completed":true,"is_favorite":true}""");
+        await File.WriteAllTextAsync(Path.Combine(second, "元数据.json"),
+            """{"manga_title":"乙","manga_url":"https://18comic.vip/album/200","completed":false}""");
+        using var httpClient = new HttpClient();
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings-query"));
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress-query"));
+        progress.Save(second, "1", 0);
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(new JmComicService(httpClient), library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(new JmComicService(httpClient), scheduler, library,
+            exporter, TestServiceFactory.CreateReader(library), settings, readingProgress: progress);
+
+        var byId = await client.GetLibraryAsync(keyword: "100");
+        var favorites = await client.GetLibraryAsync(favoritesOnly: true);
+        var incomplete = await client.GetLibraryAsync(completion: LibraryCompletionFilter.Incomplete);
+        var recent = await client.GetLibraryAsync(sort: LibrarySort.RecentRead);
+
+        Assert.AreEqual("100", byId.Items.Single().MangaId);
+        Assert.AreEqual("甲", favorites.Items.Single().Title);
+        Assert.AreEqual("乙", incomplete.Items.Single().Title);
+        Assert.AreEqual("乙", recent.Items.First().Title);
+    }
+
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)
     {
         var timestamp = long.Parse(request.Headers.GetValues("tokenparam").Single().Split(',')[0]);

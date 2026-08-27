@@ -575,6 +575,7 @@ public sealed class JmComicService : IDisposable
         CancellationToken cancellationToken = default,
         Action<JmImageProgress>? progress = null,
         Func<CancellationToken, Task>? waitBeforeImage = null,
+        Func<int, CancellationToken, Task>? throttleBytes = null,
         string? preferredDirectoryName = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -642,7 +643,8 @@ public sealed class JmComicService : IDisposable
                             tasks.Count,
                             totalBytes));
                     },
-                    waitBeforeImage);
+                    waitBeforeImage,
+                    throttleBytes);
                 if (succeeded)
                 {
                     var completed = Interlocked.Increment(ref successCount);
@@ -1118,7 +1120,8 @@ public sealed class JmComicService : IDisposable
         ImageDownload item,
         CancellationToken cancellationToken,
         Action<int>? bytesDownloaded = null,
-        Func<CancellationToken, Task>? waitBeforeAttempt = null)
+        Func<CancellationToken, Task>? waitBeforeAttempt = null,
+        Func<int, CancellationToken, Task>? throttleBytes = null)
     {
         if (File.Exists(item.Destination) && new FileInfo(item.Destination).Length > 0) return true;
         var partialPath = item.Destination + ".part";
@@ -1150,6 +1153,7 @@ public sealed class JmComicService : IDisposable
                     {
                         var read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                         if (read == 0) break;
+                        if (throttleBytes is not null) await throttleBytes(read, cancellationToken);
                         await imageBuffer.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                         bytesDownloaded?.Invoke(read);
                     }

@@ -20,9 +20,11 @@ public sealed class BackendClient
     private readonly CbzExportService _export;
     private readonly ReaderService _reader;
     private readonly ApplicationSettingsService _applicationSettings;
+    private readonly ReadingProgressService? _readingProgress;
     private readonly IJmCredentialStore _jmCredentials;
     private readonly SemaphoreSlim _restoreLoginGate = new(1, 1);
     private int _loginGeneration;
+    private HashSet<string> _libraryUpdates = new(StringComparer.OrdinalIgnoreCase);
 
     public BackendClient(
         JmComicService jmComic,
@@ -31,7 +33,8 @@ public sealed class BackendClient
         CbzExportService export,
         ReaderService reader,
         ApplicationSettingsService applicationSettings,
-        IJmCredentialStore? jmCredentials = null)
+        IJmCredentialStore? jmCredentials = null,
+        ReadingProgressService? readingProgress = null)
     {
         _jmComic = jmComic;
         _downloads = downloads;
@@ -39,6 +42,7 @@ public sealed class BackendClient
         _export = export;
         _reader = reader;
         _applicationSettings = applicationSettings;
+        _readingProgress = readingProgress;
         _jmCredentials = jmCredentials ?? new VolatileJmCredentialStore();
     }
 
@@ -144,6 +148,9 @@ public sealed class BackendClient
     public Task<DownloadActionResponse> RetryDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.RetryDownloadAsync(taskId, cancellationToken), "download_retry_failed");
 
+    public Task<int> RetryAllFailedDownloadsAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _downloads.RetryAllFailedAsync(cancellationToken), "download_retry_all_failed");
+
     public Task<DownloadActionResponse> StopDownloadAsync(string taskId, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _downloads.StopDownloadAsync(taskId, cancellationToken), "download_stop_failed");
 
@@ -152,6 +159,10 @@ public sealed class BackendClient
         string keyword = "",
         int page = 1,
         int pageSize = 20,
+        LibraryCompletionFilter completion = LibraryCompletionFilter.All,
+        bool favoritesOnly = false,
+        bool updatesOnly = false,
+        LibrarySort sort = LibrarySort.DownloadedAt,
         CancellationToken cancellationToken = default) =>
         InvokeAsync(() => Task.Run(() =>
         {
@@ -160,10 +171,16 @@ public sealed class BackendClient
             // 调用方在 UI 线程 await,续体仍会回到 UI 线程,集合更新的线程性不变。
             cancellationToken.ThrowIfCancellationRequested();
             var entries = _library.EnumerateLibraryEntries()
-                .Where(entry => string.IsNullOrWhiteSpace(keyword) ||
+                .Where(entry => (string.IsNullOrWhiteSpace(keyword) ||
                     entry.Title.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                    entry.Author.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(entry => entry.IsFavorite)
+                    entry.Author.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                    entry.MangaId.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+                    (completion == LibraryCompletionFilter.All || completion == LibraryCompletionFilter.Completed && entry.Completed || completion == LibraryCompletionFilter.Incomplete && !entry.Completed) &&
+                    (!favoritesOnly || entry.IsFavorite) &&
+                    (!updatesOnly || _libraryUpdates.Contains(entry.RootDirectory)))
+                .OrderByDescending(entry => sort == LibrarySort.RecentRead ? _readingProgress?.GetLastReadAt(entry.RootDirectory) : null)
+                .ThenByDescending(entry => sort == LibrarySort.ChapterCount ? entry.DownloadedChapterCount : 0)
+                .ThenByDescending(entry => entry.IsFavorite)
                 .ThenByDescending(entry => entry.SavedAt)
                 .ToList();
             var safePageSize = Math.Clamp(pageSize, 1, 100);
@@ -183,6 +200,11 @@ public sealed class BackendClient
                     LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
                     IsFavorite = entry.IsFavorite,
                     DuplicateDirectoryCount = entry.DuplicateDirectoryCount,
+                    MangaId = entry.MangaId,
+                    Completed = entry.Completed,
+                    DiskUsageBytes = entry.DiskUsageBytes,
+                    SavedAt = entry.SavedAt,
+                    LastReadAt = _readingProgress?.GetLastReadAt(entry.RootDirectory),
                 }).ToList(),
                 Total = entries.Count,
                 Page = safePage,
@@ -208,6 +230,12 @@ public sealed class BackendClient
 
             return _library.DeleteManga(rootDir);
         }, cancellationToken), "library_delete_failed");
+
+    public Task<DuplicateCleanupPreview> PreviewDuplicateCleanupAsync(string rootDir, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => Task.Run(() => _library.PreviewDuplicateCleanup(rootDir), cancellationToken), "duplicate_preview_failed");
+
+    public Task<int> CleanupDuplicateDirectoriesAsync(string rootDir, IReadOnlyCollection<string> confirmedDirectories, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => Task.Run(() => _library.CleanupDuplicateDirectories(rootDir, confirmedDirectories), cancellationToken), "duplicate_cleanup_failed");
 
     public Task<JmLibraryImportPreview> ScanJmLibraryImportAsync(
         string sourceRoot,
@@ -315,6 +343,9 @@ public sealed class BackendClient
         }).ToArray();
 
         var results = await Task.WhenAll(checks);
+        _libraryUpdates = results.Where(item => item.HasUpdate)
+            .Select(item => item.RootDir)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return new LibraryCheckUpdatesResponse
         {
             Items = results.ToList(),

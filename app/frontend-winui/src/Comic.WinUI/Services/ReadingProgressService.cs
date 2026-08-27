@@ -44,6 +44,8 @@ public sealed class ReadingProgressService
         }
     }
 
+    public DateTimeOffset? GetLastReadAt(string rootDirectory) => Get(rootDirectory)?.UpdatedAtUtc;
+
     public void Save(string rootDirectory, string chapterDirectoryName, int pageIndex)
     {
         var key = NormalizeRootDirectory(rootDirectory);

@@ -38,13 +38,17 @@
                            Style="{StaticResource BodyStrongTextBlockStyle}"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
-                <ToggleSwitch Grid.Column="2"
-                              OffContent="单页"
-                              OnContent="条漫"
-                              IsOn="{x:Bind ViewModel.IsStripMode, Mode=TwoWay}"
-                              IsEnabled="{x:Bind ViewModel.CanToggleReaderMode, Mode=OneWay}"
-                              Toggled="OnReaderModeToggled"
-                              VerticalAlignment="Center" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <ComboBox Width="110" SelectedIndex="{x:Bind ViewModel.ReaderModeIndex, Mode=TwoWay}" SelectionChanged="OnReaderModeChanged">
+                        <ComboBoxItem Content="单页" />
+                        <ComboBoxItem Content="双页" />
+                        <ComboBoxItem Content="条漫" />
+                    </ComboBox>
+                    <ToggleButton Content="从右向左" IsChecked="{x:Bind ViewModel.IsRightToLeft, Mode=TwoWay}"
+                                  Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
+                    <Button Content="快捷键" Click="OnShortcutSettingsClick" />
+                    <Button Content="全屏" Click="OnFullscreenClick" />
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -144,13 +148,19 @@
                           VerticalScrollBarVisibility="Auto"
                           ZoomMode="Disabled"
                           SizeChanged="OnPagedViewportSizeChanged">
-                <Grid Tapped="OnImageAreaTapped" Background="Transparent">
-                    <Image x:Name="PagedImage"
-                           Source="{x:Bind ViewModel.CurrentImage, Mode=OneWay}"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           ImageOpened="OnPagedImageOpened" />
+                <Grid Tapped="OnImageAreaTapped" Background="Transparent"
+                      FlowDirection="{x:Bind ViewModel.PageFlowDirection, Mode=OneWay}" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Image x:Name="PagedImage" Grid.Column="0"
+                           Source="{x:Bind ViewModel.CurrentImage, Mode=OneWay}" Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" ImageOpened="OnPagedImageOpened" />
+                    <Image x:Name="SecondaryPagedImage" Grid.Column="1"
+                           Source="{x:Bind ViewModel.SecondaryImage, Mode=OneWay}" Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Visibility="{x:Bind ViewModel.IsDoublePage, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </Grid>
             </ScrollViewer>
 

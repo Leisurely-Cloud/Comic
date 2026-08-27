@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Comic.WinUI.Models;
 using Comic.WinUI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
@@ -83,6 +84,25 @@ public sealed partial class LibraryPage : Page
         {
             await ViewModel.DeleteSelectedMangaCommand.ExecuteAsync(null);
         }
+    }
+
+    private async void OnCleanupDuplicatesClick(object sender, RoutedEventArgs e)
+    {
+        var preview = await ViewModel.PreviewDuplicateCleanupAsync();
+        if (preview is null || preview.Items.Count == 0) return;
+        var lines = preview.Items.Select(item =>
+            $"{item.Directory}\n  {item.ChapterCount} 章 · {FormatBytes(item.SizeBytes)}");
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"清理 {preview.Items.Count} 个重复目录？",
+            Content = $"以下目录将移入 Windows 回收站，可恢复。主目录不会删除。\n\n{string.Join("\n\n", lines)}\n\n预计释放 {FormatBytes(preview.TotalBytes)}。",
+            PrimaryButtonText = "移入回收站",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            await ViewModel.CleanupDuplicateDirectoriesAsync(preview);
     }
 
     private async void OnImportJmClick(object sender, RoutedEventArgs e)

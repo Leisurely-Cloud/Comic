@@ -179,7 +179,8 @@ public sealed class ReaderPageViewModelTests
             reader,
             settings);
 
-        return new ReaderPageViewModel(backendClient, settings, progressService, dispatcher);
+        var preferences = new ReaderPreferenceService(Path.Combine(_container, "reader-preferences"));
+        return new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher);
     }
 
     private static HttpResponseMessage EncryptedApiResponse(HttpRequestMessage request, string json)

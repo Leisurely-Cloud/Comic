@@ -124,6 +124,22 @@ public sealed class ApplicationSettingsServiceTests
     }
 
     [TestMethod]
+    public void DownloadPlan_IsPersistedAndClampedWithoutBreakingExistingPreferences()
+    {
+        var directory = Path.Combine(_container, "download-plan");
+        var settings = new ApplicationSettingsService(directory);
+
+        settings.UpdateDownloadPlan(99, 2048, true, TimeSpan.FromHours(3.5));
+
+        var reloaded = new ApplicationSettingsService(directory);
+        Assert.AreEqual(8, reloaded.MaxConcurrentDownloadTasks);
+        Assert.AreEqual(2048, reloaded.DownloadSpeedLimitKbps);
+        Assert.IsTrue(reloaded.DownloadScheduleEnabled);
+        Assert.AreEqual(TimeSpan.FromHours(3.5), reloaded.DownloadScheduleTime);
+        Assert.AreEqual(ApplicationSettingsService.SystemTheme, reloaded.Theme);
+    }
+
+    [TestMethod]
     public void StripZoom_DefaultsToFortyAndAllowsThirtyPercent()
     {
         var settings = new ApplicationSettingsService(_container);

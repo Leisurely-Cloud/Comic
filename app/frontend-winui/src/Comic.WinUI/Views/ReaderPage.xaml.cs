@@ -1,10 +1,12 @@
 using Comic.WinUI.ViewModels;
+using Comic.WinUI.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Windowing;
 
 namespace Comic.WinUI.Views;
 
@@ -16,6 +18,7 @@ public sealed partial class ReaderPage : Page
     private readonly Dictionary<UIElement, ReaderStripImageItemViewModel> _stripItemsByElement = [];
     private bool _stripChapterAdvancePending;
     private bool _stripZoomInProgress;
+    private bool _isFullscreen;
 
     public ReaderPage()
     {
@@ -279,6 +282,50 @@ public sealed partial class ReaderPage : Page
         }
     }
 
+    private void OnReaderModeChanged(object sender, SelectionChangedEventArgs e) =>
+        OnReaderModeToggled(sender, e);
+
+    private void OnFullscreenClick(object sender, RoutedEventArgs e) => ToggleFullscreen();
+
+    private void ToggleFullscreen()
+    {
+        var window = ((App)Application.Current).MainWindow;
+        if (window is null) return;
+        if (_isFullscreen)
+        {
+            window.AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+            if (window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
+        }
+        else window.AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+        _isFullscreen = !_isFullscreen;
+    }
+
+    private async void OnShortcutSettingsClick(object sender, RoutedEventArgs e)
+    {
+        var shortcuts = ViewModel.Shortcuts;
+        var previous = new TextBox { Header = "上一页按键", Text = shortcuts.PreviousKey, PlaceholderText = "例如 Left" };
+        var next = new TextBox { Header = "下一页按键", Text = shortcuts.NextKey, PlaceholderText = "例如 Right" };
+        var fullscreen = new TextBox { Header = "全屏按键", Text = shortcuts.FullscreenKey, PlaceholderText = "例如 F11" };
+        var tapRight = new CheckBox { Content = "点击右半区域前进", IsChecked = shortcuts.TapRightToAdvance };
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(previous); panel.Children.Add(next); panel.Children.Add(fullscreen); panel.Children.Add(tapRight);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot, Title = "阅读快捷键", Content = panel,
+            PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (!Enum.TryParse<Windows.System.VirtualKey>(previous.Text.Trim(), true, out _) ||
+            !Enum.TryParse<Windows.System.VirtualKey>(next.Text.Trim(), true, out _) ||
+            !Enum.TryParse<Windows.System.VirtualKey>(fullscreen.Text.Trim(), true, out _))
+        {
+            ViewModel.PageError = "快捷键名称无效，请使用 Left、Right、PageDown、F11 等按键名。";
+            return;
+        }
+        ViewModel.SaveShortcuts(new ReaderShortcutPreference(
+            previous.Text.Trim(), next.Text.Trim(), fullscreen.Text.Trim(), tapRight.IsChecked == true));
+    }
+
     private void OnChapterSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _stripChapterAdvancePending = false;
@@ -417,6 +464,24 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
+        var shortcuts = ViewModel.Shortcuts;
+        if (string.Equals(e.Key.ToString(), shortcuts.FullscreenKey, StringComparison.OrdinalIgnoreCase))
+        {
+            ToggleFullscreen(); e.Handled = true; return;
+        }
+        if (string.Equals(e.Key.ToString(), shortcuts.PreviousKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (ViewModel.IsStripMode) ViewModel.PreviousChapterCommand.Execute(null);
+            else await ViewModel.PreviousImageCommand.ExecuteAsync(null);
+            e.Handled = true; return;
+        }
+        if (string.Equals(e.Key.ToString(), shortcuts.NextKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (ViewModel.IsStripMode) ViewModel.NextChapterCommand.Execute(null);
+            else await ViewModel.NextImageCommand.ExecuteAsync(null);
+            e.Handled = true; return;
+        }
+
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Left:
@@ -470,6 +535,12 @@ public sealed partial class ReaderPage : Page
                 }
                 break;
             case Windows.System.VirtualKey.Escape:
+                if (_isFullscreen)
+                {
+                    ToggleFullscreen();
+                    e.Handled = true;
+                    break;
+                }
                 if (Frame.CanGoBack)
                 {
                     Frame.GoBack();
@@ -485,7 +556,9 @@ public sealed partial class ReaderPage : Page
         if (ViewModel.IsStripMode || sender is not FrameworkElement element) return;
 
         var point = e.GetPosition(element);
-        var goNext = point.X >= element.ActualWidth / 2;
+        var rightSide = point.X >= element.ActualWidth / 2;
+        var goNext = ViewModel.Shortcuts.TapRightToAdvance ? rightSide : !rightSide;
+        if (ViewModel.IsRightToLeft) goNext = !goNext;
         if (goNext)
         {
             await ViewModel.NextImageCommand.ExecuteAsync(null);

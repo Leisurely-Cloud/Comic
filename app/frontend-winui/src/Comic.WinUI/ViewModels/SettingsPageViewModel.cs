@@ -18,17 +18,20 @@ public partial class SettingsPageViewModel : ObservableObject
     private readonly ApplicationSettingsService _applicationSettings;
     private readonly ShellViewModel _shellViewModel;
     private readonly SearchHistoryService _searchHistoryService;
+    private readonly AppUpdateService _appUpdateService;
 
     public SettingsPageViewModel(
         BackendClient backendClient,
         ApplicationSettingsService applicationSettings,
         ShellViewModel shellViewModel,
-        SearchHistoryService searchHistoryService)
+        SearchHistoryService searchHistoryService,
+        AppUpdateService? appUpdateService = null)
     {
         _backendClient = backendClient;
         _applicationSettings = applicationSettings;
         _shellViewModel = shellViewModel;
         _searchHistoryService = searchHistoryService;
+        _appUpdateService = appUpdateService ?? new AppUpdateService();
     }
 
     public IReadOnlyList<SettingOption> ThemeOptions { get; } =
@@ -83,6 +86,18 @@ public partial class SettingsPageViewModel : ObservableObject
         new("3", "3 次"),
         new("4", "4 次"),
         new("5", "5 次"),
+    ];
+
+    public IReadOnlyList<SettingOption> MaxTaskOptions { get; } =
+    [
+        new("1", "1 个任务"), new("2", "2 个任务"), new("3", "3 个任务"),
+        new("4", "4 个任务"), new("6", "6 个任务"), new("8", "8 个任务"),
+    ];
+
+    public IReadOnlyList<SettingOption> SpeedLimitOptions { get; } =
+    [
+        new("0", "不限速"), new("512", "512 KB/s"), new("1024", "1 MB/s"),
+        new("2048", "2 MB/s"), new("5120", "5 MB/s"), new("10240", "10 MB/s"),
     ];
 
     [ObservableProperty]
@@ -160,6 +175,31 @@ public partial class SettingsPageViewModel : ObservableObject
     [ObservableProperty]
     public partial SettingOption? SelectedDownloadDirectoryLayout { get; set; }
 
+    [ObservableProperty] public partial SettingOption? SelectedMaxDownloadTasks { get; set; }
+    [ObservableProperty] public partial SettingOption? SelectedSpeedLimit { get; set; }
+    [ObservableProperty] public partial bool DownloadScheduleEnabled { get; set; }
+    [ObservableProperty] public partial TimeSpan DownloadScheduleTime { get; set; } = TimeSpan.FromHours(2);
+
+    [ObservableProperty]
+    public partial bool CheckUpdatesOnStartup { get; set; }
+
+    [ObservableProperty]
+    public partial string AppUpdateStatus { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string AppUpdateNotes { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsCheckingAppUpdate { get; set; }
+
+    [ObservableProperty]
+    public partial double AppUpdateDownloadProgress { get; set; }
+
+    [ObservableProperty]
+    public partial bool CanDownloadAppUpdate { get; set; }
+
+    private AppUpdateInfo? _availableUpdate;
+
     public string DefaultStripZoomText => $"{DefaultStripZoomPercent:0}%";
 
     partial void OnDefaultStripZoomPercentChanged(double value) =>
@@ -189,6 +229,11 @@ public partial class SettingsPageViewModel : ObservableObject
                 ?? ChapterRetryOptions.First(option => option.Key == "3");
             SelectedDownloadDirectoryLayout = DownloadDirectoryLayoutOptions.First(
                 option => option.Key == _applicationSettings.DownloadDirectoryLayout);
+            SelectedMaxDownloadTasks = MaxTaskOptions.FirstOrDefault(option => option.Key == _applicationSettings.MaxConcurrentDownloadTasks.ToString()) ?? MaxTaskOptions[1];
+            SelectedSpeedLimit = SpeedLimitOptions.FirstOrDefault(option => option.Key == _applicationSettings.DownloadSpeedLimitKbps.ToString()) ?? SpeedLimitOptions[0];
+            DownloadScheduleEnabled = _applicationSettings.DownloadScheduleEnabled;
+            DownloadScheduleTime = _applicationSettings.DownloadScheduleTime;
+            CheckUpdatesOnStartup = _applicationSettings.CheckUpdatesOnStartup;
             SettingsError = string.Empty;
             SaveStatus = string.Empty;
             var accountState = await _backendClient.RestoreJmLoginAsync(cancellationToken);
@@ -276,6 +321,12 @@ public partial class SettingsPageViewModel : ObservableObject
                 int.TryParse(SelectedConcurrency?.Key, out var concurrency) ? concurrency : 3,
                 int.TryParse(SelectedChapterRetryCount?.Key, out var retryCount) ? retryCount : 3,
                 SelectedDownloadDirectoryLayout?.Key ?? ApplicationSettingsService.DirectoryLayoutOrganized);
+            _applicationSettings.UpdateCheckUpdatesOnStartup(CheckUpdatesOnStartup);
+            _applicationSettings.UpdateDownloadPlan(
+                int.TryParse(SelectedMaxDownloadTasks?.Key, out var maxTasks) ? maxTasks : 2,
+                int.TryParse(SelectedSpeedLimit?.Key, out var speedLimit) ? speedLimit : 0,
+                DownloadScheduleEnabled,
+                DownloadScheduleTime);
 
             // 2. 尝试更新下载目录。存在未结束的下载任务时会被拒绝,
             //    单独提示即可,不能因为目录更新失败而丢失其他设置。
@@ -326,6 +377,11 @@ public partial class SettingsPageViewModel : ObservableObject
         SelectedChapterRetryCount = ChapterRetryOptions.First(option => option.Key == "3");
         SelectedDownloadDirectoryLayout = DownloadDirectoryLayoutOptions.First(
             option => option.Key == ApplicationSettingsService.DirectoryLayoutOrganized);
+        CheckUpdatesOnStartup = true;
+        SelectedMaxDownloadTasks = MaxTaskOptions[1];
+        SelectedSpeedLimit = SpeedLimitOptions[0];
+        DownloadScheduleEnabled = false;
+        DownloadScheduleTime = TimeSpan.FromHours(2);
         SettingsError = string.Empty;
         SaveStatus = "已恢复默认值，点击“保存设置”后生效。";
     }
@@ -390,5 +446,39 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             SettingsError = $"清空下载历史失败: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task CheckAppUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        IsCheckingAppUpdate = true;
+        CanDownloadAppUpdate = false;
+        AppUpdateStatus = "正在检查 GitHub Release...";
+        try
+        {
+            _availableUpdate = await _appUpdateService.CheckAsync(cancellationToken);
+            AppUpdateNotes = _availableUpdate.ReleaseNotes;
+            CanDownloadAppUpdate = _availableUpdate.IsUpdateAvailable && !string.IsNullOrWhiteSpace(_availableUpdate.AssetDownloadUrl);
+            AppUpdateStatus = _availableUpdate.IsUpdateAvailable
+                ? $"发现新版本 {_availableUpdate.LatestVersion}（当前 {_availableUpdate.CurrentVersion}）"
+                : $"当前 {_availableUpdate.CurrentVersion} 已是最新版本。";
+        }
+        catch (Exception ex) { AppUpdateStatus = $"检查失败：{ex.Message}"; }
+        finally { IsCheckingAppUpdate = false; }
+    }
+
+    [RelayCommand]
+    private async Task DownloadAppUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        if (_availableUpdate is null) return;
+        CanDownloadAppUpdate = false;
+        try
+        {
+            var progress = new Progress<double>(value => AppUpdateDownloadProgress = value);
+            var path = await _appUpdateService.DownloadInstallerAsync(_availableUpdate, progress, cancellationToken);
+            AppUpdateStatus = $"安装包已下载：{path}。请手动运行，应用不会自动安装或重启。";
+            Process.Start("explorer.exe", $"/select,\"{path}\"");
+        }
+        catch (Exception ex) { AppUpdateStatus = $"下载失败：{ex.Message}"; CanDownloadAppUpdate = true; }
     }
 }

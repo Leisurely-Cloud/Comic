@@ -180,6 +180,7 @@ public sealed class DownloadHistoryItem : ObservableObject
     public string StatusLabel => Status switch
     {
         "pending" => "等待中",
+        "scheduled" => "已计划",
         "running" => "下载中",
         "paused" => "已暂停",
         "pausing" => "正在暂停",

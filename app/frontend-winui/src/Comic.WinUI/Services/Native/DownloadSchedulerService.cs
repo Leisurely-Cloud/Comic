@@ -33,6 +33,8 @@ public sealed class DownloadSchedulerService : IDisposable
     private long _creationSequence;
     private readonly object _historyLock = new();
     private readonly List<DownloadHistoryItem> _history;
+    private readonly DynamicDownloadTaskGate _taskGate = new();
+    private readonly DownloadBandwidthLimiter _bandwidthLimiter = new();
 
     public DownloadSchedulerService(
         JmComicService jmComic,
@@ -294,7 +296,7 @@ public sealed class DownloadSchedulerService : IDisposable
         var state = RequireTask(taskId);
         lock (state.Gate)
         {
-            if (state.Dto.Status is "running" or "paused" or "pausing" or "pending")
+            if (state.Dto.Status is "running" or "paused" or "pausing" or "pending" or "scheduled")
             {
                 state.PauseRequested = false;
                 state.Dto.Status = "stopping";
@@ -517,8 +519,13 @@ public sealed class DownloadSchedulerService : IDisposable
     {
         var token = state.StopSource.Token;
         var failures = new List<FailedChapterRecord>();
+        var slotAcquired = false;
         try
         {
+            await WaitForScheduledStartAsync(state, token);
+            lock (state.Gate) { state.Dto.Status = "pending"; state.Dto.StatusText = "等待下载槽位"; }
+            await _taskGate.WaitAsync(() => _applicationSettings?.MaxConcurrentDownloadTasks ?? 2, token);
+            slotAcquired = true;
             JmMangaInfo? manga;
             lock (state.Gate) manga = state.Manga;
             if (manga is null)
@@ -657,6 +664,10 @@ public sealed class DownloadSchedulerService : IDisposable
                                     selected.Count,
                                     imageToken,
                                     logTransitions: false),
+                                throttleBytes: (bytes, imageToken) => _bandwidthLimiter.WaitAsync(
+                                    bytes,
+                                    () => (_applicationSettings?.DownloadSpeedLimitKbps ?? 0) * 1024L,
+                                    imageToken),
                                 preferredDirectoryName: PreferredChapterDirectoryName(
                                     chapter,
                                     rootDirectory,
@@ -823,7 +834,34 @@ public sealed class DownloadSchedulerService : IDisposable
             }
             AppendLog(state, "error", ex.Message);
         }
-        finally { RecordHistory(state); }
+        finally
+        {
+            if (slotAcquired) _taskGate.Release();
+            RecordHistory(state);
+        }
+    }
+
+    private async Task WaitForScheduledStartAsync(NativeDownloadTask state, CancellationToken cancellationToken)
+    {
+        if (_applicationSettings?.DownloadScheduleEnabled != true) return;
+        var now = DateTimeOffset.Now;
+        var scheduled = now.Date + _applicationSettings.DownloadScheduleTime;
+        if (scheduled <= now) scheduled = scheduled.AddDays(1);
+        lock (state.Gate)
+        {
+            state.Dto.Status = "scheduled";
+            state.Dto.StatusText = $"计划于 {scheduled:MM-dd HH:mm} 开始";
+        }
+        await Task.Delay(scheduled - now, cancellationToken);
+    }
+
+    public async Task<int> RetryAllFailedAsync(CancellationToken cancellationToken = default)
+    {
+        var ids = _downloads.Values.Select(CloneTask)
+            .Where(task => task.Status is "failed" or "partial")
+            .Select(task => task.Id).ToList();
+        foreach (var id in ids) await RetryDownloadAsync(id, cancellationToken);
+        return ids.Count;
     }
 
     internal Task<JmMangaInfo> ResolveMangaInfoForRunAsync(
@@ -1539,5 +1577,62 @@ public sealed class DownloadSchedulerService : IDisposable
             RequestStop();
             StopSource.Dispose();
         }
+    }
+}
+
+internal sealed class DynamicDownloadTaskGate
+{
+    private readonly object _gate = new();
+    private int _active;
+    private readonly Queue<TaskCompletionSource> _waiters = new();
+
+    public async Task WaitAsync(Func<int> limitProvider, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            TaskCompletionSource? waiter = null;
+            lock (_gate)
+            {
+                if (_active < Math.Max(1, limitProvider())) { _active++; return; }
+                waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _waiters.Enqueue(waiter);
+            }
+            await waiter.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    public void Release()
+    {
+        TaskCompletionSource[] waiters;
+        lock (_gate)
+        {
+            _active = Math.Max(0, _active - 1);
+            waiters = _waiters.ToArray();
+            _waiters.Clear();
+        }
+        foreach (var waiter in waiters) waiter.TrySetResult();
+    }
+}
+
+internal sealed class DownloadBandwidthLimiter
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private DateTimeOffset _nextAvailable = DateTimeOffset.UtcNow;
+
+    public async Task WaitAsync(int bytes, Func<long> bytesPerSecondProvider, CancellationToken cancellationToken)
+    {
+        var limit = bytesPerSecondProvider();
+        if (limit <= 0 || bytes <= 0) return;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_nextAvailable < now) _nextAvailable = now;
+            var delayUntil = _nextAvailable;
+            _nextAvailable += TimeSpan.FromSeconds(bytes / (double)limit);
+            var delay = delayUntil - now;
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken);
+        }
+        finally { _gate.Release(); }
     }
 }

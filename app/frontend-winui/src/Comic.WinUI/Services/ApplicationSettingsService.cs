@@ -68,6 +68,11 @@ public sealed class ApplicationSettingsService
     public int ChapterRetryCount => NormalizeRetryCount(_preferences.ChapterRetryCount);
 
     public string DownloadDirectoryLayout => NormalizeDirectoryLayout(_preferences.DownloadDirectoryLayout);
+    public bool CheckUpdatesOnStartup => _preferences.CheckUpdatesOnStartup;
+    public int MaxConcurrentDownloadTasks => Math.Clamp(_preferences.MaxConcurrentDownloadTasks, 1, 8);
+    public int DownloadSpeedLimitKbps => Math.Clamp(_preferences.DownloadSpeedLimitKbps, 0, 102400);
+    public bool DownloadScheduleEnabled => _preferences.DownloadScheduleEnabled;
+    public TimeSpan DownloadScheduleTime => TimeSpan.TryParse(_preferences.DownloadScheduleTime, out var value) ? value : TimeSpan.Zero;
 
     public string SettingsDirectory => Path.GetDirectoryName(_filePath) ?? string.Empty;
 
@@ -154,6 +159,21 @@ public sealed class ApplicationSettingsService
     public void UpdateStorageRoot(string storageRoot)
     {
         _preferences.StorageRoot = Path.GetFullPath(storageRoot);
+        Save();
+    }
+
+    public void UpdateCheckUpdatesOnStartup(bool enabled)
+    {
+        _preferences.CheckUpdatesOnStartup = enabled;
+        Save();
+    }
+
+    public void UpdateDownloadPlan(int maxConcurrentTasks, int speedLimitKbps, bool scheduleEnabled, TimeSpan scheduleTime)
+    {
+        _preferences.MaxConcurrentDownloadTasks = Math.Clamp(maxConcurrentTasks, 1, 8);
+        _preferences.DownloadSpeedLimitKbps = Math.Clamp(speedLimitKbps, 0, 102400);
+        _preferences.DownloadScheduleEnabled = scheduleEnabled;
+        _preferences.DownloadScheduleTime = scheduleTime.ToString(@"hh\:mm");
         Save();
     }
 
@@ -244,5 +264,10 @@ public sealed class ApplicationSettingsService
         public int DownloadConcurrency { get; set; } = 3;
         public int ChapterRetryCount { get; set; } = 3;
         public string DownloadDirectoryLayout { get; set; } = DirectoryLayoutOrganized;
+        public bool CheckUpdatesOnStartup { get; set; } = true;
+        public int MaxConcurrentDownloadTasks { get; set; } = 2;
+        public int DownloadSpeedLimitKbps { get; set; }
+        public bool DownloadScheduleEnabled { get; set; }
+        public string DownloadScheduleTime { get; set; } = "02:00";
     }
 }

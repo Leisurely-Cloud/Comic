@@ -74,6 +74,7 @@
                 </StackPanel>
                 <StackPanel x:Name="BatchToggleButtons" Grid.Column="1" Orientation="Horizontal" Spacing="4"
                             VerticalAlignment="Center">
+                    <Button Content="重试全部失败任务" Command="{x:Bind ViewModel.RetryAllFailedTasksCommand, Mode=OneWay}" />
                     <Button Content="批量操作" Click="OnToggleBatchModeClick"
                             Visibility="{x:Bind ViewModel.IsBatchMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
                     <Button Content="退出批量" Click="OnToggleBatchModeClick"

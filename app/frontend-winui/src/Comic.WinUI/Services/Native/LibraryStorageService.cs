@@ -209,7 +209,11 @@ public sealed class LibraryStorageService
                 ParseDate(metadata?.SavedAt) ?? directory.LastWriteTime,
                 metadata?.IsFavorite ?? false,
                 metadata?.Completed ?? false,
-                0));
+                0)
+            {
+                MangaId = inferredMangaId ?? string.Empty,
+                DiskUsageBytes = CalculateDirectorySize(directory),
+            });
         }
         var deduplicated = entries
             .GroupBy(LibraryIdentityKey, StringComparer.OrdinalIgnoreCase)
@@ -242,6 +246,13 @@ public sealed class LibraryStorageService
         return mangaId is null
             ? $"path:{entry.RootDirectory}"
             : $"{SiteCatalog.Key}:{mangaId}";
+    }
+
+    private static long CalculateDirectorySize(DirectoryInfo directory)
+    {
+        try { return directory.EnumerateFiles("*", System.IO.SearchOption.AllDirectories).Sum(file => file.Length); }
+        catch (UnauthorizedAccessException) { return 0; }
+        catch (IOException) { return 0; }
     }
 
     private static string? ResolveMangaId(LibraryMetadata? metadata, string directoryName) =>
@@ -331,6 +342,65 @@ public sealed class LibraryStorageService
         }
 
         return deletedCount;
+    }
+
+    public DuplicateCleanupPreview PreviewDuplicateCleanup(string rootDirectory)
+    {
+        var primary = ResolveLibraryRoot(rootDirectory);
+        return new DuplicateCleanupPreview
+        {
+            PrimaryRoot = primary,
+            Items = FindDuplicateDirectories(primary)
+                .Select(path => new DuplicateCleanupItem
+                {
+                    Directory = path,
+                    ChapterCount = EnumerateChapterDirectories(path).Count,
+                    SizeBytes = CalculateDirectorySize(new DirectoryInfo(path)),
+                })
+                .ToList(),
+        };
+    }
+
+    public int CleanupDuplicateDirectories(string rootDirectory, IReadOnlyCollection<string> confirmedDirectories)
+    {
+        var primary = ResolveLibraryRoot(rootDirectory);
+        var current = FindDuplicateDirectories(primary);
+        var confirmed = confirmedDirectories
+            .Select(ResolveExistingDirectoryPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expected = current.Order(StringComparer.OrdinalIgnoreCase).ToList();
+        if (!confirmed.SequenceEqual(expected, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("重复目录已发生变化，请重新预览后再清理。");
+
+        var count = 0;
+        try
+        {
+            foreach (var path in expected)
+            {
+                _recycleDirectory(path);
+                count++;
+            }
+        }
+        finally { InvalidateLibraryCache(); }
+        return count;
+    }
+
+    private List<string> FindDuplicateDirectories(string primaryRoot)
+    {
+        var metadata = LoadLibraryMetadata(primaryRoot);
+        var mangaId = ResolveMangaId(metadata, Path.GetFileName(primaryRoot));
+        if (mangaId is null) return [];
+        return new DirectoryInfo(StorageRoot).EnumerateDirectories()
+            .Where(directory => !SamePath(directory.FullName, primaryRoot) &&
+                !directory.Name.StartsWith('.') &&
+                !directory.Name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase) &&
+                ResolveMangaId(LoadLibraryMetadata(directory.FullName), directory.Name) == mangaId &&
+                EnumerateChapterDirectories(directory.FullName).Count > 0)
+            .Select(directory => ResolveLibraryRoot(directory.FullName))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     // ---- JM 目录导入 ----
@@ -976,7 +1046,11 @@ public sealed record LibraryEntry(
     DateTime SavedAt,
     bool IsFavorite,
     bool Completed,
-    int DuplicateDirectoryCount);
+    int DuplicateDirectoryCount)
+{
+    public string MangaId { get; init; } = string.Empty;
+    public long DiskUsageBytes { get; init; }
+}
 
 internal sealed record ChapterContent(DirectoryInfo Directory, IReadOnlyList<string> Images);
 

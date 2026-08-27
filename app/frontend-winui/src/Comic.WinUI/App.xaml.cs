@@ -65,6 +65,8 @@ public sealed partial class App : Application
         services.AddSingleton<ApplicationSettingsService>();
         services.AddSingleton<IJmCredentialStore, WindowsJmCredentialStore>();
         services.AddSingleton<ReadingProgressService>();
+        services.AddSingleton<ReaderPreferenceService>();
+        services.AddSingleton<AppUpdateService>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();
         services.AddTransient<LibraryPageViewModel>();

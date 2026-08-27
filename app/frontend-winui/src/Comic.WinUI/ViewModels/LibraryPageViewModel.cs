@@ -46,6 +46,21 @@ public partial class LibraryPageViewModel : ObservableObject
     public partial string Keyword { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial int CompletionFilterIndex { get; set; }
+
+    [ObservableProperty]
+    public partial bool FavoritesOnly { get; set; }
+
+    [ObservableProperty]
+    public partial bool UpdatesOnly { get; set; }
+
+    [ObservableProperty]
+    public partial int SortIndex { get; set; } = 1;
+
+    private LibraryCompletionFilter CompletionFilter => (LibraryCompletionFilter)Math.Clamp(CompletionFilterIndex, 0, 2);
+    private LibrarySort Sort => (LibrarySort)Math.Clamp(SortIndex, 0, 2);
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanDeleteSelectedManga))]
     public partial LibraryItemViewModel? SelectedItem { get; set; }
 
@@ -113,6 +128,7 @@ public partial class LibraryPageViewModel : ObservableObject
     public string SelectedContinueReading => SelectedItem?.ContinueReadingText ?? string.Empty;
 
     public string SelectedFavoriteButtonText => SelectedItem?.FavoriteButtonText ?? "收藏";
+    public bool SelectedHasDuplicates => SelectedItem?.HasDuplicateDirectories == true;
 
     public bool CanDeleteSelectedManga =>
         SelectedItem is not null &&
@@ -200,7 +216,10 @@ public partial class LibraryPageViewModel : ObservableObject
         IsLoading = true;
         try
         {
-            var result = await _backendClient.GetLibraryAsync(keyword: Keyword.Trim(), page: _currentPage, pageSize: _pageSize, cancellationToken: cancellationToken);
+            var result = await _backendClient.GetLibraryAsync(
+                keyword: Keyword.Trim(), page: _currentPage, pageSize: _pageSize,
+                completion: CompletionFilter, favoritesOnly: FavoritesOnly, updatesOnly: UpdatesOnly, sort: Sort,
+                cancellationToken: cancellationToken);
             Items.Clear();
             foreach (var item in result.Items)
             {
@@ -320,6 +339,7 @@ public partial class LibraryPageViewModel : ObservableObject
             UpdateCheckStatus = updates.Count > 0
                 ? $"发现 {updates.Count} 部漫画有更新"
                 : "所有漫画已是最新";
+            if (UpdatesOnly) await SearchAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -387,6 +407,36 @@ public partial class LibraryPageViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLastChapter));
         OnPropertyChanged(nameof(SelectedContinueReading));
         OnPropertyChanged(nameof(SelectedFavoriteButtonText));
+        OnPropertyChanged(nameof(SelectedHasDuplicates));
+    }
+
+    partial void OnCompletionFilterIndexChanged(int value) => _ = SearchAsync();
+    partial void OnFavoritesOnlyChanged(bool value) => _ = SearchAsync();
+    partial void OnUpdatesOnlyChanged(bool value) => _ = SearchAsync();
+    partial void OnSortIndexChanged(int value) => _ = SearchAsync();
+
+    public Task<DuplicateCleanupPreview?> PreviewDuplicateCleanupAsync(CancellationToken cancellationToken = default)
+    {
+        if (SelectedItem is null || SelectedItem.DuplicateDirectoryCount == 0) return Task.FromResult<DuplicateCleanupPreview?>(null);
+        return PreviewDuplicateCleanupCoreAsync(SelectedItem.RootDir, cancellationToken);
+    }
+
+    private async Task<DuplicateCleanupPreview?> PreviewDuplicateCleanupCoreAsync(string rootDir, CancellationToken cancellationToken)
+    {
+        try { return await _backendClient.PreviewDuplicateCleanupAsync(rootDir, cancellationToken); }
+        catch (Exception ex) { PageError = $"预览重复目录失败：{ex.Message}"; return null; }
+    }
+
+    public async Task CleanupDuplicateDirectoriesAsync(DuplicateCleanupPreview preview, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var count = await _backendClient.CleanupDuplicateDirectoriesAsync(
+                preview.PrimaryRoot, preview.Items.Select(item => item.Directory).ToList(), cancellationToken);
+            await LoadAsync(cancellationToken);
+            LibraryStatus = $"已将 {count} 个重复目录移入回收站。";
+        }
+        catch (Exception ex) { PageError = $"清理失败：{ex.Message}"; }
     }
 
     [RelayCommand]
@@ -609,6 +659,26 @@ public partial class LibraryItemViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(DuplicateDirectoriesText))]
     public partial int DuplicateDirectoryCount { get; set; }
 
+    [ObservableProperty]
+    public partial string MangaId { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool Completed { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DiskUsageText))]
+    public partial long DiskUsageBytes { get; set; }
+
+    public string DiskUsageText => DiskUsageBytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"磁盘 {DiskUsageBytes / (1024d * 1024 * 1024):0.0} GB",
+        >= 1024L * 1024 => $"磁盘 {DiskUsageBytes / (1024d * 1024):0.0} MB",
+        _ => $"磁盘 {DiskUsageBytes / 1024d:0} KB",
+    };
+
+    public string CompletionText => Completed ? "已完成" : "未完成";
+    public string MangaIdText => string.IsNullOrWhiteSpace(MangaId) ? string.Empty : $"JM{MangaId}";
+
     public bool HasDuplicateDirectories => DuplicateDirectoryCount > 0;
 
     public string DuplicateDirectoriesText => DuplicateDirectoryCount > 0
@@ -636,6 +706,9 @@ public partial class LibraryItemViewModel : ObservableObject
             LastDownloadedChapterTitle = dto.LastDownloadedChapterTitle,
             IsFavorite = dto.IsFavorite,
             DuplicateDirectoryCount = dto.DuplicateDirectoryCount,
+            MangaId = dto.MangaId,
+            Completed = dto.Completed,
+            DiskUsageBytes = dto.DiskUsageBytes,
         };
     }
 }

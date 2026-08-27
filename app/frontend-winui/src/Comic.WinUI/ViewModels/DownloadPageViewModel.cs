@@ -1504,6 +1504,19 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    [RelayCommand]
+    public async Task RetryAllFailedTasksAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var count = await _backendClient.RetryAllFailedDownloadsAsync(cancellationToken);
+            PageError = string.Empty;
+            DownloadNotice = count > 0 ? $"已统一重试 {count} 个失败任务。" : "当前没有可重试的失败任务。";
+            await InitializeAsync(cancellationToken);
+        }
+        catch (Exception ex) { PageError = $"统一重试失败：{ex.Message}"; }
+    }
+
     public async Task<bool> RetryHistoryItemAsync(string historyId, CancellationToken cancellationToken = default)
     {
         var history = HistoryItems.FirstOrDefault(item => item.Id == historyId);
@@ -1572,7 +1585,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         => CurrentTask?.CanRetryFailures == true;
 
     private bool CanStop()
-        => CurrentTask is not null && CurrentTask.Status is "pending" or "running" or "paused" or "pausing" or "dispatched";
+        => CurrentTask is not null && CurrentTask.Status is "pending" or "scheduled" or "running" or "paused" or "pausing" or "dispatched";
 
     partial void OnCurrentTaskChanged(DownloadTaskItemViewModel? value)
     {

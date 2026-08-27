@@ -281,6 +281,30 @@
                                       DisplayMemberPath="DisplayName" />
                         </Grid>
                     </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE916;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2"><TextBlock Text="任务并发与限速" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="限制同时运行的漫画任务数和所有下载的合计速度。" Style="{StaticResource PageDescriptionTextBlockStyle}"/></StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                <ComboBox Width="130" ItemsSource="{x:Bind ViewModel.MaxTaskOptions, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedMaxDownloadTasks, Mode=TwoWay}" DisplayMemberPath="DisplayName" />
+                                <ComboBox Width="130" ItemsSource="{x:Bind ViewModel.SpeedLimitOptions, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedSpeedLimit, Mode=TwoWay}" DisplayMemberPath="DisplayName" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE823;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2"><TextBlock Text="定时下载" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="启用后，新建和重试任务会等待到下一个指定时间再开始。" Style="{StaticResource PageDescriptionTextBlockStyle}"/></StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.DownloadScheduleEnabled, Mode=TwoWay}" OffContent="关闭" OnContent="启用" />
+                                <TimePicker Time="{x:Bind ViewModel.DownloadScheduleTime, Mode=TwoWay}" ClockIdentifier="24HourClock" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel x:Name="ReaderSection" Spacing="8">
@@ -396,6 +420,42 @@
 
                 <StackPanel x:Name="MaintenanceSection" Spacing="8">
                     <TextBlock Text="数据与维护" Style="{StaticResource SectionHeaderTextBlockStyle}" />
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE895;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="软件更新" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="从 GitHub Release 检查并下载新版安装包；不会静默安装或自动重启。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                <ToggleSwitch Header="启动时检查" IsOn="{x:Bind ViewModel.CheckUpdatesOnStartup, Mode=TwoWay}" />
+                                <Button Content="立即检查" Command="{x:Bind ViewModel.CheckAppUpdateCommand, Mode=OneWay}" />
+                                <Button Content="下载安装包" Command="{x:Bind ViewModel.DownloadAppUpdateCommand, Mode=OneWay}"
+                                        IsEnabled="{x:Bind ViewModel.CanDownloadAppUpdate, Mode=OneWay}" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                       Text="{x:Bind ViewModel.AppUpdateStatus, Mode=OneWay}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" MaxHeight="180"
+                                       Text="{x:Bind ViewModel.AppUpdateNotes, Mode=OneWay}" TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                            <ProgressBar Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0"
+                                         VerticalAlignment="Bottom" Maximum="100"
+                                         Value="{x:Bind ViewModel.AppUpdateDownloadProgress, Mode=OneWay}" />
+                        </Grid>
+                    </Border>
 
                     <Border Style="{StaticResource SettingsRowBorderStyle}">
                         <Grid ColumnSpacing="16">
