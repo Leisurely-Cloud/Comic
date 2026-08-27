@@ -135,7 +135,10 @@ public sealed partial class ReaderPage : Page
 
     private double _pagedBaseWidth;
     private double _pagedBaseHeight;
+    private double _secondaryPagedBaseWidth;
+    private double _secondaryPagedBaseHeight;
     private bool _pagedImageReady;
+    private bool _secondaryPagedImageReady;
 
     private void OnPagedZoomOutClick(object sender, RoutedEventArgs e) =>
         ViewModel.ChangePagedZoom(-10);
@@ -152,38 +155,60 @@ public sealed partial class ReaderPage : Page
         {
             DispatcherQueue.TryEnqueue(ApplyPagedZoom);
         }
+        else if (e.PropertyName == nameof(ReaderPageViewModel.IsDoublePage))
+        {
+            DispatcherQueue.TryEnqueue(UpdatePagedBaseSizes);
+        }
     }
 
     private void OnPagedImageOpened(object sender, RoutedEventArgs e)
     {
         if (sender is not Image { Source: BitmapImage bitmap }) return;
-        UpdatePagedBaseSize(bitmap);
-        ApplyPagedZoom();
+        UpdatePagedBaseSizes();
+    }
+
+    private void OnSecondaryPagedImageOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Image { Source: BitmapImage }) return;
+        UpdatePagedBaseSizes();
     }
 
     private void OnPagedViewportSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (PagedImage.Source is BitmapImage bitmap)
-        {
-            UpdatePagedBaseSize(bitmap);
-            ApplyPagedZoom();
-        }
+        UpdatePagedBaseSizes();
     }
 
-    /// <summary>按视口计算 100% 缩放对应的图片基准尺寸(恰好适应阅读区)。</summary>
-    private void UpdatePagedBaseSize(BitmapImage bitmap)
+    /// <summary>按视口计算 100% 缩放尺寸；双页模式下每页各占一半可用宽度。</summary>
+    private void UpdatePagedBaseSizes()
     {
-        if (bitmap.PixelWidth <= 0 || bitmap.PixelHeight <= 0) return;
         var viewportWidth = Math.Max(1, PagedScrollViewer.ViewportWidth > 0
             ? PagedScrollViewer.ViewportWidth
             : PagedScrollViewer.ActualWidth);
         var viewportHeight = Math.Max(1, PagedScrollViewer.ViewportHeight > 0
             ? PagedScrollViewer.ViewportHeight
             : PagedScrollViewer.ActualHeight);
-        var fitScale = Math.Min(viewportWidth / bitmap.PixelWidth, viewportHeight / bitmap.PixelHeight);
-        _pagedBaseWidth = bitmap.PixelWidth * fitScale;
-        _pagedBaseHeight = bitmap.PixelHeight * fitScale;
-        _pagedImageReady = true;
+
+        if (PagedImage.Source is BitmapImage primary)
+        {
+            (_pagedBaseWidth, _pagedBaseHeight) = ReaderLayoutCalculator.CalculateFitSize(
+                primary.PixelWidth, primary.PixelHeight, viewportWidth, viewportHeight, ViewModel.IsDoublePage);
+            _pagedImageReady = _pagedBaseWidth > 0;
+        }
+
+        if (ViewModel.IsDoublePage && SecondaryPagedImage.Source is BitmapImage secondary)
+        {
+            (_secondaryPagedBaseWidth, _secondaryPagedBaseHeight) = ReaderLayoutCalculator.CalculateFitSize(
+                secondary.PixelWidth, secondary.PixelHeight, viewportWidth, viewportHeight, true);
+            _secondaryPagedImageReady = _secondaryPagedBaseWidth > 0;
+        }
+        else
+        {
+            _secondaryPagedImageReady = false;
+            SecondaryPagedImage.ClearValue(FrameworkElement.WidthProperty);
+            SecondaryPagedImage.ClearValue(FrameworkElement.HeightProperty);
+        }
+
+        ApplyPagedZoom();
     }
 
     private void ApplyPagedZoom()
@@ -192,6 +217,11 @@ public sealed partial class ReaderPage : Page
         var zoom = ViewModel.PagedZoomPercent / 100d;
         PagedImage.Width = Math.Max(1, _pagedBaseWidth * zoom);
         PagedImage.Height = Math.Max(1, _pagedBaseHeight * zoom);
+        if (_secondaryPagedImageReady)
+        {
+            SecondaryPagedImage.Width = Math.Max(1, _secondaryPagedBaseWidth * zoom);
+            SecondaryPagedImage.Height = Math.Max(1, _secondaryPagedBaseHeight * zoom);
+        }
     }
 
     private Windows.Foundation.Point StripViewportCenter() => new(

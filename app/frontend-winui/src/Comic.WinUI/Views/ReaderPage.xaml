@@ -159,7 +159,7 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center" ImageOpened="OnPagedImageOpened" />
                     <Image x:Name="SecondaryPagedImage" Grid.Column="1"
                            Source="{x:Bind ViewModel.SecondaryImage, Mode=OneWay}" Stretch="Uniform"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" ImageOpened="OnSecondaryPagedImageOpened"
                            Visibility="{x:Bind ViewModel.IsDoublePage, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </Grid>
             </ScrollViewer>
