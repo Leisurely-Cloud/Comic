@@ -2,7 +2,12 @@ namespace Comic.WinUI.Services;
 
 public static class ReaderLayoutCalculator
 {
+    public const double StripLoadingPlaceholderHeight = 480;
+
     public static int PrimaryColumnSpan(bool isDoublePage) => isDoublePage ? 1 : 2;
+
+    public static double StripItemMinHeight(bool hasLoadedImage) =>
+        hasLoadedImage ? 0 : StripLoadingPlaceholderHeight;
 
     public static (double Width, double Height) CalculateFitSize(
         double pixelWidth,

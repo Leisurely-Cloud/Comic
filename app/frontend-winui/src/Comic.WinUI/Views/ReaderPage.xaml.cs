@@ -375,8 +375,21 @@ public sealed partial class ReaderPage : Page
         if (args.Index < 0 || args.Index >= ViewModel.StripImages.Count) return;
 
         var item = ViewModel.StripImages[args.Index];
+        if (args.Element is Grid container)
+        {
+            container.MinHeight = ReaderLayoutCalculator.StripItemMinHeight(item.Image is not null);
+        }
         _stripItemsByElement[args.Element] = item;
         _ = ViewModel.LoadStripImageAsync(item);
+    }
+
+    private void OnStripImageOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Image { Parent: Grid container }) return;
+
+        container.MinHeight = ReaderLayoutCalculator.StripItemMinHeight(true);
+        container.InvalidateMeasure();
+        StripImageRepeater.InvalidateMeasure();
     }
 
     private void OnStripElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)

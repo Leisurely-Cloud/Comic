@@ -198,7 +198,8 @@
                             <Image Source="{x:Bind Image, Mode=OneWay}"
                                    Stretch="Uniform"
                                    HorizontalAlignment="Stretch"
-                                   VerticalAlignment="Top" />
+                                   VerticalAlignment="Top"
+                                   ImageOpened="OnStripImageOpened" />
                             <ProgressRing Width="40" Height="40"
                                           IsActive="{x:Bind IsLoading, Mode=OneWay}"
                                           HorizontalAlignment="Center"

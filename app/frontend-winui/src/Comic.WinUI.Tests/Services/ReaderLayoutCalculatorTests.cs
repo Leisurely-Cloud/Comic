@@ -7,6 +7,13 @@ namespace Comic.WinUI.Tests.Services;
 public sealed class ReaderLayoutCalculatorTests
 {
     [TestMethod]
+    public void StripItemMinHeight_RemovesLoadingPlaceholderAfterImageLoads()
+    {
+        Assert.AreEqual(480, ReaderLayoutCalculator.StripItemMinHeight(false));
+        Assert.AreEqual(0, ReaderLayoutCalculator.StripItemMinHeight(true));
+    }
+
+    [TestMethod]
     public void PrimaryColumnSpan_SinglePageFillsBothColumnsAndSpreadUsesOne()
     {
         Assert.AreEqual(2, ReaderLayoutCalculator.PrimaryColumnSpan(false));
