@@ -184,6 +184,8 @@ public sealed partial class ReaderPage : Page
         // InitializeComponent can raise SizeChanged before OnNavigatedTo injects the view model.
         if (ViewModel is null) return;
 
+        Grid.SetColumnSpan(PagedImage, ReaderLayoutCalculator.PrimaryColumnSpan(ViewModel.IsDoublePage));
+
         var viewportWidth = Math.Max(1, PagedScrollViewer.ViewportWidth > 0
             ? PagedScrollViewer.ViewportWidth
             : PagedScrollViewer.ActualWidth);

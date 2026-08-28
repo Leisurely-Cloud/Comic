@@ -7,6 +7,13 @@ namespace Comic.WinUI.Tests.Services;
 public sealed class ReaderLayoutCalculatorTests
 {
     [TestMethod]
+    public void PrimaryColumnSpan_SinglePageFillsBothColumnsAndSpreadUsesOne()
+    {
+        Assert.AreEqual(2, ReaderLayoutCalculator.PrimaryColumnSpan(false));
+        Assert.AreEqual(1, ReaderLayoutCalculator.PrimaryColumnSpan(true));
+    }
+
+    [TestMethod]
     public void CalculateFitSize_DoublePageUsesHalfViewportForEachPage()
     {
         var size = ReaderLayoutCalculator.CalculateFitSize(1000, 2000, 2008, 2000, true);

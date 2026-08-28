@@ -2,6 +2,8 @@ namespace Comic.WinUI.Services;
 
 public static class ReaderLayoutCalculator
 {
+    public static int PrimaryColumnSpan(bool isDoublePage) => isDoublePage ? 1 : 2;
+
     public static (double Width, double Height) CalculateFitSize(
         double pixelWidth,
         double pixelHeight,

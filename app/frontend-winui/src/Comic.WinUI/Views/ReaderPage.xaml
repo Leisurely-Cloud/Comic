@@ -154,7 +154,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Image x:Name="PagedImage" Grid.Column="0"
+                    <Image x:Name="PagedImage" Grid.Column="0" Grid.ColumnSpan="2"
                            Source="{x:Bind ViewModel.CurrentImage, Mode=OneWay}" Stretch="Uniform"
                            HorizontalAlignment="Center" VerticalAlignment="Center" ImageOpened="OnPagedImageOpened" />
                     <Image x:Name="SecondaryPagedImage" Grid.Column="1"
