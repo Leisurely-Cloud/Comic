@@ -961,6 +961,9 @@ public sealed class JmComicService : IDisposable
         foreach (var domain in GetOrderedDomains())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            using var domainTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            domainTimeout.CancelAfter(_options.ApiRequestTimeout);
+            var domainToken = domainTimeout.Token;
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var uri = BuildUri($"https://{domain}{path}", parameters);
             try
@@ -975,9 +978,9 @@ public sealed class JmComicService : IDisposable
                     if (!string.IsNullOrWhiteSpace(cookie))
                         request.Headers.TryAddWithoutValidation("Cookie", cookie);
                 }
-                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                using var response = await _httpClient.SendAsync(request, domainToken);
                 response.EnsureSuccessStatusCode();
-                using var envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                using var envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync(domainToken));
                 var root = envelope.RootElement;
                 if (!root.TryGetProperty("code", out var code) || ReadInt(code) != 200)
                 {
@@ -994,6 +997,12 @@ public sealed class JmComicService : IDisposable
                 using var payload = JsonDocument.Parse(plaintext);
                 PromoteDomain(domain);
                 return new ApiRequestResult(payload.RootElement.Clone(), ReadResponseCookies(response));
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                var message = $"等待超过 {_options.ApiRequestTimeout.TotalSeconds:0.#} 秒";
+                _logger.LogWarning(ex, "禁漫天堂 API 域名 {Domain} 响应超时，尝试备用域名", domain);
+                errors.Add($"{domain}: {message}");
             }
             catch (OperationCanceledException)
             {

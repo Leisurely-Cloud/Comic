@@ -433,6 +433,34 @@ public class JmComicServiceTests
     }
 
     [TestMethod]
+    public async Task LoginAsync_TimesOutSlowDomainAndFallsBackToNextDomain()
+    {
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            if (request.RequestUri?.Host == "slow.test")
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            return BuildEncryptedResponse(request, """{"uid":"42","username":"fallback","s":"token"}""");
+        });
+        using var service = new JmComicService(
+            new HttpClient(handler),
+            new JmSiteOptions
+            {
+                ApiDomains = ["slow.test", "working.test"],
+                ApiRequestTimeout = TimeSpan.FromMilliseconds(50),
+            });
+
+        var account = await service.LoginAsync("tester", "secret").WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.AreEqual("fallback", account.Username);
+        CollectionAssert.AreEqual(
+            new[] { "slow.test", "working.test" },
+            handler.RequestedUris.Select(uri => new Uri(uri).Host).ToArray());
+    }
+
+    [TestMethod]
     public async Task GetFavoritesAsync_SendsSessionCookieAndParsesFoldersAndPaging()
     {
         var favoriteRequestSeen = false;

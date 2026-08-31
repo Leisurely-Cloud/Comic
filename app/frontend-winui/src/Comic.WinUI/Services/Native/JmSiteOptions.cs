@@ -22,6 +22,9 @@ public sealed class JmSiteOptions
 
     public string ImageDomain { get; init; } = "cdn-msp2.jmapiproxy2.cc";
 
+    /// <summary>单个 API 域名的响应等待上限；超时后立即尝试下一个备用域名。</summary>
+    public TimeSpan ApiRequestTimeout { get; init; } = TimeSpan.FromSeconds(6);
+
     public int DefaultScrambleId { get; init; } = 220_980;
 
     public string UserAgent { get; init; } =
