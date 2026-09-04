@@ -87,6 +87,32 @@ public sealed class RankingPageViewModelTests
             int.Parse(item.Title.Split(' ')[^1]) % 2 == 0));
     }
 
+    [TestMethod]
+    public async Task EmptyRanking_DoesNotTreatSectionsAsLoadedData()
+    {
+        _handler.Dispose();
+        _handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/categories/filter", request.RequestUri?.AbsolutePath);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(new { total = 0, content = Array.Empty<object>() });
+            var tokenParam = request.Headers.GetValues("tokenparam").Single();
+            var timestamp = long.Parse(tokenParam.Split(',')[0]);
+            var encrypted = EncryptWithSecret(timestamp, "185Hcomic3PAPP7R", payload);
+            var envelope = JsonSerializer.Serialize(new { code = 200, data = encrypted });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(envelope, Encoding.UTF8, "application/json"),
+            };
+        });
+        var viewModel = CreateViewModel();
+
+        await viewModel.InitializeAsync();
+        await WaitUntilAsync(() => !viewModel.IsLoading && viewModel.Sections.Count > 0);
+
+        Assert.IsFalse(viewModel.HasData, "只有榜单分类而没有条目时，下次进入页面应重新加载。");
+        Assert.AreEqual(0, viewModel.RankingItems.Count);
+    }
+
     private RankingPageViewModel CreateViewModel()
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
@@ -107,7 +133,9 @@ public sealed class RankingPageViewModelTests
 
     private static HttpResponseMessage BuildRankingResponse(HttpRequestMessage request)
     {
-        Assert.AreEqual("/search", request.RequestUri?.AbsolutePath);
+        Assert.AreEqual("/categories/filter", request.RequestUri?.AbsolutePath);
+        Assert.AreEqual("0", ReadQueryValue(request.RequestUri!, "c"));
+        Assert.AreEqual(string.Empty, ReadQueryValue(request.RequestUri!, "order"));
         var page = ReadQueryValue(request.RequestUri!, "page");
         var items = page == "1"
             ? Enumerable.Range(1, 25).Select(index => new

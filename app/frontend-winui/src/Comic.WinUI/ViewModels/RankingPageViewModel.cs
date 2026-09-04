@@ -65,7 +65,7 @@ public partial class RankingPageViewModel : ObservableObject
     public bool HasItems => RankingItems.Count > 0;
 
     /// <summary>是否已有加载过的榜单数据(用于页面重入时避免重复刷新)。</summary>
-    public bool HasData => RankingItems.Count > 0 || Sections.Count > 0;
+    public bool HasData => _loadedItems.Count > 0;
 
     public event EventHandler<string>? NavigateToDetailRequested;
     public event EventHandler<string>? DownloadMangaRequested;

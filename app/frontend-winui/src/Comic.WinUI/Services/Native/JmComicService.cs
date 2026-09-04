@@ -333,10 +333,34 @@ public sealed class JmComicService : IDisposable
         var selectedSection = RankingSections.ContainsKey(section)
             ? section
             : RankingSections.Keys.First();
-        var result = await SearchAsync(string.Empty, page, RankingSections[selectedSection], cancellationToken);
+        var safePage = Math.Max(page, 1);
+        // JM 已不再把空关键词搜索当作分类浏览，/search 会返回 total=0。
+        // 排行榜本身属于分类接口，按全部分类(c=0)和对应排序读取。
+        var payload = await RequestApiAsync(
+            "/categories/filter",
+            new Dictionary<string, string>
+            {
+                ["page"] = safePage.ToString(),
+                ["order"] = string.Empty,
+                ["c"] = "0",
+                ["o"] = RankingSections[selectedSection],
+            },
+            cancellationToken);
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("禁漫天堂排行榜结果结构无效");
+        }
+
+        var items = payload.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array
+            ? content.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.Object &&
+                               !string.IsNullOrWhiteSpace(GetString(item, "id")))
+                .Select(BuildSearchResult)
+                .ToList()
+            : [];
         return new RankingResponse
         {
-            Items = result.Items.Select(item => new RankingItem
+            Items = items.Select(item => new RankingItem
             {
                 Title = item.Title,
                 Url = item.Url,
@@ -348,7 +372,7 @@ public sealed class JmComicService : IDisposable
                 DetailSectionLabel = "站点: 禁漫天堂",
                 Categories = item.Categories,
             }).ToList(),
-            Total = result.Total,
+            Total = Math.Max(ReadIntProperty(payload, "total"), items.Count),
             Section = selectedSection,
             AvailableSections = new Dictionary<string, string>(RankingSections),
             IsSinglePage = false,

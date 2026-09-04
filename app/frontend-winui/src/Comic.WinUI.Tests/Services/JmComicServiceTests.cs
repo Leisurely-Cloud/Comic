@@ -62,6 +62,37 @@ public class JmComicServiceTests
     }
 
     [TestMethod]
+    public async Task GetRankingAsync_UsesCategoryFilterInsteadOfEmptySearch()
+    {
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.AreEqual("/categories/filter", request.RequestUri?.AbsolutePath);
+            var query = request.RequestUri?.Query ?? string.Empty;
+            StringAssert.Contains(query, "page=2");
+            StringAssert.Contains(query, "order=");
+            StringAssert.Contains(query, "c=0");
+            StringAssert.Contains(query, "o=tf");
+            return BuildEncryptedResponse(request,
+                """
+                {
+                  "total": "81",
+                  "content": [
+                    {"id":"1001","name":"榜单作品","author":["作者甲"],"category":{"id":"1","title":"同人"}}
+                  ]
+                }
+                """);
+        });
+        using var service = new JmComicService(new HttpClient(handler));
+
+        var result = await service.GetRankingAsync("最多点赞", 2);
+
+        Assert.AreEqual(81, result.Total);
+        Assert.AreEqual("最多点赞", result.Section);
+        Assert.AreEqual("榜单作品", result.Items.Single().Title);
+        Assert.AreEqual("https://18comic.vip/album/1001", result.Items.Single().Url);
+    }
+
+    [TestMethod]
     public void DecryptPayload_UsesSuppliedDataSecretInsteadOfDefault()
     {
         // 站点密钥集中在 JmSiteOptions 里,注入自定义配置必须真正生效。
