@@ -434,11 +434,11 @@ public class JmComicServiceTests
     [TestMethod]
     public async Task LoginAsync_PostsCredentialsAndKeepsSessionOnlyInMemory()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             Assert.AreEqual(HttpMethod.Post, request.Method);
             Assert.AreEqual("/login", request.RequestUri?.AbsolutePath);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             StringAssert.Contains(form, "username=test%40example.com");
             StringAssert.Contains(form, "password=secret");
             var response = BuildEncryptedResponse(request,
@@ -495,11 +495,11 @@ public class JmComicServiceTests
     public async Task GetFavoritesAsync_SendsSessionCookieAndParsesFoldersAndPaging()
     {
         var favoriteRequestSeen = false;
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             if (request.RequestUri?.AbsolutePath == "/login")
             {
-                await request.Content!.ReadAsStringAsync();
+                await request.Content!.ReadAsStringAsync(cancellationToken);
                 var response = BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
                 response.Headers.TryAddWithoutValidation("Set-Cookie", "device=desktop; Path=/");
                 return response;
@@ -555,7 +555,7 @@ public class JmComicServiceTests
     [TestMethod]
     public async Task SetJmFavoriteAsync_AddsWithPostAndAlbumIdInFormBody()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             if (request.RequestUri?.AbsolutePath == "/login")
                 return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
@@ -563,7 +563,7 @@ public class JmComicServiceTests
             Assert.AreEqual("/favorite", request.RequestUri?.AbsolutePath);
             Assert.AreEqual(HttpMethod.Post, request.Method);
             Assert.AreEqual(string.Empty, request.RequestUri?.Query);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             Assert.AreEqual("aid=1001", form);
             return BuildEncryptedResponse(request, """{"status":"ok","msg":"操作成功"}""");
         });
@@ -579,7 +579,7 @@ public class JmComicServiceTests
     [TestMethod]
     public async Task SetJmFavoriteAsync_RemovesWithSameToggleRequest()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             if (request.RequestUri?.AbsolutePath == "/login")
                 return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
@@ -587,7 +587,7 @@ public class JmComicServiceTests
             Assert.AreEqual("/favorite", request.RequestUri?.AbsolutePath);
             Assert.AreEqual(HttpMethod.Post, request.Method);
             Assert.AreEqual(string.Empty, request.RequestUri?.Query);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             Assert.AreEqual("aid=1001", form);
             return BuildEncryptedResponse(request, """{"status":"ok","msg":"取消成功"}""");
         });
@@ -621,14 +621,14 @@ public class JmComicServiceTests
     [TestMethod]
     public async Task ManageFavoriteFolderAsync_AddsFolderWithOfficialFields()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             if (request.RequestUri?.AbsolutePath == "/login")
                 return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
 
             Assert.AreEqual("/favorite_folder", request.RequestUri?.AbsolutePath);
             Assert.AreEqual(HttpMethod.Post, request.Method);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             StringAssert.Contains(form, "type=add");
             StringAssert.Contains(form, "folder_id=0");
             StringAssert.Contains(form, "folder_name=%E8%BF%BD%E6%9B%B4");
@@ -647,13 +647,13 @@ public class JmComicServiceTests
     [TestMethod]
     public async Task ManageFavoriteFolderAsync_MovesAlbumWithOfficialFields()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             if (request.RequestUri?.AbsolutePath == "/login")
                 return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");
 
             Assert.AreEqual("/favorite_folder", request.RequestUri?.AbsolutePath);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             StringAssert.Contains(form, "type=move");
             StringAssert.Contains(form, "folder_id=7");
             StringAssert.Contains(form, "aid=1001");

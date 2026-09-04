@@ -14,6 +14,22 @@
 
 请提供问题描述、复现步骤、期望与实际行为，以及 Windows 和 .NET 版本。
 
+## 验证
+
+常规测试不会访问外部站点：
+
+```powershell
+dotnet test .\app\frontend-winui\src\Comic.WinUI.Tests\Comic.WinUI.Tests.csproj -c Release -r win-x64 --filter "TestCategory!=Live"
+```
+
+需要确认 JM 当前接口契约时，可显式运行联网冒烟测试：
+
+```powershell
+$env:COMIC_RUN_LIVE_TESTS = "1"
+dotnet test .\app\frontend-winui\src\Comic.WinUI.Tests\Comic.WinUI.Tests.csproj -c Release -r win-x64 --filter "TestCategory=Live"
+Remove-Item Env:COMIC_RUN_LIVE_TESTS
+```
+
 ## 提交要求
 
 - 每个提交聚焦单一变更并使用清晰描述。

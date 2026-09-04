@@ -1,6 +1,7 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ['v*']
@@ -21,17 +22,43 @@ jobs:
       uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj', 'Directory.Build.props') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -r win-x64
+    - name: Audit direct and transitive dependencies
+      run: dotnet list app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj package --vulnerable --include-transitive
+    - name: Verify formatting
+      run: dotnet format app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj --verify-no-changes --no-restore --verbosity minimal
     - name: Build tests
-      run: dotnet build app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-restore
+      # WinUI 测试宿主会产生两个已知 PRI 本地化警告；其余编译器和 SDK 分析器警告均阻塞 CI。
+      run: dotnet build app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-restore -warnaserror -warnnotaserror:PRI257,PRI263
     - name: Run WinUI tests
       # 测试宿主自带 Windows App SDK Runtime,无需修改 runner 的系统包注册。
-      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-build --no-restore --blame-hang-timeout 2m --blame-hang-dump-type none
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-build --no-restore --filter "TestCategory!=Live" --collect:"XPlat Code Coverage" --logger "trx;LogFileName=tests.trx" --results-directory "${{ runner.temp }}/comic-test-results" --blame-hang-timeout 2m --blame-hang-dump-type none
+    - name: Run JM live smoke test
+      if: github.event_name == 'workflow_dispatch'
+      env:
+        COMIC_RUN_LIVE_TESTS: 1
+      run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-build --no-restore --filter "TestCategory=Live" --logger "trx;LogFileName=live-tests.trx" --results-directory "${{ runner.temp }}/comic-test-results" --blame-hang-timeout 1m --blame-hang-dump-type none
+    - name: Upload test and coverage reports
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-results
+        path: ${{ runner.temp }}/comic-test-results
+        if-no-files-found: warn
+        retention-days: 14
 
   package:
     name: Build installer
     runs-on: windows-latest
+    if: github.event_name != 'workflow_dispatch'
     # 打包与发布必须在测试通过后进行,否则 tag 推送会发出未经验证的安装包。
     needs: test
     permissions:
@@ -43,6 +70,13 @@ jobs:
       uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
+    - name: Restore NuGet package cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj', 'Directory.Build.props') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Publish framework-dependent C# app
       shell: pwsh
       run: |

@@ -80,11 +80,11 @@ public sealed class BackendClientTests
     [TestMethod]
     public async Task JmLogin_RestoresSavedCredentialAndLogoutClearsIt()
     {
-        using var handler = new FakeHttpMessageHandler(async (request, _) =>
+        using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
         {
             Assert.AreEqual(HttpMethod.Post, request.Method);
             Assert.AreEqual("/login", request.RequestUri?.AbsolutePath);
-            var form = await request.Content!.ReadAsStringAsync();
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
             StringAssert.Contains(form, "username=tester");
             StringAssert.Contains(form, "password=secret");
             return BuildEncryptedResponse(request, """{"uid":"42","username":"tester","s":"session-token"}""");

@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <!-- 显式启用 SDK 分析器；采用默认规则集，避免一次引入大量历史风格告警。 -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+
+    <!-- .NET 9 默认只审计直接依赖，这里显式覆盖传递依赖并关注高危以上问题。 -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+</Project>
