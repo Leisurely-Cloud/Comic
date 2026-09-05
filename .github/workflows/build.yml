@@ -36,8 +36,8 @@ jobs:
     - name: Verify formatting
       run: dotnet format app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj --verify-no-changes --no-restore --verbosity minimal
     - name: Build tests
-      # WinUI 测试宿主会产生两个已知 PRI 本地化警告；其余编译器和 SDK 分析器警告均阻塞 CI。
-      run: dotnet build app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-restore -warnaserror -warnnotaserror:PRI257,PRI263
+      # 仅将编译器和 SDK 分析器警告视为错误；全局 -warnaserror 会把 MakePri 的本地化诊断强制升级，且无法由 WarningsNotAsErrors 排除。
+      run: dotnet build app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-restore -p:TreatWarningsAsErrors=true
     - name: Run WinUI tests
       # 测试宿主自带 Windows App SDK Runtime,无需修改 runner 的系统包注册。
       run: dotnet test app/frontend-winui/src/Comic.WinUI.Tests/Comic.WinUI.Tests.csproj -c Release -r win-x64 --no-build --no-restore --filter "TestCategory!=Live" --collect:"XPlat Code Coverage" --logger "trx;LogFileName=tests.trx" --results-directory "${{ runner.temp }}/comic-test-results" --blame-hang-timeout 2m --blame-hang-dump-type none
