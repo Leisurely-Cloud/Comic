@@ -432,7 +432,7 @@ public partial class LibraryPageViewModel : ObservableObject
         try
         {
             var count = await _backendClient.CleanupDuplicateDirectoriesAsync(
-                preview.PrimaryRoot, preview.Items.Select(item => item.Directory).ToList(), cancellationToken);
+                preview.PrimaryRoot, preview.Items.Where(item => item.CanCleanup).Select(item => item.Directory).ToList(), cancellationToken);
             await LoadAsync(cancellationToken);
             LibraryStatus = $"已将 {count} 个重复目录移入回收站。";
         }

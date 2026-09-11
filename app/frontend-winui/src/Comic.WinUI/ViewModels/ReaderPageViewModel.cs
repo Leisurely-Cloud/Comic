@@ -27,6 +27,11 @@ public partial class ReaderPageViewModel : ObservableObject
     private readonly ReaderPreferenceService _readerPreferences;
     private readonly string _defaultReaderMode;
     private readonly int _defaultStripZoom;
+    private readonly Func<byte[], CancellationToken, Task<BitmapImage>> _decodePagedImage;
+    private CancellationTokenSource? _pagedImageCts;
+    private int _pagedImageRequest;
+    private int _failedPagedImageIndex = -1;
+    internal Task PagedImageApplication { get; private set; } = Task.CompletedTask;
 
     private CancellationTokenSource? _imageCts;
     private CancellationTokenSource? _preloadCts;
@@ -44,7 +49,19 @@ public partial class ReaderPageViewModel : ObservableObject
         ReadingProgressService readingProgressService,
         ReaderPreferenceService readerPreferences,
         IDispatcher dispatcher)
+        : this(backendClient, applicationSettings, readingProgressService, readerPreferences, dispatcher, DecodePagedImageAsync)
     {
+    }
+
+    internal ReaderPageViewModel(
+        BackendClient backendClient,
+        ApplicationSettingsService applicationSettings,
+        ReadingProgressService readingProgressService,
+        ReaderPreferenceService readerPreferences,
+        IDispatcher dispatcher,
+        Func<byte[], CancellationToken, Task<BitmapImage>> decodePagedImage)
+    {
+        _decodePagedImage = decodePagedImage;
         _backendClient = backendClient;
         _dispatcherQueue = dispatcher;
         _readingProgressService = readingProgressService;
@@ -84,6 +101,9 @@ public partial class ReaderPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string PageError { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool HasFailedPagedImage { get; set; }
 
     [ObservableProperty]
     public partial bool IsStripMode { get; set; }
@@ -342,7 +362,13 @@ public partial class ReaderPageViewModel : ObservableObject
 
         if (value)
         {
+            Interlocked.Increment(ref _pagedImageRequest);
+            _pagedImageCts?.Cancel();
+            HasFailedPagedImage = false;
+            PageError = string.Empty;
+            IsLoading = false;
             CurrentImage = null;
+            SecondaryImage = null;
             RebuildStripImages();
             StripPositionRestoreRequested?.Invoke(CurrentImageIndex);
         }
@@ -408,12 +434,16 @@ public partial class ReaderPageViewModel : ObservableObject
 
     private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default)
     {
+        Interlocked.Increment(ref _pagedImageRequest);
+        _pagedImageCts?.Cancel();
         _imageCts?.Cancel();
         _imageCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _imageCts.Token;
         ClearImageCache();
 
         IsLoading = true;
+        HasFailedPagedImage = false;
+        _failedPagedImageIndex = -1;
         PageError = string.Empty;
         _currentImagePaths = [];
         _currentImageSources = [];
@@ -473,7 +503,7 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         finally
         {
-            IsLoading = false;
+            if (!token.IsCancellationRequested && (IsStripMode || _pagedImageCts is null)) IsLoading = false;
         }
     }
 
@@ -567,9 +597,19 @@ public partial class ReaderPageViewModel : ObservableObject
         var totalCount = CurrentImageCount;
         if (index < 0 || index >= totalCount) return;
 
+        _pagedImageCts?.Cancel();
+        var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _imageCts?.Token ?? CancellationToken.None);
+        _pagedImageCts = request;
+        var token = request.Token;
+        var requestId = Interlocked.Increment(ref _pagedImageRequest);
+        var doublePage = IsDoublePage;
+        var enqueued = false;
         IsLoading = true;
+        PageError = string.Empty;
+        HasFailedPagedImage = false;
         try
         {
+            token.ThrowIfCancellationRequested();
             // 优先使用预加载缓存,否则实时拉取。
             byte[] bytes;
             if (index == _nextImageCacheIndex && _nextImageCache is not null)
@@ -580,55 +620,97 @@ public partial class ReaderPageViewModel : ObservableObject
             }
             else
             {
-                bytes = await GetImageBytesAtAsync(index, cancellationToken);
+                bytes = await GetImageBytesAtAsync(index, token);
             }
 
-            var secondaryBytes = IsDoublePage && index + 1 < totalCount
-                ? await GetImageBytesAtAsync(index + 1, cancellationToken)
+            token.ThrowIfCancellationRequested();
+            var secondaryBytes = doublePage && index + 1 < totalCount
+                ? await GetImageBytesAtAsync(index + 1, token)
                 : null;
-            _dispatcherQueue.TryEnqueue(() =>
-            {
-                // 回调是排队执行的:排队期间用户可能已切章(LoadChapterImagesAsync 会取消
-                // _imageCts)。不重新检查 token 就会把上一章的页码写进新章节的阅读进度。
-                if (cancellationToken.IsCancellationRequested) return;
-
-                var bitmap = new BitmapImage();
-                CurrentImage = bitmap;
-                SecondaryImage = null;
-                CurrentImageIndex = index;
-                NotifyImageNavigationChanged();
-
-                using var stream = new MemoryStream(bytes);
-                stream.Position = 0;
-                bitmap.SetSource(stream.AsRandomAccessStream());
-                if (secondaryBytes is not null)
-                {
-                    var secondary = new BitmapImage();
-                    using var secondaryStream = new MemoryStream(secondaryBytes);
-                    secondary.SetSource(secondaryStream.AsRandomAccessStream());
-                    SecondaryImage = secondary;
-                }
-                SaveReadingProgress(index);
-            });
-
-            // 后台预取下一张,让连续翻页不等待。
-            if (index + 1 < totalCount)
-            {
-                _ = PreloadImageAsync(index + 1);
-            }
+            enqueued = _dispatcherQueue.TryEnqueue(() =>
+                PagedImageApplication = ApplyPagedImageAsync(bytes, secondaryBytes, index, requestId, request, token));
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            PageError = $"加载图片失败: {ex.Message}";
+            enqueued = _dispatcherQueue.TryEnqueue(() =>
+            {
+                try { if (IsCurrentPagedRequest(requestId, token)) ReportPagedImageFailure(index, ex); }
+                finally { FinishPagedRequest(requestId, request, token); }
+            });
         }
         finally
         {
-            _dispatcherQueue.TryEnqueue(() => IsLoading = false);
+            if (!enqueued) FinishPagedRequest(requestId, request, token);
         }
     }
+
+    private async Task ApplyPagedImageAsync(byte[] bytes, byte[]? secondaryBytes, int index,
+        int requestId, CancellationTokenSource request, CancellationToken token)
+    {
+        try
+        {
+            if (!IsCurrentPagedRequest(requestId, token)) return;
+            // 同时覆盖同步异常和异步解码失败；两页都解码成功后才更新显示与阅读进度。
+            var primary = await _decodePagedImage(bytes, token);
+            if (!IsCurrentPagedRequest(requestId, token)) return;
+            var secondary = secondaryBytes is null ? null : await _decodePagedImage(secondaryBytes, token);
+            if (!IsCurrentPagedRequest(requestId, token)) return;
+            CurrentImage = primary;
+            SecondaryImage = secondary;
+            CurrentImageIndex = index;
+            NotifyImageNavigationChanged();
+            PageError = string.Empty;
+            HasFailedPagedImage = false;
+            _failedPagedImageIndex = -1;
+            IsLoading = false;
+            SaveReadingProgress(index);
+            var next = index + (secondaryBytes is null ? 1 : 2);
+            if (next < CurrentImageCount) _ = PreloadImageAsync(next);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (IsCurrentPagedRequest(requestId, token)) ReportPagedImageFailure(index, ex);
+        }
+        finally { FinishPagedRequest(requestId, request, token); }
+    }
+
+    private static async Task<BitmapImage> DecodePagedImageAsync(byte[] bytes, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var bitmap = new BitmapImage();
+        using var stream = new MemoryStream(bytes);
+        await bitmap.SetSourceAsync(stream.AsRandomAccessStream()).AsTask(token);
+        return bitmap;
+    }
+
+    private bool IsCurrentPagedRequest(int requestId, CancellationToken token) =>
+        requestId == _pagedImageRequest && !token.IsCancellationRequested;
+
+    private void ReportPagedImageFailure(int index, Exception error)
+    {
+        CurrentImage = null;
+        SecondaryImage = null;
+        CurrentImageIndex = index;
+        NotifyImageNavigationChanged();
+        _failedPagedImageIndex = index;
+        HasFailedPagedImage = true;
+        PageError = $"第 {index + 1} 页加载失败，可重试或翻到下一页：{error.Message}";
+    }
+
+    private void FinishPagedRequest(int requestId, CancellationTokenSource request, CancellationToken token)
+    {
+        if (requestId == _pagedImageRequest) IsLoading = false;
+        if (ReferenceEquals(_pagedImageCts, request)) _pagedImageCts = null;
+        request.Dispose();
+    }
+
+    [RelayCommand]
+    public Task RetryPagedImageAsync(CancellationToken cancellationToken = default) =>
+        _failedPagedImageIndex < 0 ? Task.CompletedTask : ShowImageAsync(_failedPagedImageIndex, cancellationToken);
 
     /// <summary>按当前模式(在线/本地)读取指定索引的图片字节。</summary>
     private async Task<byte[]> GetImageBytesAtAsync(int index, CancellationToken cancellationToken)
@@ -711,6 +793,7 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public void SaveReadingProgress(int? pageIndex = null)
     {
+        if (!IsStripMode && (HasFailedPagedImage || IsLoading)) return;
         if (SelectedChapter is null ||
             string.IsNullOrWhiteSpace(_rootDir) ||
             TotalImages <= 0)

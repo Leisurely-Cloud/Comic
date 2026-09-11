@@ -246,7 +246,7 @@ public sealed class LibraryStorageServiceTests
         var duplicateRoot = Path.Combine(_storageRoot, "测试漫画 [123]");
         var duplicateChapter = Path.Combine(duplicateRoot, "001_第一话");
         Directory.CreateDirectory(duplicateChapter);
-        File.WriteAllBytes(Path.Combine(duplicateChapter, "001.jpg"), [1, 2]);
+        File.WriteAllBytes(Path.Combine(duplicateChapter, "001.jpg"), [1, 2, 3, 4]);
         File.WriteAllText(Path.Combine(duplicateRoot, "元数据.json"),
             """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""");
         var recycled = new List<string>();
@@ -259,6 +259,7 @@ public sealed class LibraryStorageServiceTests
         var preview = service.PreviewDuplicateCleanup(_mangaRoot);
 
         Assert.AreEqual(1, preview.Items.Count);
+        Assert.IsTrue(preview.Items[0].CanCleanup);
         Assert.IsGreaterThanOrEqualTo(2, preview.TotalBytes);
         Assert.ThrowsExactly<InvalidOperationException>(() =>
             service.CleanupDuplicateDirectories(_mangaRoot, []));
@@ -267,6 +268,89 @@ public sealed class LibraryStorageServiceTests
         Assert.IsTrue(Directory.Exists(_mangaRoot));
         Assert.IsFalse(Directory.Exists(duplicateRoot));
         CollectionAssert.AreEqual(new[] { Path.GetFullPath(duplicateRoot) }, recycled);
+    }
+
+    [TestMethod]
+    [DataRow("different-image")]
+    [DataRow("extra-chapter")]
+    [DataRow("extra-page")]
+    [DataRow("notes")]
+    [DataRow("in-progress")]
+    public void DuplicateCleanup_PreservesUniqueOrUnfinishedContent(string scenario)
+    {
+        var duplicate = CreateCleanupDuplicate();
+        var relative = scenario switch
+        {
+            "different-image" => "1/001.jpg",
+            "extra-chapter" => "2/001.jpg",
+            "extra-page" => "1/002.jpg",
+            "notes" => "notes.txt",
+            _ => ".下载中_2/001.jpg",
+        };
+        var extra = Path.Combine(duplicate, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(extra)!);
+        File.WriteAllBytes(extra, [4, 3, 2, 1]);
+        var recycled = false;
+        var service = new LibraryStorageService(_storageRoot, recycleDirectory: _ => recycled = true);
+
+        var preview = service.PreviewDuplicateCleanup(_mangaRoot);
+        Assert.IsFalse(preview.Items.Single().CanCleanup);
+        Assert.AreEqual(0L, preview.TotalBytes);
+        Assert.ThrowsExactly<InvalidOperationException>(() => service.CleanupDuplicateDirectories(_mangaRoot, [duplicate]));
+        Assert.IsFalse(recycled);
+        CollectionAssert.AreEqual(new byte[] { 4, 3, 2, 1 }, File.ReadAllBytes(extra));
+    }
+
+    [TestMethod]
+    public void DuplicateCleanup_RechecksImageContentAfterPreview()
+    {
+        var duplicate = CreateCleanupDuplicate();
+        var recycled = false;
+        var service = new LibraryStorageService(_storageRoot, recycleDirectory: _ => recycled = true);
+        Assert.IsTrue(service.PreviewDuplicateCleanup(_mangaRoot).Items.Single().CanCleanup);
+
+        File.WriteAllBytes(Path.Combine(duplicate, "1", "001.jpg"), [4, 3, 2, 1]);
+        Assert.ThrowsExactly<InvalidOperationException>(() => service.CleanupDuplicateDirectories(_mangaRoot, [duplicate]));
+        Assert.IsFalse(recycled);
+    }
+
+    [TestMethod]
+    public void DuplicateCleanup_UnreadableFileIsNotTreatedAsEmpty()
+    {
+        var duplicate = CreateCleanupDuplicate();
+        using var locked = new FileStream(Path.Combine(duplicate, "1", "001.jpg"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var service = TestServiceFactory.CreateLibrary(_storageRoot);
+        Assert.IsFalse(service.PreviewDuplicateCleanup(_mangaRoot).Items.Single().CanCleanup);
+    }
+
+    [TestMethod]
+    public void DuplicateCleanup_MatchesNumericAndNamedChaptersAndKeepsOtherCandidates()
+    {
+        var duplicate = CreateCleanupDuplicate();
+        var unique = Path.Combine(_storageRoot, "unique [123]");
+        Directory.CreateDirectory(Path.Combine(unique, "2"));
+        File.WriteAllText(Path.Combine(unique, "元数据.json"),
+            """{"manga_url":"https://18comic.vip/album/123"}""");
+        File.WriteAllBytes(Path.Combine(unique, "2", "001.jpg"), [5]);
+        var recycled = new List<string>();
+        var service = new LibraryStorageService(_storageRoot, recycleDirectory: recycled.Add);
+        var preview = service.PreviewDuplicateCleanup(_mangaRoot);
+        Assert.AreEqual(2, preview.Items.Count);
+        Assert.AreEqual(1, preview.Items.Count(item => item.CanCleanup));
+        Assert.AreEqual(1, service.CleanupDuplicateDirectories(_mangaRoot, [duplicate]));
+        CollectionAssert.AreEqual(new[] { duplicate }, recycled);
+        Assert.IsTrue(File.Exists(Path.Combine(unique, "2", "001.jpg")));
+    }
+
+    private string CreateCleanupDuplicate()
+    {
+        const string metadata = """{"manga_title":"测试漫画","manga_url":"https://18comic.vip/album/123"}""";
+        File.WriteAllText(Path.Combine(_mangaRoot, "元数据.json"), metadata);
+        var duplicate = Path.Combine(_storageRoot, "copy [123]");
+        Directory.CreateDirectory(Path.Combine(duplicate, "1"));
+        File.WriteAllText(Path.Combine(duplicate, "元数据.json"), metadata);
+        File.WriteAllBytes(Path.Combine(duplicate, "1", "001.jpg"), [1, 2, 3, 4]);
+        return duplicate;
     }
 
     [TestMethod]

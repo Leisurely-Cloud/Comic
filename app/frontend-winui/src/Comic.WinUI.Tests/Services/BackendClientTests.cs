@@ -78,6 +78,54 @@ public sealed class BackendClientTests
     }
 
     [TestMethod]
+    public async Task Settings_SwitchingBetweenExistingLibrariesPreservesBothHistories()
+    {
+        var nextRoot = Path.Combine(_container, "existing-library");
+        foreach (var (root, id) in new[] { (_storageRoot, "old-history"), (nextRoot, "next-history") })
+        {
+            var state = Path.Combine(root, ".comic_state");
+            Directory.CreateDirectory(state);
+            File.WriteAllText(Path.Combine(state, "task_history.json"),
+                JsonSerializer.Serialize(new[] { new { id, manga_title = id, status = "completed" } }));
+        }
+        using var http = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings);
+
+        await client.UpdateSettingsAsync(new SettingsUpdateRequest { StorageRoot = nextRoot });
+        Assert.AreEqual("next-history", (await scheduler.GetDownloadHistoryAsync(1, 20)).Items.Single().Id);
+        await client.UpdateSettingsAsync(new SettingsUpdateRequest { StorageRoot = _storageRoot });
+        Assert.AreEqual("old-history", (await scheduler.GetDownloadHistoryAsync(1, 20)).Items.Single().Id);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(nextRoot, ".comic_state", "task_history.json")), "next-history");
+    }
+
+    [TestMethod]
+    public async Task Settings_NewLibraryDoesNotInheritOldHistory()
+    {
+        var state = Path.Combine(_storageRoot, ".comic_state");
+        Directory.CreateDirectory(state);
+        File.WriteAllText(Path.Combine(state, "task_history.json"),
+            """[{"id":"old-history","manga_title":"旧记录","status":"completed"}]""");
+        using var http = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings);
+
+        await client.UpdateSettingsAsync(new SettingsUpdateRequest { StorageRoot = Path.Combine(_container, "empty-library") });
+        Assert.AreEqual(0, (await scheduler.GetDownloadHistoryAsync(1, 20)).Items.Count);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(state, "task_history.json")), "old-history");
+    }
+
+    [TestMethod]
     public async Task JmLogin_RestoresSavedCredentialAndLogoutClearsIt()
     {
         using var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
@@ -200,6 +248,54 @@ public sealed class BackendClientTests
         Assert.AreEqual("甲", favorites.Items.Single().Title);
         Assert.AreEqual("乙", incomplete.Items.Single().Title);
         Assert.AreEqual("乙", recent.Items.First().Title);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task DuplicateCleanup_RejectsActiveDownloadWithoutSourceUrl(bool hasMetadata)
+    {
+        var root = Path.Combine(_storageRoot, "123");
+        Directory.CreateDirectory(Path.Combine(root, "1"));
+        File.WriteAllBytes(Path.Combine(root, "1", "001.jpg"), [1]);
+        if (hasMetadata) File.WriteAllText(Path.Combine(root, "元数据.json"), "{}");
+        using var handler = new FakeHttpMessageHandler(async (_, token) =>
+        {
+            await Task.Delay(Timeout.Infinite, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var jm = TestServiceFactory.CreateOfflineJmComic(handler);
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), TestServiceFactory.CreateSettings(Path.Combine(_container, "settings")));
+        var task = await scheduler.CreateDownloadAsync(new DownloadCreateRequest { Url = "https://18comic.vip/album/123" });
+
+        await Assert.ThrowsExactlyAsync<BackendApiException>(() => client.PreviewDuplicateCleanupAsync(root));
+        await Assert.ThrowsExactlyAsync<BackendApiException>(() => client.CleanupDuplicateDirectoriesAsync(root, []));
+        Assert.IsTrue(File.Exists(Path.Combine(root, "1", "001.jpg")));
+        await scheduler.StopDownloadAsync(task.Id);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (scheduler.HasActiveTaskForManga(root)) await Task.Delay(10, timeout.Token);
+    }
+
+    [TestMethod]
+    public void DuplicateCleanup_BlocksNewTasksAndReleasesReservationAfterFailure()
+    {
+        var root = Path.Combine(_storageRoot, "123");
+        Directory.CreateDirectory(Path.Combine(root, "1"));
+        File.WriteAllBytes(Path.Combine(root, "1", "001.jpg"), [1]);
+        using var jm = TestServiceFactory.CreateOfflineJmComic(FakeHttpMessageHandler.AlwaysFails());
+        var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        Assert.ThrowsExactly<IOException>(() => scheduler.RunWithIdleManga<int>(root, () =>
+        {
+            Assert.ThrowsExactly<InvalidOperationException>(() => scheduler.CreateDownloadAsync(
+                new DownloadCreateRequest { Url = "https://18comic.vip/album/123" }));
+            throw new IOException("模拟校验失败");
+        }));
+        Assert.AreEqual(42, scheduler.RunWithIdleManga(root, () => 42));
     }
 
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)

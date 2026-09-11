@@ -7,14 +7,13 @@ using Comic.WinUI.Services.Native;
 using Comic.WinUI.Tests.Services;
 using Comic.WinUI.ViewModels;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Comic.WinUI.Tests.ViewModels;
 
 /// <summary>
-/// 分页阅读器的过期回调测试。
-/// 这里只驱动「过期」那条分支:token 检查排在 new BitmapImage() 之前,所以过期回调
-/// 会提前返回、完全不碰 WinRT,因此不需要 UI 线程。正常分支要构造 BitmapImage,
-/// 在单元测试里跑不了,不在这里覆盖。
+/// 使用延迟调度器和可控解码器验证过期回调、失败恢复与进度提交。
+/// 成功替身返回 null，仅测试状态流转；真实 WinRT 位图渲染仍需界面验证。
 /// </summary>
 [TestClass]
 public sealed class ReaderPageViewModelTests
@@ -150,10 +149,125 @@ public sealed class ReaderPageViewModelTests
         Assert.AreEqual(1, Volatile.Read(ref imageRequestCount));
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task PagedDecodeFailure_DoesNotEscapeCallbackOrSaveProgressAndCanRetry(bool asynchronous)
+    {
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var failure = new TaskCompletionSource<BitmapImage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) =>
+        {
+            if (++calls == 2)
+            {
+                if (asynchronous) return failure.Task;
+                throw new IOException("损坏图片");
+            }
+            return Task.FromResult<BitmapImage>(null!);
+        });
+        await viewModel.LoadAsync(_mangaRoot);
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        Assert.AreEqual(0, progress.Get(_mangaRoot)?.PageIndex);
+
+        await viewModel.GoToImageAsync(5);
+        dispatcher.FlushFirst();
+        if (asynchronous) failure.SetException(new IOException("损坏图片"));
+        await WaitUntilAsync(() => viewModel.HasFailedPagedImage && !viewModel.IsLoading, TimeSpan.FromSeconds(5));
+        StringAssert.Contains(viewModel.PageError, "损坏图片");
+        viewModel.SaveReadingProgress(); // 离开页面时也不能把失败页标成已读。
+        Assert.AreEqual(0, progress.Get(_mangaRoot)?.PageIndex, "解码失败不得提交失败页的阅读进度。");
+        Assert.AreEqual(5, viewModel.CurrentImageIndex, "保留失败页的位置，允许继续翻页。");
+
+        await viewModel.RetryPagedImageAsync();
+        dispatcher.FlushFirst();
+        Assert.IsFalse(viewModel.HasFailedPagedImage);
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual(5, progress.Get(_mangaRoot)?.PageIndex);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task PagedDecode_StaleCompletionCannotOverwriteNewPage(bool fails)
+    {
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var pending = new TaskCompletionSource<BitmapImage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) =>
+            ++calls == 1 ? pending.Task : Task.FromResult<BitmapImage>(null!));
+        await viewModel.LoadAsync(_mangaRoot);
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        var oldApplication = viewModel.PagedImageApplication;
+        await viewModel.GoToImageAsync(2);
+        dispatcher.FlushFirst();
+        if (fails) pending.SetException(new IOException("旧请求失败"));
+        else pending.SetResult(null!);
+        // 等待旧解码续体真正完成，避免只断言尚未执行回调时的状态。
+        await oldApplication.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(2, viewModel.CurrentImageIndex);
+        Assert.AreEqual(2, progress.Get(_mangaRoot)?.PageIndex);
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.IsFalse(viewModel.HasFailedPagedImage);
+        Assert.IsFalse(viewModel.IsLoading);
+    }
+
+    [TestMethod]
+    public async Task DoublePage_SecondaryDecodeFailureDoesNotCommitPartialSpread()
+    {
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var calls = 0;
+        var failSecondary = false;
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) =>
+        {
+            if (failSecondary && ++calls == 2) throw new IOException("第二张图片损坏");
+            return Task.FromResult<BitmapImage>(null!);
+        });
+        await viewModel.LoadAsync(_mangaRoot);
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        viewModel.IsDoublePage = true;
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        failSecondary = true;
+        await viewModel.GoToImageAsync(2);
+        dispatcher.FlushFirst();
+        Assert.IsTrue(viewModel.HasFailedPagedImage);
+        Assert.IsNull(viewModel.CurrentImage);
+        Assert.IsNull(viewModel.SecondaryImage);
+        Assert.AreEqual(0, progress.Get(_mangaRoot)?.PageIndex);
+        StringAssert.Contains(viewModel.PageError, "第二张图片损坏");
+    }
+
+    [TestMethod]
+    public async Task SwitchingToStrip_IgnoresPendingPagedDecodeFailure()
+    {
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var pending = new TaskCompletionSource<BitmapImage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => pending.Task);
+        await viewModel.LoadAsync(_mangaRoot);
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        var oldApplication = viewModel.PagedImageApplication;
+        viewModel.IsStripMode = true;
+        pending.SetException(new IOException("旧分页图片损坏"));
+        await oldApplication.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsTrue(viewModel.IsStripMode);
+        Assert.IsFalse(viewModel.HasFailedPagedImage);
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+    }
+
     private ReaderPageViewModel CreateViewModel(
         IDispatcher dispatcher,
         ReadingProgressService progressService,
-        bool useStripMode = false)
+        bool useStripMode = false,
+        Func<byte[], CancellationToken, Task<BitmapImage>>? decoder = null)
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
         if (useStripMode)
@@ -180,7 +294,9 @@ public sealed class ReaderPageViewModelTests
             settings);
 
         var preferences = new ReaderPreferenceService(Path.Combine(_container, "reader-preferences"));
-        return new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher);
+        return decoder is null
+            ? new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher)
+            : new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher, decoder);
     }
 
     private static HttpResponseMessage EncryptedApiResponse(HttpRequestMessage request, string json)

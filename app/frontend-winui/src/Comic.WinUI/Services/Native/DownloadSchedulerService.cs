@@ -28,11 +28,13 @@ public sealed class DownloadSchedulerService : IDisposable
     private readonly ILogger<DownloadSchedulerService> _logger;
     private readonly ConcurrentDictionary<string, NativeDownloadTask> _downloads = [];
     private readonly object _createLock = new();
+    private bool _libraryMaintenance;
     // 任务号是 Guid 前 8 位,没有时间序,不能拿来排序。这里单独记创建次序。
     private readonly ConcurrentDictionary<string, long> _creationOrder = [];
     private long _creationSequence;
     private readonly object _historyLock = new();
     private readonly List<DownloadHistoryItem> _history;
+    private string _historyFile;
     private readonly DynamicDownloadTaskGate _taskGate = new();
     private readonly DownloadBandwidthLimiter _bandwidthLimiter = new();
 
@@ -46,11 +48,12 @@ public sealed class DownloadSchedulerService : IDisposable
         _library = library;
         _applicationSettings = applicationSettings;
         _logger = logger ?? NullLogger<DownloadSchedulerService>.Instance;
+        _historyFile = Path.Combine(StateDirectory, "task_history.json");
         _history = LoadHistory();
     }
 
     private string StateDirectory => Path.Combine(_library.StorageRoot, ".comic_state");
-    private string HistoryFile => Path.Combine(StateDirectory, "task_history.json");
+    private string HistoryFile => _historyFile;
 
     public static bool IsTerminal(string status) => status is "completed" or "failed" or "partial" or "stopped";
 
@@ -61,12 +64,13 @@ public sealed class DownloadSchedulerService : IDisposable
     {
         var resolvedRoot = _library.ResolveLibraryRoot(rootDirectory);
         var metadata = _library.LoadLibraryMetadata(resolvedRoot);
-        var mangaId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId;
+        var mangaId = JmComicService.ParseMangaId(metadata?.MangaUrl ?? string.Empty).MangaId
+            ?? JmComicService.ParseMangaId(Path.GetFileName(resolvedRoot)).MangaId;
 
         foreach (var state in _downloads.Values)
         {
             var snapshot = CloneTask(state);
-            if (IsTerminal(snapshot.Status)) continue;
+            if (IsTerminal(snapshot.Status) && state.Worker?.IsCompleted != false) continue;
 
             string taskRoot;
             lock (state.Gate)
@@ -96,9 +100,30 @@ public sealed class DownloadSchedulerService : IDisposable
         Directory.CreateDirectory(StateDirectory);
         lock (_historyLock)
         {
+            // 保存时仍绑定旧书库，加载前才切换路径，避免覆盖目标书库已有历史。
+            _historyFile = Path.Combine(StateDirectory, "task_history.json");
             _history.Clear();
             _history.AddRange(LoadHistory());
         }
+    }
+
+    internal T RunWithIdleManga<T>(string rootDirectory, Func<T> action)
+    {
+        lock (_createLock)
+        {
+            EnsureNoLibraryMaintenance();
+            if (HasActiveTaskForManga(rootDirectory))
+                throw new InvalidOperationException("这部漫画仍有未结束的下载任务，请先停止任务再清理。");
+            _libraryMaintenance = true;
+        }
+        try { return action(); }
+        finally { lock (_createLock) _libraryMaintenance = false; }
+    }
+
+    private void EnsureNoLibraryMaintenance()
+    {
+        if (_libraryMaintenance)
+            throw new InvalidOperationException("书库正在校验或清理副本，请完成后再启动下载。");
     }
 
     public void Dispose()
@@ -131,6 +156,7 @@ public sealed class DownloadSchedulerService : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         lock (_createLock)
         {
+            EnsureNoLibraryMaintenance();
             var duplicate = _downloads.Values.FirstOrDefault(state =>
                 !IsTerminal(CloneTask(state).Status) && SameDownloadRequest(state.Request, request));
             if (duplicate is not null)
@@ -232,10 +258,12 @@ public sealed class DownloadSchedulerService : IDisposable
         if (stoppedWorker is not null)
         {
             await stoppedWorker.WaitAsync(cancellationToken);
+            lock (_createLock)
             lock (state.Gate)
             {
                 if (state.Dto.Status == "stopped")
                 {
+                    EnsureNoLibraryMaintenance();
                     state.ReplaceStopSource();
                     state.PauseRequested = false;
                     state.HistoryRecorded = false;
@@ -270,10 +298,12 @@ public sealed class DownloadSchedulerService : IDisposable
             await completedWorker.WaitAsync(cancellationToken);
         }
 
+        lock (_createLock)
         lock (state.Gate)
         {
             if (state.Dto.Status is "failed" or "partial")
             {
+                EnsureNoLibraryMaintenance();
                 state.ReplaceStopSource();
                 state.PauseRequested = false;
                 state.HistoryRecorded = false;

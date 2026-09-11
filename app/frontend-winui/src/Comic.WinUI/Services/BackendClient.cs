@@ -232,10 +232,12 @@ public sealed class BackendClient
         }, cancellationToken), "library_delete_failed");
 
     public Task<DuplicateCleanupPreview> PreviewDuplicateCleanupAsync(string rootDir, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => Task.Run(() => _library.PreviewDuplicateCleanup(rootDir), cancellationToken), "duplicate_preview_failed");
+        InvokeAsync(() => Task.Run(() => _downloads.RunWithIdleManga(rootDir,
+            () => _library.PreviewDuplicateCleanup(rootDir)), cancellationToken), "duplicate_preview_failed");
 
     public Task<int> CleanupDuplicateDirectoriesAsync(string rootDir, IReadOnlyCollection<string> confirmedDirectories, CancellationToken cancellationToken = default) =>
-        InvokeAsync(() => Task.Run(() => _library.CleanupDuplicateDirectories(rootDir, confirmedDirectories), cancellationToken), "duplicate_cleanup_failed");
+        InvokeAsync(() => Task.Run(() => _downloads.RunWithIdleManga(rootDir,
+            () => _library.CleanupDuplicateDirectories(rootDir, confirmedDirectories)), cancellationToken), "duplicate_cleanup_failed");
 
     public Task<JmLibraryImportPreview> ScanJmLibraryImportAsync(
         string sourceRoot,

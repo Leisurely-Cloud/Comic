@@ -75,7 +75,7 @@ public sealed class DuplicateCleanupPreview
 {
     public string PrimaryRoot { get; init; } = string.Empty;
     public List<DuplicateCleanupItem> Items { get; init; } = [];
-    public long TotalBytes => Items.Sum(item => item.SizeBytes);
+    public long TotalBytes => Items.Where(item => item.CanCleanup).Sum(item => item.SizeBytes);
 }
 
 public sealed class DuplicateCleanupItem
@@ -83,6 +83,8 @@ public sealed class DuplicateCleanupItem
     public string Directory { get; init; } = string.Empty;
     public int ChapterCount { get; init; }
     public long SizeBytes { get; init; }
+    public bool CanCleanup { get; init; }
+    public string Reason { get; init; } = string.Empty;
 }
 
 public sealed class LibraryCheckUpdatesResponse

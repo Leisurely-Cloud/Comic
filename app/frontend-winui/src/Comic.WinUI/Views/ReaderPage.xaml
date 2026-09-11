@@ -286,8 +286,14 @@
                 VerticalAlignment="Bottom" HorizontalAlignment="Center"
                 Background="{ThemeResource ControlFillColorDefaultBrush}"
                 CornerRadius="8" Padding="16,10">
-            <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
-                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
+            <StackPanel Spacing="8">
+                <TextBlock Text="{x:Bind ViewModel.PageError, Mode=OneWay}"
+                           Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
+                <Button Content="重试本页"
+                        Command="{x:Bind ViewModel.RetryPagedImageCommand}"
+                        Visibility="{x:Bind ViewModel.HasFailedPagedImage, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="重新加载失败的分页图片" />
+            </StackPanel>
         </Border>
     </Grid>
 </Page>

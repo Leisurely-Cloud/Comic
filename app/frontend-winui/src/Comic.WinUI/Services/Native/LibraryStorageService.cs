@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -347,24 +348,95 @@ public sealed class LibraryStorageService
     public DuplicateCleanupPreview PreviewDuplicateCleanup(string rootDirectory)
     {
         var primary = ResolveLibraryRoot(rootDirectory);
+        Dictionary<string, (long Length, string Hash)>? primaryFiles = null;
+        string? primaryError = null;
+        try { primaryFiles = ReadCleanupInventory(primary); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            primaryError = "主目录无法完整校验，暂不清理。";
+        }
         return new DuplicateCleanupPreview
         {
             PrimaryRoot = primary,
             Items = FindDuplicateDirectories(primary)
-                .Select(path => new DuplicateCleanupItem
-                {
-                    Directory = path,
-                    ChapterCount = EnumerateChapterDirectories(path).Count,
-                    SizeBytes = CalculateDirectorySize(new DirectoryInfo(path)),
-                })
+                .Select(path => InspectDuplicate(primary, path, primaryFiles, primaryError))
                 .ToList(),
         };
+    }
+
+    private DuplicateCleanupItem InspectDuplicate(string primary, string path,
+        Dictionary<string, (long Length, string Hash)>? primaryFiles, string? primaryError)
+    {
+        var reason = primaryError;
+        try
+        {
+            if (reason is null)
+            {
+                var files = ReadCleanupInventory(path);
+                if (files.Count == 0 || files.Any(file =>
+                    !primaryFiles!.TryGetValue(file.Key, out var retained) || retained != file.Value))
+                {
+                    reason = "包含主目录没有的章节、不同内容或额外文件，已保留。";
+                }
+                else if (LoadLibraryMetadata(path)?.IsFavorite == true && LoadLibraryMetadata(primary)?.IsFavorite != true)
+                {
+                    reason = "此目录保存了收藏标记，请先将主目录设为收藏。";
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            reason = "文件正在变化、无法读取或包含链接，暂不清理。";
+        }
+        return new DuplicateCleanupItem
+        {
+            Directory = path,
+            ChapterCount = EnumerateChapterDirectories(path).Count,
+            SizeBytes = reason is null ? CalculateDirectorySize(new DirectoryInfo(path)) : 0,
+            CanCleanup = reason is null,
+            Reason = reason ?? "全部文件已在主目录中找到一致副本。",
+        };
+    }
+
+    // 目录名可以变化，但章节序号和文件内容必须一致。未知附加文件也必须有副本。
+    // 手动遍历并拒绝链接，防止递归进入书库外路径；读取失败时绝不当作空目录。
+    private static Dictionary<string, (long Length, string Hash)> ReadCleanupInventory(string root)
+    {
+        var files = new Dictionary<string, (long Length, string Hash)>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<DirectoryInfo>();
+        pending.Push(new DirectoryInfo(root));
+        while (pending.TryPop(out var directory))
+        {
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("不能清理包含目录链接的副本。");
+            foreach (var entry in directory.EnumerateFileSystemInfos())
+            {
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                    entry.Name.StartsWith(".下载中_", StringComparison.Ordinal) ||
+                    entry.Name.EndsWith(".part", StringComparison.OrdinalIgnoreCase) ||
+                    entry.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("副本包含链接或未完成文件。");
+                if (entry is DirectoryInfo child) { pending.Push(child); continue; }
+                var relative = Path.GetRelativePath(root, entry.FullName);
+                if (relative.Equals("元数据.json", StringComparison.OrdinalIgnoreCase)) continue;
+                var parts = relative.Split(Path.DirectorySeparatorChar);
+                if (parts.Length > 1 && Regex.IsMatch(parts[0], @"^\d+(?:_|$)"))
+                    parts[0] = $"chapter:{ChapterOrder(parts[0])}";
+                var key = string.Join('/', parts);
+                using var input = new FileStream(entry.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (!files.TryAdd(key, (input.Length, Convert.ToHexString(SHA256.HashData(input)))))
+                    throw new InvalidOperationException("章节序号重复，无法安全判断副本。");
+            }
+        }
+        return files;
     }
 
     public int CleanupDuplicateDirectories(string rootDirectory, IReadOnlyCollection<string> confirmedDirectories)
     {
         var primary = ResolveLibraryRoot(rootDirectory);
-        var current = FindDuplicateDirectories(primary);
+        // 确认后重新读取并校验内容，不能只比较目录名。
+        var current = PreviewDuplicateCleanup(primary).Items
+            .Where(item => item.CanCleanup).Select(item => item.Directory).ToList();
         var confirmed = confirmedDirectories
             .Select(ResolveExistingDirectoryPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -379,6 +451,8 @@ public sealed class LibraryStorageService
         {
             foreach (var path in expected)
             {
+                if (!InspectDuplicate(primary, path, ReadCleanupInventory(primary), null).CanCleanup)
+                    throw new InvalidOperationException("副本内容已发生变化，请重新预览后再清理。");
                 _recycleDirectory(path);
                 count++;
             }
@@ -394,6 +468,7 @@ public sealed class LibraryStorageService
         if (mangaId is null) return [];
         return new DirectoryInfo(StorageRoot).EnumerateDirectories()
             .Where(directory => !SamePath(directory.FullName, primaryRoot) &&
+                (directory.Attributes & FileAttributes.ReparsePoint) == 0 &&
                 !directory.Name.StartsWith('.') &&
                 !directory.Name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase) &&
                 ResolveMangaId(LoadLibraryMetadata(directory.FullName), directory.Name) == mangaId &&

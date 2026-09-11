@@ -90,14 +90,16 @@ public sealed partial class LibraryPage : Page
     {
         var preview = await ViewModel.PreviewDuplicateCleanupAsync();
         if (preview is null || preview.Items.Count == 0) return;
+        var safeCount = preview.Items.Count(item => item.CanCleanup);
         var lines = preview.Items.Select(item =>
-            $"{item.Directory}\n  {item.ChapterCount} 章 · {FormatBytes(item.SizeBytes)}");
+            $"{(item.CanCleanup ? "可清理" : "保留")}：{item.Directory}\n  {item.Reason}");
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = $"清理 {preview.Items.Count} 个重复目录？",
-            Content = $"以下目录将移入 Windows 回收站，可恢复。主目录不会删除。\n\n{string.Join("\n\n", lines)}\n\n预计释放 {FormatBytes(preview.TotalBytes)}。",
+            Title = safeCount > 0 ? $"清理 {safeCount} 个已验证副本？" : "没有可安全清理的副本",
+            Content = $"仅将有一致副本的目录移入 Windows 回收站。主目录和含独有内容的目录会保留。\n\n{string.Join("\n\n", lines)}\n\n可清理文件大小：{FormatBytes(preview.TotalBytes)}。",
             PrimaryButtonText = "移入回收站",
+            IsPrimaryButtonEnabled = safeCount > 0,
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,
         };
