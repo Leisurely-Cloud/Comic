@@ -22,6 +22,24 @@ public sealed class ApplicationSettingsServiceTests
     }
 
     [TestMethod]
+    public void DownloadPlan_NotifiesAfterNormalizedSettingsArePersisted()
+    {
+        var settings = new ApplicationSettingsService(_container);
+        var notified = false;
+        settings.DownloadPlanChanged += (_, _) =>
+        {
+            var saved = new ApplicationSettingsService(_container);
+            Assert.AreEqual(8, saved.MaxConcurrentDownloadTasks);
+            Assert.AreEqual(0, saved.DownloadSpeedLimitKbps);
+            Assert.IsTrue(saved.DownloadScheduleEnabled);
+            Assert.AreEqual(new TimeSpan(12, 34, 0), saved.DownloadScheduleTime);
+            notified = true;
+        };
+        settings.UpdateDownloadPlan(99, -1, true, new TimeSpan(12, 34, 56));
+        Assert.IsTrue(notified);
+    }
+
+    [TestMethod]
     public void Preferences_ArePersistedAcrossInstances()
     {
         var storageRoot = Path.Combine(_container, "downloads");

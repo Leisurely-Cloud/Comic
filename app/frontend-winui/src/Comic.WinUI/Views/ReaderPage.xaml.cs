@@ -155,8 +155,13 @@ public sealed partial class ReaderPage : Page
         {
             DispatcherQueue.TryEnqueue(ApplyPagedZoom);
         }
-        else if (e.PropertyName == nameof(ReaderPageViewModel.IsDoublePage))
+        else if (e.PropertyName is nameof(ReaderPageViewModel.IsDoublePage)
+                 or nameof(ReaderPageViewModel.IsStripMode)
+                 or nameof(ReaderPageViewModel.CurrentImage)
+                 or nameof(ReaderPageViewModel.SecondaryImage))
         {
+            // SetSourceAsync 在 view model 中已完成解码，再绑定到 Image 不保证触发 ImageOpened。
+            // 等本轮绑定更新后重新计算，不能只依赖 ImageOpened / 视口尺寸变化。
             DispatcherQueue.TryEnqueue(UpdatePagedBaseSizes);
         }
     }
@@ -193,14 +198,15 @@ public sealed partial class ReaderPage : Page
             ? PagedScrollViewer.ViewportHeight
             : PagedScrollViewer.ActualHeight);
 
-        if (PagedImage.Source is BitmapImage primary)
+        _pagedImageReady = false;
+        if (ViewModel.CurrentImage is BitmapImage primary)
         {
             (_pagedBaseWidth, _pagedBaseHeight) = ReaderLayoutCalculator.CalculateFitSize(
                 primary.PixelWidth, primary.PixelHeight, viewportWidth, viewportHeight, ViewModel.IsDoublePage);
             _pagedImageReady = _pagedBaseWidth > 0;
         }
 
-        if (ViewModel.IsDoublePage && SecondaryPagedImage.Source is BitmapImage secondary)
+        if (ViewModel.IsDoublePage && ViewModel.SecondaryImage is BitmapImage secondary)
         {
             (_secondaryPagedBaseWidth, _secondaryPagedBaseHeight) = ReaderLayoutCalculator.CalculateFitSize(
                 secondary.PixelWidth, secondary.PixelHeight, viewportWidth, viewportHeight, true);

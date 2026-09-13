@@ -36,6 +36,7 @@ public sealed class DownloadSchedulerService : IDisposable
     private readonly List<DownloadHistoryItem> _history;
     private string _historyFile;
     private readonly DynamicDownloadTaskGate _taskGate = new();
+    private readonly DownloadScheduleWaiter _scheduleWaiter = new();
     private readonly DownloadBandwidthLimiter _bandwidthLimiter = new();
 
     public DownloadSchedulerService(
@@ -50,6 +51,17 @@ public sealed class DownloadSchedulerService : IDisposable
         _logger = logger ?? NullLogger<DownloadSchedulerService>.Instance;
         _historyFile = Path.Combine(StateDirectory, "task_history.json");
         _history = LoadHistory();
+        if (_applicationSettings is not null)
+        {
+            _applicationSettings.DownloadPlanChanged += OnDownloadPlanChanged;
+            OnDownloadPlanChanged(this, EventArgs.Empty);
+        }
+    }
+
+    private void OnDownloadPlanChanged(object? sender, EventArgs args)
+    {
+        _scheduleWaiter.Update(_applicationSettings!.DownloadScheduleEnabled, _applicationSettings.DownloadScheduleTime);
+        _taskGate.NotifyLimitChanged();
     }
 
     private string StateDirectory => Path.Combine(_library.StorageRoot, ".comic_state");
@@ -128,6 +140,8 @@ public sealed class DownloadSchedulerService : IDisposable
 
     public void Dispose()
     {
+        if (_applicationSettings is not null)
+            _applicationSettings.DownloadPlanChanged -= OnDownloadPlanChanged;
         // 必须先取消、等 worker 退出,再释放 CTS。直接 Dispose 会在仍在运行的 worker 底下
         // 释放它正在使用的 token,后台线程随即抛 ObjectDisposedException,并留下 .part 残件。
         // 这里用完成回调而不是阻塞等待:Dispose 由窗口关闭触发,不能卡住 UI 线程。
@@ -871,19 +885,15 @@ public sealed class DownloadSchedulerService : IDisposable
         }
     }
 
-    private async Task WaitForScheduledStartAsync(NativeDownloadTask state, CancellationToken cancellationToken)
-    {
-        if (_applicationSettings?.DownloadScheduleEnabled != true) return;
-        var now = DateTimeOffset.Now;
-        var scheduled = now.Date + _applicationSettings.DownloadScheduleTime;
-        if (scheduled <= now) scheduled = scheduled.AddDays(1);
-        lock (state.Gate)
+    private Task WaitForScheduledStartAsync(NativeDownloadTask state, CancellationToken cancellationToken) =>
+        _scheduleWaiter.WaitAsync(scheduled =>
         {
-            state.Dto.Status = "scheduled";
-            state.Dto.StatusText = $"计划于 {scheduled:MM-dd HH:mm} 开始";
-        }
-        await Task.Delay(scheduled - now, cancellationToken);
-    }
+            lock (state.Gate)
+            {
+                state.Dto.Status = "scheduled";
+                state.Dto.StatusText = $"计划于 {scheduled:MM-dd HH:mm} 开始";
+            }
+        }, cancellationToken);
 
     public async Task<int> RetryAllFailedAsync(CancellationToken cancellationToken = default)
     {
@@ -1614,33 +1624,92 @@ internal sealed class DynamicDownloadTaskGate
 {
     private readonly object _gate = new();
     private int _active;
-    private readonly Queue<TaskCompletionSource> _waiters = new();
+    private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public async Task WaitAsync(Func<int> limitProvider, CancellationToken cancellationToken)
     {
         while (true)
         {
-            TaskCompletionSource? waiter = null;
+            Task changed;
             lock (_gate)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (_active < Math.Max(1, limitProvider())) { _active++; return; }
-                waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                _waiters.Enqueue(waiter);
+                changed = _changed.Task;
             }
-            await waiter.Task.WaitAsync(cancellationToken);
+            await changed.WaitAsync(cancellationToken);
         }
     }
 
     public void Release()
     {
-        TaskCompletionSource[] waiters;
         lock (_gate)
         {
             _active = Math.Max(0, _active - 1);
-            waiters = _waiters.ToArray();
-            _waiters.Clear();
+            NotifyLimitChanged();
         }
-        foreach (var waiter in waiters) waiter.TrySetResult();
+    }
+
+    public void NotifyLimitChanged()
+    {
+        lock (_gate)
+        {
+            var previous = _changed;
+            _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            previous.TrySetResult();
+        }
+    }
+}
+
+/// <summary>设置变化只重排尚在等待定时的任务，不影响已进入下载队列的任务。</summary>
+internal sealed class DownloadScheduleWaiter
+{
+    private readonly object _gate = new();
+    private bool _enabled;
+    private TimeSpan _time;
+    private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void Update(bool enabled, TimeSpan time)
+    {
+        lock (_gate)
+        {
+            if (_enabled == enabled && _time == time) return;
+            _enabled = enabled;
+            _time = time;
+            var previous = _changed;
+            _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            previous.TrySetResult();
+        }
+    }
+
+    public async Task WaitAsync(Action<DateTimeOffset> reportSchedule, CancellationToken cancellationToken)
+    {
+        Task? observedChange = null;
+        DateTimeOffset scheduled = default;
+        while (true)
+        {
+            Task changed;
+            var now = DateTimeOffset.Now;
+            lock (_gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_enabled) return;
+                changed = _changed.Task;
+                if (observedChange != changed)
+                {
+                    // 只有定时设置改变才计算下一次时间，限速/并发更新不能把任务推迟到明天。
+                    var local = now.LocalDateTime.Date + _time;
+                    if (local <= now.LocalDateTime) local = local.AddDays(1);
+                    scheduled = new DateTimeOffset(local);
+                    observedChange = changed;
+                    reportSchedule(scheduled);
+                }
+            }
+            var delay = scheduled - DateTimeOffset.Now;
+            if (delay <= TimeSpan.Zero) return;
+            try { await changed.WaitAsync(delay, cancellationToken); }
+            catch (TimeoutException) { /* 重新检查截止时间和同时发生的设置变更。 */ }
+        }
     }
 }
 

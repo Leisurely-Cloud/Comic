@@ -655,6 +655,157 @@ public sealed class DownloadSchedulerServiceTests
         Assert.AreEqual(0, handler.RequestedUris.Count);
     }
 
+    [TestMethod]
+    public async Task DynamicTaskGate_IncreasedLimitWakesWaitersWithoutRelease()
+    {
+        var gate = new DynamicDownloadTaskGate();
+        var limit = 1;
+        await gate.WaitAsync(() => limit, CancellationToken.None);
+        var second = gate.WaitAsync(() => limit, CancellationToken.None);
+        Assert.IsFalse(second.IsCompleted);
+        limit = 2;
+        gate.NotifyLimitChanged();
+        await second.WaitAsync(TimeSpan.FromSeconds(2));
+        gate.Release();
+        gate.Release();
+    }
+
+    [TestMethod]
+    public async Task DynamicTaskGate_DecreasedLimitLetsActiveTasksFinish()
+    {
+        var gate = new DynamicDownloadTaskGate();
+        await gate.WaitAsync(() => 2, CancellationToken.None);
+        await gate.WaitAsync(() => 2, CancellationToken.None);
+        var third = gate.WaitAsync(() => 1, CancellationToken.None);
+        gate.NotifyLimitChanged();
+        gate.Release();
+        Assert.IsFalse(third.IsCompleted);
+        gate.Release();
+        await third.WaitAsync(TimeSpan.FromSeconds(2));
+        gate.Release();
+    }
+
+    [TestMethod]
+    public async Task DynamicTaskGate_CancelledWaiterDoesNotConsumeSlot()
+    {
+        var gate = new DynamicDownloadTaskGate();
+        using var stop = new CancellationTokenSource();
+        await gate.WaitAsync(() => 1, CancellationToken.None);
+        var cancelled = gate.WaitAsync(() => 1, stop.Token);
+        stop.Cancel();
+        await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => cancelled);
+        gate.Release();
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => gate.WaitAsync(() => 1, stop.Token));
+        await gate.WaitAsync(() => 1, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+        gate.Release();
+    }
+
+    [TestMethod]
+    public async Task DownloadPlan_IncreasedConcurrencyStartsQueuedTask()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        using var handler = new FakeHttpMessageHandler(async (_, token) =>
+        {
+            if (Interlocked.Increment(ref count) == 1) firstStarted.TrySetResult();
+            else secondStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        });
+        var settings = new ApplicationSettingsService(Path.Combine(_container, "plan-settings"));
+        settings.UpdateDownloadPlan(1, 0, false, TimeSpan.Zero);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), TestServiceFactory.CreateLibrary(_storageRoot), settings);
+        var first = await service.CreateDownloadAsync(new DownloadCreateRequest { Url = "https://18comic.vip/album/98" });
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var second = await service.CreateDownloadAsync(new DownloadCreateRequest { Url = "https://18comic.vip/album/99" });
+        await WaitForStatusAsync(service, second.Id, task => task.StatusText == "等待下载槽位");
+        Assert.IsFalse(secondStarted.Task.IsCompleted);
+        settings.UpdateDownloadPlan(2, 0, false, TimeSpan.Zero);
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await service.StopDownloadAsync(first.Id);
+        await service.StopDownloadAsync(second.Id);
+        await WaitUntilTerminalAsync(service, first.Id);
+        await WaitUntilTerminalAsync(service, second.Id);
+    }
+
+    [TestMethod]
+    public async Task DownloadPlan_ChangedScheduleUpdatesExistingTaskAndDisablingStartsIt()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new FakeHttpMessageHandler(async (_, token) =>
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        });
+        var settings = new ApplicationSettingsService(Path.Combine(_container, "plan-settings"));
+        settings.UpdateDownloadPlan(1, 0, true, DateTime.Now.AddHours(1).TimeOfDay);
+        using var service = TestServiceFactory.CreateScheduler(
+            TestServiceFactory.CreateOfflineJmComic(handler), TestServiceFactory.CreateLibrary(_storageRoot), settings);
+        var task = await service.CreateDownloadAsync(new DownloadCreateRequest { Url = "https://18comic.vip/album/99" });
+        var original = await WaitForStatusAsync(service, task.Id, snapshot => snapshot.Status == "scheduled");
+        settings.UpdateDownloadPlan(1, 0, true, DateTime.Now.AddHours(2).TimeOfDay);
+        await WaitForStatusAsync(service, task.Id, snapshot => snapshot.Status == "scheduled" && snapshot.StatusText != original.StatusText);
+        Assert.IsFalse(started.Task.IsCompleted);
+        settings.UpdateDownloadPlan(1, 0, false, settings.DownloadScheduleTime);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await service.StopDownloadAsync(task.Id);
+        await WaitUntilTerminalAsync(service, task.Id);
+    }
+
+    [TestMethod]
+    public async Task ScheduleWaiter_UnchangedScheduleDoesNotRecalculateDeadline()
+    {
+        var waiter = new DownloadScheduleWaiter();
+        var time = DateTime.Now.AddHours(1).TimeOfDay;
+        waiter.Update(true, time);
+        var reports = 0;
+        var pending = waiter.WaitAsync(_ => Interlocked.Increment(ref reports), CancellationToken.None);
+        waiter.Update(true, time);
+        Assert.AreEqual(1, Volatile.Read(ref reports));
+        Assert.IsFalse(pending.IsCompleted);
+        waiter.Update(false, time);
+        await pending.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.AreEqual(1, Volatile.Read(ref reports));
+    }
+
+    [TestMethod]
+    public async Task ScheduleWaiter_CancellationSurvivesSettingsChanges()
+    {
+        var waiter = new DownloadScheduleWaiter();
+        waiter.Update(true, DateTime.Now.AddHours(1).TimeOfDay);
+        using var stop = new CancellationTokenSource();
+        var pending = waiter.WaitAsync(_ => { }, stop.Token);
+        stop.Cancel();
+        waiter.Update(false, TimeSpan.Zero);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
+    }
+
+    [TestMethod]
+    public async Task ScheduleWaiter_ReachesDeadlineWithoutReschedulingTomorrow()
+    {
+        var waiter = new DownloadScheduleWaiter();
+        waiter.Update(true, DateTime.Now.AddSeconds(1).TimeOfDay);
+        var reports = 0;
+        await waiter.WaitAsync(_ => reports++, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.AreEqual(1, reports);
+    }
+
+    private static async Task<DownloadTaskDto> WaitForStatusAsync(
+        DownloadSchedulerService service, string taskId, Func<DownloadTaskDto, bool> predicate)
+    {
+        var timeout = Stopwatch.StartNew();
+        while (true)
+        {
+            var snapshot = await service.GetDownloadAsync(taskId);
+            if (predicate(snapshot)) return snapshot;
+            Assert.IsTrue(timeout.Elapsed < TimeSpan.FromSeconds(3), $"未进入预期状态：{snapshot.Status} / {snapshot.StatusText}");
+            await Task.Delay(10);
+        }
+    }
+
     private static async Task<DownloadTaskDto> WaitUntilTerminalAsync(
         DownloadSchedulerService service,
         string taskId)

@@ -45,6 +45,7 @@ public sealed class ApplicationSettingsService
     }
 
     public event EventHandler? ThemeChanged;
+    public event EventHandler? DownloadPlanChanged;
 
     public string StorageRoot =>
         string.IsNullOrWhiteSpace(_preferences.StorageRoot)
@@ -175,6 +176,7 @@ public sealed class ApplicationSettingsService
         _preferences.DownloadScheduleEnabled = scheduleEnabled;
         _preferences.DownloadScheduleTime = scheduleTime.ToString(@"hh\:mm");
         Save();
+        DownloadPlanChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public static string ResolveDefaultStorageRoot()
