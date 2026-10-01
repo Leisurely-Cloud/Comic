@@ -422,6 +422,53 @@
                     <TextBlock Text="数据与维护" Style="{StaticResource SectionHeaderTextBlockStyle}" />
 
                     <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE768;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="启动时继续下载" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="自动继续上次执行或等待的任务，定时任务遵循下载计划；已暂停、已停止的任务保留原状态。关闭时点击“继续”手动恢复。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="2" IsOn="{x:Bind ViewModel.ResumeDownloadsOnStartup, Mode=TwoWay}" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
+                        <Grid ColumnSpacing="16" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <FontIcon Glyph="&#xE8F1;" FontSize="22" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="数据备份与修复" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="备份设置、阅读进度、本地收藏与下载记录（不含漫画图片或账号凭据）。恢复或修复会先预览，重启软件后生效。"
+                                           Style="{StaticResource PageDescriptionTextBlockStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <Button Content="导出备份" Click="OnExportDataBackupClick" IsEnabled="{x:Bind ViewModel.IsDataMaintenanceBusy, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}" />
+                                <Button Content="恢复备份" Click="OnRestoreDataBackupClick" IsEnabled="{x:Bind ViewModel.IsDataMaintenanceBusy, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}" />
+                                <Button Content="检查与修复" Click="OnCheckDataClick" IsEnabled="{x:Bind ViewModel.IsDataMaintenanceBusy, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}" />
+                                <Button Content="取消待恢复" Click="OnCancelDataRestoreClick" IsEnabled="{x:Bind ViewModel.IsDataMaintenanceBusy, Mode=OneWay, Converter={StaticResource InverseBoolConverter}}" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{x:Bind ViewModel.DataMaintenanceStatus, Mode=OneWay}" TextWrapping="Wrap" />
+                            <ProgressBar Grid.Row="3" Grid.Column="1" IsIndeterminate="True"
+                                         Visibility="{x:Bind ViewModel.IsDataMaintenanceBusy, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowBorderStyle}">
                         <Grid ColumnSpacing="16" RowSpacing="10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="40" />

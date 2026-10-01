@@ -17,7 +17,7 @@ using Windows.Storage.Streams;
 
 namespace Comic.WinUI.Services.Native;
 
-public sealed class JmComicService : IDisposable
+public sealed partial class JmComicService : IDisposable
 {
     private const string TempChapterPrefix = ".下载中_";
 
@@ -1174,23 +1174,10 @@ public sealed class JmComicService : IDisposable
                         : item.Url + "?ts=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     using var request = new HttpRequestMessage(HttpMethod.Get, uri);
                     request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/*,*/*;q=0.8");
-                    using var response = await _httpClient.SendAsync(
-                        request,
-                        HttpCompletionOption.ResponseHeadersRead,
-                        cancellationToken);
+                    using var response = await SendImageRequestAsync(request, cancellationToken);
                     response.EnsureSuccessStatusCode();
                     using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-                    using var imageBuffer = new MemoryStream();
-                    var buffer = new byte[64 * 1024];
-                    while (true)
-                    {
-                        var read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
-                        if (read == 0) break;
-                        if (throttleBytes is not null) await throttleBytes(read, cancellationToken);
-                        await imageBuffer.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                        bytesDownloaded?.Invoke(read);
-                    }
-                    var imageData = imageBuffer.ToArray();
+                    var imageData = await ReadImageDataAsync(input, cancellationToken, bytesDownloaded, throttleBytes);
                     if (imageData.Length == 0) throw new InvalidDataException("图片内容为空");
 
                     var output = item.BlockCount > 0

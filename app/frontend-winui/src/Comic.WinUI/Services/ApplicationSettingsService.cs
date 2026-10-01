@@ -31,9 +31,7 @@ public sealed class ApplicationSettingsService
     private UserPreferences _preferences;
 
     public ApplicationSettingsService()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Comic.WinUI"))
+        : this(ResolveSettingsDirectory())
     {
     }
 
@@ -73,9 +71,15 @@ public sealed class ApplicationSettingsService
     public int MaxConcurrentDownloadTasks => Math.Clamp(_preferences.MaxConcurrentDownloadTasks, 1, 8);
     public int DownloadSpeedLimitKbps => Math.Clamp(_preferences.DownloadSpeedLimitKbps, 0, 102400);
     public bool DownloadScheduleEnabled => _preferences.DownloadScheduleEnabled;
+    public bool ResumeDownloadsOnStartup => _preferences.ResumeDownloadsOnStartup;
     public TimeSpan DownloadScheduleTime => TimeSpan.TryParse(_preferences.DownloadScheduleTime, out var value) ? value : TimeSpan.Zero;
 
     public string SettingsDirectory => Path.GetDirectoryName(_filePath) ?? string.Empty;
+
+    public static string ResolveSettingsDirectory() =>
+        Environment.GetEnvironmentVariable("COMIC_DATA_DIR") is { Length: > 0 } configured
+            ? Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured))
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Comic.WinUI");
 
     public void UpdatePreferences(string theme, string chapterSelectionMode)
     {
@@ -169,6 +173,12 @@ public sealed class ApplicationSettingsService
         Save();
     }
 
+    public void UpdateResumeDownloadsOnStartup(bool enabled)
+    {
+        _preferences.ResumeDownloadsOnStartup = enabled;
+        Save();
+    }
+
     public void UpdateDownloadPlan(int maxConcurrentTasks, int speedLimitKbps, bool scheduleEnabled, TimeSpan scheduleTime)
     {
         _preferences.MaxConcurrentDownloadTasks = Math.Clamp(maxConcurrentTasks, 1, 8);
@@ -193,9 +203,7 @@ public sealed class ApplicationSettingsService
     {
         try
         {
-            return File.Exists(_filePath)
-                ? JsonSerializer.Deserialize<UserPreferences>(File.ReadAllText(_filePath), JsonOptions) ?? new UserPreferences()
-                : new UserPreferences();
+            return AtomicJsonFile.Read<UserPreferences>(_filePath, JsonOptions) ?? new UserPreferences();
         }
         catch
         {
@@ -205,12 +213,7 @@ public sealed class ApplicationSettingsService
 
     private void Save()
     {
-        var temporaryPath = _filePath + ".tmp";
-        File.WriteAllText(
-            temporaryPath,
-            JsonSerializer.Serialize(_preferences, JsonOptions),
-            new UTF8Encoding(false));
-        File.Move(temporaryPath, _filePath, true);
+        AtomicJsonFile.Write(_filePath, _preferences, JsonOptions);
     }
 
     private static string NormalizeTheme(string? value) => value switch
@@ -254,7 +257,7 @@ public sealed class ApplicationSettingsService
         _ => DirectoryLayoutOrganized,
     };
 
-    private sealed class UserPreferences
+    internal sealed class UserPreferences
     {
         public string StorageRoot { get; set; } = string.Empty;
         public string Theme { get; set; } = SystemTheme;
@@ -270,6 +273,7 @@ public sealed class ApplicationSettingsService
         public int MaxConcurrentDownloadTasks { get; set; } = 2;
         public int DownloadSpeedLimitKbps { get; set; }
         public bool DownloadScheduleEnabled { get; set; }
+        public bool ResumeDownloadsOnStartup { get; set; }
         public string DownloadScheduleTime { get; set; } = "02:00";
     }
 }

@@ -25,12 +25,12 @@ public sealed class ReaderService
             .OrderBy(item => LibraryStorageService.ChapterOrder(item.Directory.Name))
             .ThenBy(item => item.Directory.Name, StringComparer.OrdinalIgnoreCase)
             .Select(item => new ReaderChapterDto
-        {
-            DirName = item.Directory.Name,
-            Title = LibraryStorageService.ChapterTitle(item.Directory.Name, metadata),
-            Order = LibraryStorageService.ChapterOrder(item.Directory.Name),
-            ImageCount = item.Images.Count,
-        }).ToList();
+            {
+                DirName = item.Directory.Name,
+                Title = LibraryStorageService.ChapterTitle(item.Directory.Name, metadata),
+                Order = LibraryStorageService.ChapterOrder(item.Directory.Name),
+                ImageCount = item.Images.Count,
+            }).ToList();
         return Task.FromResult(new ReaderChaptersResponse
         {
             MangaTitle = metadata?.MangaTitle is { Length: > 0 } metadataTitle ? metadataTitle : Path.GetFileName(resolvedRoot),

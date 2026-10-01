@@ -352,8 +352,12 @@ public sealed partial class ReaderPage : Page
         panel.Children.Add(previous); panel.Children.Add(next); panel.Children.Add(fullscreen); panel.Children.Add(tapRight);
         var dialog = new ContentDialog
         {
-            XamlRoot = XamlRoot, Title = "阅读快捷键", Content = panel,
-            PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+            Title = "阅读快捷键",
+            Content = panel,
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         if (!Enum.TryParse<Windows.System.VirtualKey>(previous.Text.Trim(), true, out _) ||

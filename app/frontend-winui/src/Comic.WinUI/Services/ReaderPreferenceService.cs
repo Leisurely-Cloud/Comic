@@ -52,9 +52,7 @@ public sealed class ReaderPreferenceService
     {
         try
         {
-            return File.Exists(_filePath)
-                ? JsonSerializer.Deserialize<ReaderPreferenceDocument>(File.ReadAllText(_filePath), JsonOptions) ?? new()
-                : new();
+            return AtomicJsonFile.Read<ReaderPreferenceDocument>(_filePath, JsonOptions) ?? new();
         }
         catch { return new(); }
     }
@@ -63,9 +61,7 @@ public sealed class ReaderPreferenceService
     {
         try
         {
-            var temporary = _filePath + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(_document, JsonOptions), new UTF8Encoding(false));
-            File.Move(temporary, _filePath, true);
+            AtomicJsonFile.Write(_filePath, _document, JsonOptions);
         }
         catch { }
     }
@@ -76,7 +72,7 @@ public sealed class ReaderPreferenceService
         catch { return value.Trim().ToUpperInvariant(); }
     }
 
-    private sealed class ReaderPreferenceDocument
+    internal sealed class ReaderPreferenceDocument
     {
         public Dictionary<string, ReaderPreference> Manga { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public ReaderShortcutPreference Shortcuts { get; set; } = new("Left", "Right", "F11", true);

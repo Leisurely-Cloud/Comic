@@ -12,7 +12,7 @@ namespace Comic.WinUI.Services.Native;
 /// 下载调度服务:管理下载任务的生命周期(创建/暂停/继续/停止/删除)、
 /// 章节下载执行、进度统计与下载历史持久化。
 /// </summary>
-public sealed class DownloadSchedulerService : IDisposable
+public sealed partial class DownloadSchedulerService : IDisposable
 {
     private const string TemporaryChapterPrefix = ".下载中_";
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -56,6 +56,8 @@ public sealed class DownloadSchedulerService : IDisposable
             _applicationSettings.DownloadPlanChanged += OnDownloadPlanChanged;
             OnDownloadPlanChanged(this, EventArgs.Empty);
         }
+        RestoreQueue();
+        _queueTimer = new Timer(_ => SaveQueue(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     private void OnDownloadPlanChanged(object? sender, EventArgs args)
@@ -108,14 +110,23 @@ public sealed class DownloadSchedulerService : IDisposable
     /// <summary>存储根目录切换后,把历史归档到旧位置并从新位置重新加载。</summary>
     public void ReloadHistoryForStorageChange()
     {
-        SaveHistory();
-        Directory.CreateDirectory(StateDirectory);
-        lock (_historyLock)
+        lock (_queueLock)
         {
-            // 保存时仍绑定旧书库，加载前才切换路径，避免覆盖目标书库已有历史。
-            _historyFile = Path.Combine(StateDirectory, "task_history.json");
-            _history.Clear();
-            _history.AddRange(LoadHistory());
+            SaveQueue();
+            SaveHistory();
+            Directory.CreateDirectory(StateDirectory);
+            lock (_historyLock)
+            {
+                // 保存时仍绑定旧书库，加载前才切换路径，避免覆盖目标书库已有历史。
+                _historyFile = Path.Combine(StateDirectory, "task_history.json");
+                _history.Clear();
+                _history.AddRange(LoadHistory());
+            }
+            foreach (var state in _downloads.Values) state.Dispose();
+            _downloads.Clear();
+            _creationOrder.Clear();
+            _queueFile = Path.Combine(StateDirectory, "task_queue.json");
+            RestoreQueue();
         }
     }
 
@@ -132,6 +143,19 @@ public sealed class DownloadSchedulerService : IDisposable
         finally { lock (_createLock) _libraryMaintenance = false; }
     }
 
+    internal T RunWithIdleLibrary<T>(Func<T> action)
+    {
+        lock (_createLock)
+        {
+            EnsureNoLibraryMaintenance();
+            if (_downloads.Values.Any(state => state.Worker?.IsCompleted == false))
+                throw new InvalidOperationException("请先停止正在执行或等待的下载任务，再备份或恢复数据。");
+            _libraryMaintenance = true;
+        }
+        try { return action(); }
+        finally { lock (_createLock) _libraryMaintenance = false; }
+    }
+
     private void EnsureNoLibraryMaintenance()
     {
         if (_libraryMaintenance)
@@ -140,6 +164,13 @@ public sealed class DownloadSchedulerService : IDisposable
 
     public void Dispose()
     {
+        lock (_queueLock)
+        {
+            if (_shuttingDown) return;
+            SaveQueue();
+            _shuttingDown = true;
+            _queueTimer?.Dispose();
+        }
         if (_applicationSettings is not null)
             _applicationSettings.DownloadPlanChanged -= OnDownloadPlanChanged;
         // 必须先取消、等 worker 退出,再释放 CTS。直接 Dispose 会在仍在运行的 worker 底下
@@ -197,6 +228,7 @@ public sealed class DownloadSchedulerService : IDisposable
                 });
             _downloads[id] = state;
             _creationOrder[id] = Interlocked.Increment(ref _creationSequence);
+            SaveQueue();
             state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
             return Task.FromResult(CloneTask(state));
         }
@@ -246,6 +278,7 @@ public sealed class DownloadSchedulerService : IDisposable
                 state.Dto.StatusText = "正在暂停，等待当前图片收尾";
             }
         }
+        SaveQueue();
         return Task.FromResult(new DownloadActionResponse { Status = CloneTask(state).Status });
     }
 
@@ -254,9 +287,14 @@ public sealed class DownloadSchedulerService : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         var state = RequireTask(taskId);
         Task? stoppedWorker = null;
+        var restarted = false;
         lock (state.Gate)
         {
-            if (state.Dto.Status is "paused" or "pausing")
+            if (state.Worker is null && state.Dto.Status is ("paused" or "stopped"))
+            {
+                stoppedWorker = Task.CompletedTask;
+            }
+            else if (state.Dto.Status is "paused" or "pausing")
             {
                 state.PauseRequested = false;
                 state.Dto.Status = "running";
@@ -273,24 +311,26 @@ public sealed class DownloadSchedulerService : IDisposable
         {
             await stoppedWorker.WaitAsync(cancellationToken);
             lock (_createLock)
-            lock (state.Gate)
-            {
-                if (state.Dto.Status == "stopped")
+                lock (state.Gate)
                 {
-                    EnsureNoLibraryMaintenance();
-                    state.ReplaceStopSource();
-                    state.PauseRequested = false;
-                    state.HistoryRecorded = false;
-                    state.Dto.Status = "running";
-                    state.Dto.StatusText = "正在恢复任务，检查本地进度";
-                    state.Dto.TaskError = null;
-                    ResetDownloadSpeedLocked(state);
-                    RemoveHistoryRecord(state.Dto.Id);
-                    state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+                    if (state.Dto.Status is "stopped" or "paused")
+                    {
+                        EnsureNoLibraryMaintenance();
+                        state.ReplaceStopSource();
+                        state.PauseRequested = false;
+                        state.HistoryRecorded = false;
+                        state.Dto.Status = "running";
+                        state.Dto.StatusText = "正在恢复任务，检查本地进度";
+                        state.Dto.TaskError = null;
+                        ResetDownloadSpeedLocked(state);
+                        RemoveHistoryRecord(state.Dto.Id);
+                        state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+                        restarted = true;
+                    }
                 }
-            }
         }
-        return new DownloadActionResponse { Status = CloneTask(state).Status };
+        SaveQueue();
+        return new DownloadActionResponse { Status = restarted ? "running" : CloneTask(state).Status };
     }
 
     public async Task<DownloadActionResponse> RetryDownloadAsync(string taskId, CancellationToken cancellationToken = default)
@@ -313,24 +353,25 @@ public sealed class DownloadSchedulerService : IDisposable
         }
 
         lock (_createLock)
-        lock (state.Gate)
-        {
-            if (state.Dto.Status is "failed" or "partial")
+            lock (state.Gate)
             {
-                EnsureNoLibraryMaintenance();
-                state.ReplaceStopSource();
-                state.PauseRequested = false;
-                state.HistoryRecorded = false;
-                state.Dto.Status = "running";
-                state.Dto.StatusText = "正在重试失败章节，检查本地进度";
-                state.Dto.TaskError = null;
-                ResetDownloadSpeedLocked(state);
-                RemoveHistoryRecord(state.Dto.Id);
-                AppendLog(state, "info", "手动重试失败章节");
-                state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+                if (state.Dto.Status is "failed" or "partial")
+                {
+                    EnsureNoLibraryMaintenance();
+                    state.ReplaceStopSource();
+                    state.PauseRequested = false;
+                    state.HistoryRecorded = false;
+                    state.Dto.Status = "running";
+                    state.Dto.StatusText = "正在重试失败章节，检查本地进度";
+                    state.Dto.TaskError = null;
+                    ResetDownloadSpeedLocked(state);
+                    RemoveHistoryRecord(state.Dto.Id);
+                    AppendLog(state, "info", "手动重试失败章节");
+                    state.Worker = Task.Run(() => ProcessDownloadAsync(state), CancellationToken.None);
+                }
             }
-        }
 
+        SaveQueue();
         return new DownloadActionResponse { Status = CloneTask(state).Status };
     }
 
@@ -338,6 +379,7 @@ public sealed class DownloadSchedulerService : IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = RequireTask(taskId);
+        string responseStatus;
         lock (state.Gate)
         {
             if (state.Dto.Status is "running" or "paused" or "pausing" or "pending" or "scheduled")
@@ -346,9 +388,16 @@ public sealed class DownloadSchedulerService : IDisposable
                 state.Dto.Status = "stopping";
                 state.Dto.StatusText = "正在停止";
                 state.StopSource.Cancel();
+                if (state.Worker is null)
+                {
+                    state.Dto.Status = "stopped";
+                    state.Dto.StatusText = "已停止";
+                }
             }
+            responseStatus = state.Dto.Status;
         }
-        return Task.FromResult(new DownloadActionResponse { Status = CloneTask(state).Status });
+        SaveQueue();
+        return Task.FromResult(new DownloadActionResponse { Status = responseStatus });
     }
 
     public async Task<BatchActionResponse> BatchStopDownloadsAsync(IReadOnlyCollection<string> taskIds, CancellationToken cancellationToken = default)
@@ -380,6 +429,7 @@ public sealed class DownloadSchedulerService : IDisposable
             }
             else result.Failed.Add(id);
         }
+        SaveQueue();
         return Task.FromResult(result);
     }
 
@@ -590,7 +640,8 @@ public sealed class DownloadSchedulerService : IDisposable
             }
             var rootDirectory = ResolveMangaRootDirectory(manga);
             Directory.CreateDirectory(rootDirectory);
-            var requestedSelection = SelectChapters(manga, state.Request.Chapters);
+            var requestedSelection = SelectChapters(manga, state.Request.Chapters)
+                .Where(chapter => !state.DeletedChapterIds.Contains(chapter.Id)).ToList();
             if (requestedSelection.Count == 0) throw new InvalidOperationException("没有匹配到可下载章节");
 
             var localChapters = GetLocalDownloadedChapters(rootDirectory);
@@ -650,7 +701,7 @@ public sealed class DownloadSchedulerService : IDisposable
                 {
                     Id = chapter.Id,
                     Title = chapter.Title,
-                    Status = "pending",
+                    Status = state.StoppedChapterIds.Contains(chapter.Id) ? "stopped" : "pending",
                 }).ToList();
             }
             AppendLog(state, "info", $"保存目录: {rootDirectory}");
@@ -860,7 +911,7 @@ public sealed class DownloadSchedulerService : IDisposable
                 state.Dto.TaskError = null;
             }
             AppendLog(state, "info", "下载已停止");
-            if (state.Manga is not null) SaveLibraryMetadata(state, false, failures);
+            if (!_shuttingDown && state.Manga is not null) SaveLibraryMetadata(state, false, failures);
         }
         catch (Exception ex)
         {
@@ -881,7 +932,14 @@ public sealed class DownloadSchedulerService : IDisposable
         finally
         {
             if (slotAcquired) _taskGate.Release();
-            RecordHistory(state);
+            lock (_queueLock)
+            {
+                if (!_shuttingDown)
+                {
+                    RecordHistory(state);
+                    SaveQueue();
+                }
+            }
         }
     }
 
@@ -962,15 +1020,20 @@ public sealed class DownloadSchedulerService : IDisposable
 
     internal Dictionary<int, DownloadedChapterRecord> GetLocalDownloadedChapters(string rootDirectory)
     {
+        var metadata = _library.LoadLibraryMetadata(rootDirectory);
         return _library.EnumerateChapterDirectories(rootDirectory)
-            .Select(directory => new DownloadedChapterRecord
+            .Select(directory => (Directory: directory, Images: _library.EnumerateImages(directory.FullName)))
+            .Where(item => item.Images.Count > 0 && item.Images.All(path => new FileInfo(path).Length > 0))
+            .Select(item => new DownloadedChapterRecord
             {
-                Order = LibraryStorageService.ChapterOrder(directory.Name),
-                DirName = directory.Name,
-                Title = LibraryStorageService.ChapterTitle(directory.Name),
-                ImageCount = _library.EnumerateImages(directory.FullName).Count,
+                Order = LibraryStorageService.ChapterOrder(item.Directory.Name),
+                DirName = item.Directory.Name,
+                Title = LibraryStorageService.ChapterTitle(item.Directory.Name),
+                ImageCount = item.Images.Count,
             })
             .Where(chapter => chapter.Order > 0 && chapter.ImageCount > 0)
+            .Where(chapter => !(metadata?.LastFailedChapterRecords.Any(failed => failed.Order == chapter.Order) ?? false) &&
+                chapter.ImageCount >= (metadata?.DownloadedChapters.FirstOrDefault(record => record.Order == chapter.Order)?.ImageCount ?? 0))
             .GroupBy(chapter => chapter.Order)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(chapter => chapter.ImageCount).First());
     }
@@ -1269,9 +1332,7 @@ public sealed class DownloadSchedulerService : IDisposable
     {
         try
         {
-            var items = File.Exists(HistoryFile)
-                ? JsonSerializer.Deserialize<List<DownloadHistoryItem>>(File.ReadAllText(HistoryFile), JsonOptions) ?? []
-                : [];
+            var items = AtomicJsonFile.Read<List<DownloadHistoryItem>>(HistoryFile, JsonOptions) ?? [];
             var changed = false;
             foreach (var item in items)
             {

@@ -87,14 +87,7 @@ public sealed class ReadingProgressService
     {
         try
         {
-            if (!File.Exists(_filePath))
-            {
-                return new Dictionary<string, ReadingProgressEntry>(StringComparer.OrdinalIgnoreCase);
-            }
-
-            var document = JsonSerializer.Deserialize<ReadingProgressDocument>(
-                File.ReadAllText(_filePath),
-                JsonOptions);
+            var document = AtomicJsonFile.Read<ReadingProgressDocument>(_filePath, JsonOptions);
             return (document?.Entries ?? [])
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.RootDirectory) &&
                                 !string.IsNullOrWhiteSpace(entry.ChapterDirectoryName))
@@ -129,12 +122,7 @@ public sealed class ReadingProgressService
                     .OrderByDescending(entry => entry.UpdatedAtUtc)
                     .ToList(),
             };
-            var temporaryPath = _filePath + ".tmp";
-            File.WriteAllText(
-                temporaryPath,
-                JsonSerializer.Serialize(document, JsonOptions),
-                new UTF8Encoding(false));
-            File.Move(temporaryPath, _filePath, true);
+            AtomicJsonFile.Write(_filePath, document, JsonOptions);
         }
         catch
         {
@@ -160,7 +148,7 @@ public sealed class ReadingProgressService
         }
     }
 
-    private sealed class ReadingProgressDocument
+    internal sealed class ReadingProgressDocument
     {
         public List<ReadingProgressEntry> Entries { get; set; } = [];
     }

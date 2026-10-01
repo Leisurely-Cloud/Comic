@@ -269,13 +269,15 @@ public sealed class BackendClient
             if (_downloads.HasActiveTasks())
                 throw new InvalidOperationException("存在未结束的下载任务，请停止或等待任务完成后再更改目录。");
 
-            var previousRoot = _library.StorageRoot;
-            var resolvedRoot = _library.SwitchStorageRoot(settings.StorageRoot);
-            if (!LibraryStorageService.SamePath(previousRoot, resolvedRoot))
+            _downloads.RunWithIdleLibrary(() =>
             {
-                _downloads.ReloadHistoryForStorageChange();
-            }
-            _applicationSettings.UpdateStorageRoot(resolvedRoot);
+                var previousRoot = _library.StorageRoot;
+                var resolvedRoot = _library.SwitchStorageRoot(settings.StorageRoot);
+                if (!LibraryStorageService.SamePath(previousRoot, resolvedRoot))
+                    _downloads.ReloadHistoryForStorageChange();
+                _applicationSettings.UpdateStorageRoot(resolvedRoot);
+                return true;
+            });
             return await _library.GetSettingsAsync(cancellationToken);
         }, "settings_update_failed");
 

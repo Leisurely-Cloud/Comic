@@ -17,10 +17,12 @@ public sealed partial class App : Application
 
     public IServiceProvider Services { get; }
     public Window? MainWindow => _window;
+    public string? DataRestoreStatus { get; }
 
     public App()
     {
         UnhandledException += OnUnhandledException;
+        DataRestoreStatus = DataMaintenanceService.ApplyPendingRestore(ApplicationSettingsService.ResolveSettingsDirectory());
         Services = ConfigureServices();
         InitializeComponent();
     }
@@ -29,10 +31,7 @@ public sealed partial class App : Application
     {
         var services = new ServiceCollection();
 
-        var logDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Comic.WinUI",
-            "logs");
+        var logDirectory = Path.Combine(ApplicationSettingsService.ResolveSettingsDirectory(), "logs");
         services.AddLogging(builder => builder.AddProvider(new FileLoggerProvider(logDirectory)));
 
         services.AddSingleton(new JmSiteOptions());
@@ -67,6 +66,7 @@ public sealed partial class App : Application
         services.AddSingleton<ReadingProgressService>();
         services.AddSingleton<ReaderPreferenceService>();
         services.AddSingleton<AppUpdateService>();
+        services.AddSingleton<DataMaintenanceService>();
         services.AddSingleton<ShellViewModel>();
         services.AddTransient<DownloadPageViewModel>();
         services.AddTransient<LibraryPageViewModel>();

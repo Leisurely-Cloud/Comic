@@ -16,11 +16,11 @@ public sealed class SearchHistoryService
     private List<SearchHistoryEntry> _cache = [];
 
     public SearchHistoryService()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Comic.WinUI"))
+        : this(ApplicationSettingsService.ResolveSettingsDirectory())
     {
     }
+
+    public SearchHistoryService(ApplicationSettingsService settings) : this(settings.SettingsDirectory) { }
 
     internal SearchHistoryService(string directory)
     {
@@ -86,9 +86,7 @@ public sealed class SearchHistoryService
     {
         try
         {
-            if (!File.Exists(_filePath)) return [];
-            var json = File.ReadAllText(_filePath);
-            return (JsonSerializer.Deserialize<List<SearchHistoryEntry>>(json) ?? [])
+            return (AtomicJsonFile.Read<List<SearchHistoryEntry>>(_filePath, JsonOptions) ?? [])
                 .Where(entry => string.Equals(entry.SiteKey, SiteCatalog.Key, StringComparison.Ordinal))
                 .Select(entry =>
                 {
@@ -107,8 +105,7 @@ public sealed class SearchHistoryService
     {
         try
         {
-            var json = JsonSerializer.Serialize(_cache, JsonOptions);
-            File.WriteAllText(_filePath, json);
+            AtomicJsonFile.Write(_filePath, _cache, JsonOptions);
         }
         catch
         {

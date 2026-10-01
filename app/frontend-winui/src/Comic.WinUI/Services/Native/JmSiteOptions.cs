@@ -25,6 +25,9 @@ public sealed class JmSiteOptions
     /// <summary>单个 API 域名的响应等待上限；超时后立即尝试下一个备用域名。</summary>
     public TimeSpan ApiRequestTimeout { get; init; } = TimeSpan.FromSeconds(6);
 
+    /// <summary>图片响应头或单次读取连续无响应的上限，不包含暂停及限速等待。</summary>
+    public TimeSpan ImageReadTimeout { get; init; } = TimeSpan.FromSeconds(20);
+
     public int DefaultScrambleId { get; init; } = 220_980;
 
     public string UserAgent { get; init; } =

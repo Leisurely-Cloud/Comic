@@ -119,6 +119,22 @@ public partial class SettingsPageViewModel : ObservableObject
     public partial bool IsSaving { get; set; }
 
     [ObservableProperty]
+    public partial bool IsDataMaintenanceBusy { get; set; }
+
+    [ObservableProperty]
+    public partial string DataMaintenanceStatus { get; set; } = string.Empty;
+
+    public bool ResumeDownloadsOnStartup
+    {
+        get => _applicationSettings.ResumeDownloadsOnStartup;
+        set
+        {
+            _applicationSettings.UpdateResumeDownloadsOnStartup(value);
+            OnPropertyChanged();
+        }
+    }
+
+    [ObservableProperty]
     public partial string JmUsername { get; set; } = string.Empty;
 
     [ObservableProperty]
