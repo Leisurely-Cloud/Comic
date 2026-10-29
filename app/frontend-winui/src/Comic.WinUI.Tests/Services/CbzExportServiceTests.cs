@@ -9,6 +9,8 @@ namespace Comic.WinUI.Tests.Services;
 [TestClass]
 public sealed class CbzExportServiceTests
 {
+    public TestContext TestContext { get; set; } = null!;
+
     private string _container = null!;
     private string _storageRoot = null!;
     private string _mangaRoot = null!;
@@ -70,6 +72,71 @@ public sealed class CbzExportServiceTests
         Assert.AreEqual("测试漫画", comicInfo.Root?.Element("Series")?.Value);
         Assert.AreEqual("第一话", comicInfo.Root?.Element("Title")?.Value);
         Assert.AreEqual("1", comicInfo.Root?.Element("PageCount")?.Value);
+    }
+
+    [TestMethod]
+    public async Task ExportCbz_LargeImagePayloadsRoundTripWithoutChanges()
+    {
+        // 固定随机数据模拟已压缩图片，校验打包字节并记录本机耗时；不设依赖机器速度的断言。
+        var random = new Random(20261019);
+        var images = new Dictionary<string, byte[]>();
+        var extensions = new[] { ".jpg", ".png", ".webp", ".gif" };
+        for (var index = 0; index < 24; index++)
+        {
+            var bytes = new byte[256 * 1024];
+            random.NextBytes(bytes);
+            var name = $"{index + 2:000}{extensions[index % extensions.Length]}";
+            images.Add(name, bytes);
+            File.WriteAllBytes(Path.Combine(_chapterRoot, name), bytes);
+        }
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateExporter(library);
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var timer = Stopwatch.StartNew();
+            var response = await service.ExportCbzAsync(_mangaRoot);
+            var progress = await WaitUntilFinishedAsync(service, response.TaskId);
+            timer.Stop();
+            Assert.AreEqual("completed", progress.Status);
+            var archivePath = Path.Combine(progress.ExportDir, "001_第一话.cbz");
+            TestContext.WriteLine($"合成图片样本 6 MiB，第 {attempt} 次导出 {timer.Elapsed.TotalMilliseconds:F1} ms，CBZ {new FileInfo(archivePath).Length} 字节。");
+
+            using var archive = ZipFile.OpenRead(archivePath);
+            Assert.AreEqual(images.Count + 2, archive.Entries.Count);
+            foreach (var (name, expected) in images)
+            {
+                var entry = archive.GetEntry(name);
+                Assert.IsNotNull(entry);
+                await using var source = entry.Open();
+                using var restored = new MemoryStream();
+                await source.CopyToAsync(restored);
+                CollectionAssert.AreEqual(expected, restored.ToArray(), $"{name} 打包后字节必须保持一致。");
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ExportCbz_BitmapPayloadStillCompressesAndRoundTrips()
+    {
+        var payload = new byte[64 * 1024];
+        Array.Fill(payload, (byte)42);
+        File.WriteAllBytes(Path.Combine(_chapterRoot, "002.BMP"), payload);
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var service = TestServiceFactory.CreateExporter(library);
+
+        var response = await service.ExportCbzAsync(_mangaRoot);
+        var progress = await WaitUntilFinishedAsync(service, response.TaskId);
+
+        Assert.AreEqual("completed", progress.Status);
+        using var archive = ZipFile.OpenRead(Path.Combine(progress.ExportDir, "001_第一话.cbz"));
+        var entry = archive.GetEntry("002.BMP");
+        Assert.IsNotNull(entry);
+        Assert.IsLessThan(entry.Length, entry.CompressedLength, "可压缩的 BMP 仍应缩小包体。");
+        await using var source = entry.Open();
+        using var restored = new MemoryStream();
+        await source.CopyToAsync(restored);
+        CollectionAssert.AreEqual(payload, restored.ToArray());
     }
 
     [TestMethod]
@@ -199,7 +266,7 @@ public sealed class CbzExportServiceTests
         return progress;
     }
 
-    /// <summary>批量造章节。用随机字节让 deflate 无法走捷径,保证导出有可观测的耗时。</summary>
+    /// <summary>批量造章节，使用固定随机字节模拟已压缩图片，并保留可观测的取消窗口。</summary>
     private void CreateBulkChapters(int count, int imageBytes)
     {
         var random = new Random(20260819);

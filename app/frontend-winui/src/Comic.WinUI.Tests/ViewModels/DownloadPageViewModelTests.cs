@@ -236,6 +236,221 @@ public sealed class DownloadPageViewModelTests
         Assert.IsFalse(viewModel.ShowSearchResultsSection);
     }
 
+    [TestMethod]
+    public async Task BatchDelete_RestoredFailedChaptersRemoveEmptyTaskAndPreserveFiles()
+    {
+        WriteTaskQueue(CreateFailedTask("failed"));
+        var chapterRoot = Path.Combine(_storageRoot, "测试漫画", "001_第一话");
+        Directory.CreateDirectory(chapterRoot);
+        var image = Path.Combine(chapterRoot, "001.jpg");
+        File.WriteAllBytes(image, [1, 2, 3]);
+        var metadata = Path.Combine(Path.GetDirectoryName(chapterRoot)!, "元数据.json");
+        File.WriteAllText(metadata, "{\"is_favorite\":true}");
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.IsBatchMode = true;
+        foreach (var chapter in viewModel.CurrentTask!.Chapters) chapter.IsSelected = true;
+        Assert.AreEqual(0, viewModel.SelectedTaskCount);
+        Assert.AreEqual(2, viewModel.SelectedDownloadChapterCount);
+
+        await viewModel.BatchDeleteAsync();
+
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual(0, viewModel.Tasks.Count);
+        Assert.IsNull(viewModel.CurrentTask);
+        Assert.IsFalse(viewModel.HasSelectedTasks);
+        Assert.AreEqual(0, (await _scheduler.GetDownloadsAsync()).Items.Count);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(image));
+        Assert.AreEqual("{\"is_favorite\":true}", File.ReadAllText(metadata));
+        using var queue = JsonDocument.Parse(File.ReadAllText(Path.Combine(_storageRoot, ".comic_state", "task_queue.json")));
+        Assert.AreEqual(0, queue.RootElement.GetArrayLength());
+        Assert.AreEqual(0, _handler.RequestedUris.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_PartialSelectionKeepsUnselectedChaptersAcrossRestart()
+    {
+        WriteTaskQueue(CreateFailedTask("failed"));
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.IsBatchMode = true;
+        viewModel.CurrentTask!.Chapters[0].IsSelected = true;
+
+        await viewModel.BatchDeleteAsync();
+
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual(1, viewModel.Tasks.Count);
+        Assert.AreEqual("789", viewModel.CurrentTask.Chapters.Single().Id);
+        Assert.AreEqual(0, viewModel.SelectedDownloadChapterCount);
+        using var client = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var restored = TestServiceFactory.CreateScheduler(new JmComicService(client), library);
+        Assert.AreEqual("789", (await restored.GetDownloadAsync("failed")).Chapters.Single().Id);
+        using var queue = JsonDocument.Parse(File.ReadAllText(Path.Combine(_storageRoot, ".comic_state", "task_queue.json")));
+        Assert.AreEqual("456", queue.RootElement[0].GetProperty("deleted_chapters")[0].GetString());
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_MixedTaskAndChapterSelectionKeepsOtherTasksAndUpdatesCurrentTask()
+    {
+        WriteTaskQueue(CreateFailedTask("whole"), CreateFailedTask("chapters"), CreateFailedTask("keep"));
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.IsBatchMode = true;
+        var whole = viewModel.Tasks.Single(task => task.Id == "whole");
+        whole.IsSelected = true;
+        foreach (var chapter in whole.Chapters) chapter.IsSelected = true;
+        var chapters = viewModel.Tasks.Single(task => task.Id == "chapters");
+        foreach (var chapter in chapters.Chapters) chapter.IsSelected = true;
+        viewModel.CurrentTask = chapters;
+
+        await viewModel.BatchDeleteAsync();
+
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual("keep", viewModel.Tasks.Single().Id);
+        Assert.AreEqual("keep", viewModel.CurrentTask!.Id);
+        Assert.AreEqual("keep", (await _scheduler.GetDownloadsAsync()).Items.Single().Id);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_NoSelectionShowsFeedbackAndPreservesTasks()
+    {
+        WriteTaskQueue(CreateFailedTask("failed"));
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+
+        await viewModel.BatchDeleteAsync();
+
+        StringAssert.Contains(viewModel.PageError, "请先选择");
+        Assert.AreEqual(1, viewModel.Tasks.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_PausedWholeTaskRequiresStopAndThenCanBeRemoved()
+    {
+        var task = CreateFailedTask("paused");
+        task.Status = "paused";
+        WriteTaskQueue(task);
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.Tasks.Single().IsSelected = true;
+
+        await viewModel.BatchDeleteAsync();
+
+        StringAssert.Contains(viewModel.PageError, "请先停止");
+        Assert.AreEqual(1, viewModel.Tasks.Count);
+        await _scheduler.StopDownloadAsync("paused");
+        await viewModel.BatchDeleteAsync();
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual(0, viewModel.Tasks.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_RemovedTaskCannotBeReinsertedByLateSnapshot()
+    {
+        var staleTask = CreateFailedTask("failed");
+        WriteTaskQueue(staleTask);
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.Tasks.Single().IsSelected = true;
+        await viewModel.BatchDeleteAsync();
+
+        // Simulate an already queued UI snapshot arriving after successful deletion.
+        typeof(DownloadPageViewModel).GetMethod("UpsertTask", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(viewModel, [staleTask]);
+
+        Assert.AreEqual(0, viewModel.Tasks.Count);
+        Assert.IsNull(viewModel.CurrentTask);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_RestoredPausedChaptersCanRemoveEmptyQueueWithoutStartingDownload()
+    {
+        var task = CreateFailedTask("paused");
+        task.Status = "paused";
+        WriteTaskQueue(task);
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.IsBatchMode = true;
+        foreach (var chapter in viewModel.CurrentTask!.Chapters) chapter.IsSelected = true;
+
+        await viewModel.BatchDeleteAsync();
+
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual(0, viewModel.Tasks.Count);
+        Assert.AreEqual(0, _handler.RequestedUris.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_UnknownChapterIsReportedAndLeavesOtherRecords()
+    {
+        WriteTaskQueue(CreateFailedTask("failed"));
+        using var viewModel = CreateViewModel();
+
+        var result = await _scheduler.BatchDeleteChaptersAsync("failed", ["456", "missing", "456"]);
+
+        CollectionAssert.AreEqual(new[] { "456" }, result.Deleted);
+        CollectionAssert.AreEqual(new[] { "missing" }, result.Failed);
+        Assert.AreEqual("789", (await _scheduler.GetDownloadAsync("failed")).Chapters.Single().Id);
+        Assert.AreEqual(0, result.RemovedTasks.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchDelete_CancelledRequestDoesNotModifyQueue()
+    {
+        WriteTaskQueue(CreateFailedTask("failed"));
+        using var viewModel = CreateViewModel();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => _scheduler.BatchDeleteChaptersAsync("failed", ["456", "789"], cancellation.Token));
+
+        Assert.AreEqual(2, (await _scheduler.GetDownloadAsync("failed")).Chapters.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchStop_RestoredTaskShowsActualStoppedStateRatherThanStuckStopping()
+    {
+        var task = CreateFailedTask("paused");
+        task.Status = "paused";
+        WriteTaskQueue(task);
+        using var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+        viewModel.Tasks.Single().IsSelected = true;
+
+        await viewModel.BatchStopAsync();
+
+        Assert.AreEqual(string.Empty, viewModel.PageError);
+        Assert.AreEqual("stopped", viewModel.CurrentTask!.Status);
+        Assert.AreEqual("已停止", viewModel.CurrentTask.StatusText);
+        Assert.AreEqual(0, _handler.RequestedUris.Count);
+    }
+
+    private void WriteTaskQueue(params DownloadTaskDto[] tasks)
+    {
+        AtomicJsonFile.Write(Path.Combine(_storageRoot, ".comic_state", "task_queue.json"),
+            tasks.Select((task, index) => new
+            {
+                Request = new DownloadCreateRequest { Url = "https://18comic.vip/album/123", Chapters = ["456", "789"] },
+                Task = task,
+                Order = index + 1,
+            }).ToArray());
+    }
+
+    private static DownloadTaskDto CreateFailedTask(string id) => new()
+    {
+        Id = id,
+        Url = "https://18comic.vip/album/123",
+        Status = "failed",
+        MangaTitle = "测试漫画",
+        Chapters =
+        [
+            new DownloadChapterProgressDto { Id = "456", Title = "第一话", Status = "failed", Error = "没有可下载图片" },
+            new DownloadChapterProgressDto { Id = "789", Title = "第二话", Status = "failed", Error = "没有可下载图片" },
+        ],
+    };
+
     private static HttpResponseMessage BuildEncryptedResponse(HttpRequestMessage request, string json)
     {
         var tokenParam = request.Headers.GetValues("tokenparam").Single();

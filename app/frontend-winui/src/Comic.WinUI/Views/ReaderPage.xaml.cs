@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Windowing;
@@ -18,7 +19,11 @@ public sealed partial class ReaderPage : Page
     private readonly Dictionary<UIElement, ReaderStripImageItemViewModel> _stripItemsByElement = [];
     private bool _stripChapterAdvancePending;
     private bool _stripZoomInProgress;
-    private bool _isFullscreen;
+    private OverlappedPresenter? _windowedPresenter;
+    private Windows.Graphics.RectInt32 _windowedBounds;
+    private bool _wasWindowMaximized;
+    private bool _shortcutDialogOpen;
+    private bool IsFullscreen => ((App)Application.Current).MainWindow?.AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
 
     public ReaderPage()
     {
@@ -38,10 +43,12 @@ public sealed partial class ReaderPage : Page
 
         _rootDir = null;
         _onlineMangaUrl = null;
+        _archivePath = null;
         if (e.Parameter is ReaderNavigationArgs args)
         {
             _rootDir = args.LocalRootDir;
             _onlineMangaUrl = args.OnlineMangaUrl;
+            _archivePath = args.ArchivePath;
         }
         else if (e.Parameter is string rootDir)
         {
@@ -53,18 +60,29 @@ public sealed partial class ReaderPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        RestoreWindowedMode();
         SaveCurrentReadingPosition();
         ViewModel.StripPositionRestoreRequested -= OnStripPositionRestoreRequested;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ViewModel.Deactivate();
+        _stripItemsByElement.Clear();
         base.OnNavigatedFrom(e);
     }
 
     private string? _rootDir;
     private string? _onlineMangaUrl;
+    private string? _archivePath;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrEmpty(_onlineMangaUrl))
+        // Focus once, before asynchronous loading: a completed image must never steal
+        // focus from a control or dialog the user has since opened.
+        Focus(FocusState.Programmatic);
+        if (!string.IsNullOrEmpty(_archivePath))
+        {
+            await ViewModel.LoadArchiveCommand.ExecuteAsync(_archivePath);
+        }
+        else if (!string.IsNullOrEmpty(_onlineMangaUrl))
         {
             await ViewModel.LoadOnlineCommand.ExecuteAsync(_onlineMangaUrl);
         }
@@ -332,13 +350,36 @@ public sealed partial class ReaderPage : Page
     {
         var window = ((App)Application.Current).MainWindow;
         if (window is null) return;
-        if (_isFullscreen)
+        if (IsFullscreen)
         {
-            window.AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-            if (window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
+            RestoreWindowedMode();
+            return;
         }
-        else window.AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
-        _isFullscreen = !_isFullscreen;
+        if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
+        _windowedPresenter = presenter;
+        _wasWindowMaximized = presenter.State == OverlappedPresenterState.Maximized;
+        var position = window.AppWindow.Position;
+        var size = window.AppWindow.Size;
+        _windowedBounds = new(position.X, position.Y, size.Width, size.Height);
+        window.AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+    }
+
+    private void RestoreWindowedMode()
+    {
+        var window = ((App)Application.Current).MainWindow;
+        if (window is null || !IsFullscreen) return;
+        window.AppWindow.SetPresenter(_windowedPresenter ?? OverlappedPresenter.Create());
+        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            if (_wasWindowMaximized) presenter.Maximize();
+            else
+            {
+                presenter.Restore();
+                if (_windowedBounds.Width > 0 && _windowedBounds.Height > 0)
+                    window.AppWindow.MoveAndResize(_windowedBounds);
+            }
+        }
+        _windowedPresenter = null;
     }
 
     private async void OnShortcutSettingsClick(object sender, RoutedEventArgs e)
@@ -354,12 +395,17 @@ public sealed partial class ReaderPage : Page
         {
             XamlRoot = XamlRoot,
             Title = "阅读快捷键",
+            RequestedTheme = ActualTheme,
             Content = panel,
             PrimaryButtonText = "保存",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Primary,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        ContentDialogResult result;
+        _shortcutDialogOpen = true;
+        try { result = await dialog.ShowAsync(); }
+        finally { _shortcutDialogOpen = false; }
+        if (result != ContentDialogResult.Primary) return;
         if (!Enum.TryParse<Windows.System.VirtualKey>(previous.Text.Trim(), true, out _) ||
             !Enum.TryParse<Windows.System.VirtualKey>(next.Text.Trim(), true, out _) ||
             !Enum.TryParse<Windows.System.VirtualKey>(fullscreen.Text.Trim(), true, out _))
@@ -516,33 +562,30 @@ public sealed partial class ReaderPage : Page
 
     private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        // 章节下拉框聚焦时,Home/End 等按键应留给控件自身,避免误翻页。
-        if (FocusManager.GetFocusedElement() is ComboBox)
+        var inputOwnsKey = _navigationDialogOpen || _shortcutDialogOpen;
+        // Template children can own focus (e.g. a NumberBox's inner TextBox or a
+        // ComboBoxItem). Walk ancestors instead of checking only the focused leaf.
+        for (var focused = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+             focused is not null && focused != this; focused = VisualTreeHelper.GetParent(focused))
         {
-            return;
+            if (focused is ComboBox or ComboBoxItem or TextBox or NumberBox or RichEditBox
+                or PasswordBox or Slider or ContentDialog or MenuFlyoutPresenter)
+            {
+                inputOwnsKey = true;
+                break;
+            }
         }
-
-        var shortcuts = ViewModel.Shortcuts;
-        if (string.Equals(e.Key.ToString(), shortcuts.FullscreenKey, StringComparison.OrdinalIgnoreCase))
+        var modified = IsKeyDown(Windows.System.VirtualKey.Control)
+            || IsKeyDown(Windows.System.VirtualKey.Menu) || IsKeyDown(Windows.System.VirtualKey.Shift)
+            || IsKeyDown(Windows.System.VirtualKey.LeftWindows) || IsKeyDown(Windows.System.VirtualKey.RightWindows);
+        var action = ReaderKeyboardPolicy.Resolve(e.Key, ViewModel.Shortcuts,
+            ViewModel.IsStripMode, IsFullscreen, inputOwnsKey, modified);
+        if (action == ReaderKeyAction.None) return;
+        // Mark handled before awaiting so ScrollViewer cannot also process the key.
+        e.Handled = true;
+        switch (action)
         {
-            ToggleFullscreen(); e.Handled = true; return;
-        }
-        if (string.Equals(e.Key.ToString(), shortcuts.PreviousKey, StringComparison.OrdinalIgnoreCase))
-        {
-            if (ViewModel.IsStripMode) ViewModel.PreviousChapterCommand.Execute(null);
-            else await ViewModel.PreviousImageCommand.ExecuteAsync(null);
-            e.Handled = true; return;
-        }
-        if (string.Equals(e.Key.ToString(), shortcuts.NextKey, StringComparison.OrdinalIgnoreCase))
-        {
-            if (ViewModel.IsStripMode) ViewModel.NextChapterCommand.Execute(null);
-            else await ViewModel.NextImageCommand.ExecuteAsync(null);
-            e.Handled = true; return;
-        }
-
-        switch (e.Key)
-        {
-            case Windows.System.VirtualKey.Left:
+            case ReaderKeyAction.Previous:
                 if (ViewModel.IsStripMode)
                 {
                     ViewModel.PreviousChapterCommand.Execute(null);
@@ -551,9 +594,8 @@ public sealed partial class ReaderPage : Page
                 {
                     await ViewModel.PreviousImageCommand.ExecuteAsync(null);
                 }
-                e.Handled = true;
                 break;
-            case Windows.System.VirtualKey.Right:
+            case ReaderKeyAction.Next:
                 if (ViewModel.IsStripMode)
                 {
                     ViewModel.NextChapterCommand.Execute(null);
@@ -562,51 +604,28 @@ public sealed partial class ReaderPage : Page
                 {
                     await ViewModel.NextImageCommand.ExecuteAsync(null);
                 }
-                e.Handled = true;
                 break;
-            case Windows.System.VirtualKey.PageDown:
-                if (!ViewModel.IsStripMode)
-                {
-                    await ViewModel.NextImageCommand.ExecuteAsync(null);
-                    e.Handled = true;
-                }
+            case ReaderKeyAction.First:
+                await ViewModel.GoToImageCommand.ExecuteAsync(0);
                 break;
-            case Windows.System.VirtualKey.PageUp:
-                if (!ViewModel.IsStripMode)
-                {
-                    await ViewModel.PreviousImageCommand.ExecuteAsync(null);
-                    e.Handled = true;
-                }
+            case ReaderKeyAction.Last:
+                await ViewModel.GoToImageCommand.ExecuteAsync(ViewModel.TotalImages - 1);
                 break;
-            case Windows.System.VirtualKey.Home:
-                if (!ViewModel.IsStripMode)
-                {
-                    await ViewModel.GoToImageCommand.ExecuteAsync(0);
-                    e.Handled = true;
-                }
+            case ReaderKeyAction.Fullscreen:
+                ToggleFullscreen();
                 break;
-            case Windows.System.VirtualKey.End:
-                if (!ViewModel.IsStripMode)
-                {
-                    await ViewModel.GoToImageCommand.ExecuteAsync(ViewModel.TotalImages - 1);
-                    e.Handled = true;
-                }
-                break;
-            case Windows.System.VirtualKey.Escape:
-                if (_isFullscreen)
-                {
-                    ToggleFullscreen();
-                    e.Handled = true;
-                    break;
-                }
+            case ReaderKeyAction.Back:
                 if (Frame.CanGoBack)
                 {
                     Frame.GoBack();
                 }
-                e.Handled = true;
                 break;
         }
     }
+
+    private static bool IsKeyDown(Windows.System.VirtualKey key) =>
+        (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
+            & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
 
     /// <summary>分页模式点击图片:右半区域翻下一页,左半区域翻上一页。</summary>
     private async void OnImageAreaTapped(object sender, TappedRoutedEventArgs e)

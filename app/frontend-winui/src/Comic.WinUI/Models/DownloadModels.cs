@@ -318,4 +318,7 @@ public sealed class BatchActionResponse
 
     [JsonPropertyName("failed")]
     public List<string> Failed { get; set; } = [];
+
+    [JsonPropertyName("removed_tasks")]
+    public List<string> RemovedTasks { get; set; } = [];
 }

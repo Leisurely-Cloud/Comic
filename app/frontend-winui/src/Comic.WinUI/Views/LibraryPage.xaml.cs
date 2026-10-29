@@ -28,8 +28,17 @@ public sealed partial class LibraryPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         ViewModel = ((App)Application.Current).Services.GetRequiredService<LibraryPageViewModel>();
+        _archivePageActive = true;
         Bindings.Update();
         base.OnNavigatedTo(e);
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        _archivePageActive = false;
+        ViewModel.CancelArchiveDrop();
+        RecentArchiveMenu.Hide();
+        base.OnNavigatedFrom(e);
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -62,10 +71,19 @@ public sealed partial class LibraryPage : Page
         }
     }
 
+    private void OnContinueReadingClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.CanContinueReading)
+        {
+            Frame.Navigate(typeof(ReaderPage), ViewModel.ContinueReadingRoot);
+        }
+    }
+
     private async void OnDeleteMangaClick(object sender, RoutedEventArgs e)
     {
         var selected = ViewModel.SelectedItem;
         if (selected is null || string.IsNullOrWhiteSpace(selected.RootDir)) return;
+        using var archiveBlock = BlockArchiveInput();
 
         var duplicateMessage = selected.DuplicateDirectoryCount > 0
             ? $"\n\n另外检测到 {selected.DuplicateDirectoryCount} 个重复目录，也会一并移入回收站。"
@@ -88,6 +106,7 @@ public sealed partial class LibraryPage : Page
 
     private async void OnCleanupDuplicatesClick(object sender, RoutedEventArgs e)
     {
+        using var archiveBlock = BlockArchiveInput();
         var preview = await ViewModel.PreviewDuplicateCleanupAsync();
         if (preview is null || preview.Items.Count == 0) return;
         var safeCount = preview.Items.Count(item => item.CanCleanup);
@@ -109,6 +128,7 @@ public sealed partial class LibraryPage : Page
 
     private async void OnImportJmClick(object sender, RoutedEventArgs e)
     {
+        using var archiveBlock = BlockArchiveInput();
         try
         {
             var window = ((App)Application.Current).MainWindow;

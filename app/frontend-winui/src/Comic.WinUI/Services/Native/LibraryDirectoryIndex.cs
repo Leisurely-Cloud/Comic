@@ -27,10 +27,11 @@ internal sealed class LibraryDirectoryIndex : IDisposable
         _watcher.EnableRaisingEvents = true;
     }
 
-    public IReadOnlyList<LibraryEntry> GetEntries(Func<DirectoryInfo, long, LibraryEntry?> build)
+    public IReadOnlyList<LibraryEntry> GetEntries(Func<DirectoryInfo, long, LibraryEntry?> build, CancellationToken cancellationToken = default)
     {
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var directories = new DirectoryInfo(_root).EnumerateDirectories()
                 .Where(directory => !directory.Name.StartsWith('.') &&
                     !directory.Name.EndsWith("_CBZ", StringComparison.OrdinalIgnoreCase) &&
@@ -39,21 +40,32 @@ internal sealed class LibraryDirectoryIndex : IDisposable
             foreach (var removed in _entries.Keys.Where(path => !existing.Contains(path)).ToList()) _entries.Remove(removed);
             foreach (var directory in directories)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 directory.Refresh();
                 // 轻量核对章节目录与元数据，捕获尚未送达的创建/删除通知。
                 var metadata = new FileInfo(Path.Combine(directory.FullName, "元数据.json"));
                 var stamp = $"{(metadata.Exists ? metadata.LastWriteTimeUtc.Ticks : 0)}:{(metadata.Exists ? metadata.Length : 0)}:" +
                     string.Join(';', directory.EnumerateDirectories().OrderBy(item => item.Name).Select(item => item.Name));
-                if (!_entries.TryGetValue(directory.FullName, out var cached) || cached.Stamp != stamp || _dirty.Remove(directory.FullName))
+                if (!_entries.TryGetValue(directory.FullName, out var cached) || cached.Stamp != stamp || _dirty.Contains(directory.FullName))
                 {
-                    _dirty.Remove(directory.FullName);
-                    var files = directory.EnumerateFiles("*", new EnumerationOptions
+                    var files = new Dictionary<string, FileStamp>(StringComparer.OrdinalIgnoreCase);
+                    long diskUsageBytes = 0;
+                    foreach (var file in directory.EnumerateFiles("*", new EnumerationOptions
                     {
                         RecurseSubdirectories = true,
                         AttributesToSkip = FileAttributes.ReparsePoint,
                         IgnoreInaccessible = true,
-                    }).ToDictionary(file => Path.GetRelativePath(directory.FullName, file.FullName), file => new FileStamp(file.Length, file.LastWriteTimeUtc.Ticks), StringComparer.OrdinalIgnoreCase);
-                    _entries[directory.FullName] = new IndexedManga(stamp, build(directory, files.Values.Sum(file => file.Length)), files);
+                    }))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        files.Add(Path.GetRelativePath(directory.FullName, file.FullName), new FileStamp(file.Length, file.LastWriteTimeUtc.Ticks));
+                        diskUsageBytes += file.Length;
+                    }
+                    var entry = build(directory, diskUsageBytes);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _entries[directory.FullName] = new IndexedManga(stamp, entry, files);
+                    // 完整重建后再清除失效标记；取消途中仍需在下次查询重建。
+                    _dirty.Remove(directory.FullName);
                     RebuiltEntryCount++;
                 }
             }

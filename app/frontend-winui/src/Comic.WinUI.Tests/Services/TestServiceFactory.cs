@@ -14,7 +14,8 @@ internal static class TestServiceFactory
         ApplicationSettingsService? settings = null) =>
         new(jmComic, library, settings);
 
-    public static ReaderService CreateReader(LibraryStorageService library) => new(library);
+    public static ReaderService CreateReader(LibraryStorageService library, ArchiveReaderService? archiveReader = null) =>
+        new(library, archiveReader: archiveReader);
 
     public static CbzExportService CreateExporter(LibraryStorageService library) => new(library);
 

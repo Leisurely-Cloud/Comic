@@ -57,6 +57,7 @@ public sealed partial class App : Application
         services.AddSingleton<LibraryStorageService>();
         services.AddSingleton<DownloadSchedulerService>();
         services.AddSingleton<CbzExportService>();
+        services.AddSingleton<ArchiveReaderService>();
         services.AddSingleton<ReaderService>();
         services.AddSingleton<BackendClient>();
         services.AddSingleton<DownloadEventStream>();
@@ -64,6 +65,9 @@ public sealed partial class App : Application
         services.AddSingleton<ApplicationSettingsService>();
         services.AddSingleton<IJmCredentialStore, WindowsJmCredentialStore>();
         services.AddSingleton<ReadingProgressService>();
+        services.AddSingleton<RecentArchiveService>();
+        services.AddSingleton<ReadingBookmarkService>();
+        services.AddSingleton<LibraryOrganizationService>();
         services.AddSingleton<ReaderPreferenceService>();
         services.AddSingleton<AppUpdateService>();
         services.AddSingleton<DataMaintenanceService>();

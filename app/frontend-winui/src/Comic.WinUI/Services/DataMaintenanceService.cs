@@ -15,7 +15,7 @@ public sealed class DataMaintenanceService
 {
     private const int MaxFileBytes = 8 * 1024 * 1024;
     private const int MaxBackupBytes = 64 * 1024 * 1024;
-    private static readonly string[] AppFiles = ["app-settings.json", "reading-progress.json", "reader-preferences.json", "search-history.json"];
+    private static readonly string[] AppFiles = ["app-settings.json", "reading-progress.json", "reader-preferences.json", "search-history.json", "reading-bookmarks.json", "library-organization.json", "recent-archives.json"];
     private static readonly string[] StateFiles = ["task_history.json", "task_queue.json"];
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly string _settingsDirectory;
@@ -394,7 +394,10 @@ public sealed class DataMaintenanceService
             return key switch
             {
                 "app/app-settings.json" => JsonSerializer.Deserialize<ApplicationSettingsService.UserPreferences>(text, Options) is not null,
-                "app/reading-progress.json" => JsonSerializer.Deserialize<ReadingProgressService.ReadingProgressDocument>(text, Options)?.Entries is { } entries && entries.All(entry => entry is not null),
+                "app/reading-progress.json" => JsonSerializer.Deserialize<ReadingProgressService.ReadingProgressDocument>(text, Options) is { } progress && ReadingProgressService.IsValid(progress),
+                "app/reading-bookmarks.json" => JsonSerializer.Deserialize<ReadingBookmarkService.BookmarkDocument>(text, Options) is { } bookmarks && ReadingBookmarkService.IsValid(bookmarks),
+                "app/library-organization.json" => JsonSerializer.Deserialize<LibraryOrganizationService.OrganizationDocument>(text, Options) is { } organization && LibraryOrganizationService.IsValid(organization),
+                "app/recent-archives.json" => JsonSerializer.Deserialize<RecentArchiveService.RecentArchiveDocument>(text, Options) is { } archives && RecentArchiveService.IsValid(archives),
                 "app/reader-preferences.json" => JsonSerializer.Deserialize<ReaderPreferenceService.ReaderPreferenceDocument>(text, Options) is { Manga: not null, Shortcuts: not null },
                 "app/search-history.json" => JsonSerializer.Deserialize<List<SearchHistoryEntry>>(text, Options) is { } searches && searches.All(entry => entry is not null),
                 "state/task_history.json" => JsonSerializer.Deserialize<List<DownloadHistoryItem>>(text, Options) is { } history && history.All(entry => entry is not null),

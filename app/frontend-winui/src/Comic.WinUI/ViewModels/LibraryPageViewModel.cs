@@ -20,7 +20,10 @@ public partial class LibraryPageViewModel : ObservableObject
     private readonly DownloadEventStream _eventStream;
     private readonly ApplicationSettingsService _applicationSettings;
     private readonly ReadingProgressService _readingProgressService;
+    private readonly RecentArchiveService _recentArchives;
+    public LibraryOrganizationService Organization { get; }
     private int _currentPage = 1;
+    private int _loadRequest;
     private int _totalItems;
     private readonly int _pageSize;
     private CancellationTokenSource? _exportCts;
@@ -30,14 +33,19 @@ public partial class LibraryPageViewModel : ObservableObject
         BackendClient backendClient,
         DownloadEventStream eventStream,
         ApplicationSettingsService applicationSettings,
-        ReadingProgressService readingProgressService)
+        ReadingProgressService readingProgressService,
+        LibraryOrganizationService? organization = null,
+        RecentArchiveService? recentArchives = null)
     {
+        Organization = organization ?? backendClient.LibraryOrganization;
         _backendClient = backendClient;
         _eventStream = eventStream;
         _applicationSettings = applicationSettings;
         _readingProgressService = readingProgressService;
+        _recentArchives = recentArchives ?? new RecentArchiveService(applicationSettings);
         _pageSize = applicationSettings.LibraryPageSize;
         Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
+        RefreshShelves();
     }
 
     public ObservableCollection<LibraryItemViewModel> Items { get; } = [];
@@ -211,6 +219,7 @@ public partial class LibraryPageViewModel : ObservableObject
     [RelayCommand]
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        var request = Interlocked.Increment(ref _loadRequest);
         PageError = string.Empty;
         LibraryStatus = string.Empty;
         IsLoading = true;
@@ -219,16 +228,25 @@ public partial class LibraryPageViewModel : ObservableObject
             var result = await _backendClient.GetLibraryAsync(
                 keyword: Keyword.Trim(), page: _currentPage, pageSize: _pageSize,
                 completion: CompletionFilter, favoritesOnly: FavoritesOnly, updatesOnly: UpdatesOnly, sort: Sort,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken, shelfId: SelectedShelf?.Id ?? string.Empty, tag: TagFilter,
+                readingStatus: ReadingFilter);
+            if (request != _loadRequest) return;
             Items.Clear();
             foreach (var item in result.Items)
             {
                 var viewModel = LibraryItemViewModel.FromDto(item);
                 viewModel.ContinueReadingText = BuildContinueReadingText(item.RootDir);
+                viewModel.OrganizationText = DescribeOrganization(item.RootDir);
                 Items.Add(viewModel);
             }
 
             _totalItems = result.Total;
+            _currentPage = result.Page;
+            ToReadCount = result.ToReadCount;
+            ReadingCount = result.ReadingCount;
+            ReadCount = result.ReadCount;
+            ContinueReadingRoot = result.LatestReadingItem?.RootDir ?? string.Empty;
+            ContinueReadingTitle = result.LatestReadingItem?.Title ?? string.Empty;
             SelectedItem = Items.FirstOrDefault();
             OnPropertyChanged(nameof(TotalPages));
             OnPropertyChanged(nameof(CanGoPrevious));
@@ -241,15 +259,15 @@ public partial class LibraryPageViewModel : ObservableObject
         }
         catch (BackendApiException ex)
         {
-            PageError = ex.Error.Message;
+            if (request == _loadRequest) PageError = ex.Error.Message;
         }
         catch (Exception ex)
         {
-            PageError = $"操作异常: {ex.Message}";
+            if (request == _loadRequest) PageError = $"操作异常: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            if (request == _loadRequest) IsLoading = false;
         }
     }
 
@@ -408,6 +426,9 @@ public partial class LibraryPageViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedContinueReading));
         OnPropertyChanged(nameof(SelectedFavoriteButtonText));
         OnPropertyChanged(nameof(SelectedHasDuplicates));
+        OnPropertyChanged(nameof(SelectedOrganizationText));
+        OnPropertyChanged(nameof(SelectedReadingStatusText));
+        OnPropertyChanged(nameof(CanSetReadingStatus));
     }
 
     partial void OnCompletionFilterIndexChanged(int value) => _ = SearchAsync();
@@ -623,6 +644,12 @@ public partial class LibraryPageViewModel : ObservableObject
 public partial class LibraryItemViewModel : ObservableObject
 {
     [ObservableProperty]
+    public partial bool IsMarked { get; set; }
+
+    [ObservableProperty]
+    public partial string OrganizationText { get; set; } = string.Empty;
+
+    [ObservableProperty]
     public partial string Title { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -666,6 +693,10 @@ public partial class LibraryItemViewModel : ObservableObject
     public partial bool Completed { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReadingStatusText))]
+    public partial ReadingStatus ReadingStatus { get; set; }
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DiskUsageText))]
     public partial long DiskUsageBytes { get; set; }
 
@@ -676,7 +707,13 @@ public partial class LibraryItemViewModel : ObservableObject
         _ => $"磁盘 {DiskUsageBytes / 1024d:0} KB",
     };
 
-    public string CompletionText => Completed ? "已完成" : "未完成";
+    public string CompletionText => Completed ? "下载已完成" : "下载未完成";
+    public string ReadingStatusText => ReadingStatus switch
+    {
+        ReadingStatus.Reading => "在读",
+        ReadingStatus.Read => "已读",
+        _ => "待读",
+    };
     public string MangaIdText => string.IsNullOrWhiteSpace(MangaId) ? string.Empty : $"JM{MangaId}";
 
     public bool HasDuplicateDirectories => DuplicateDirectoryCount > 0;
@@ -708,6 +745,7 @@ public partial class LibraryItemViewModel : ObservableObject
             DuplicateDirectoryCount = dto.DuplicateDirectoryCount,
             MangaId = dto.MangaId,
             Completed = dto.Completed,
+            ReadingStatus = dto.ReadingStatus,
             DiskUsageBytes = dto.DiskUsageBytes,
         };
     }

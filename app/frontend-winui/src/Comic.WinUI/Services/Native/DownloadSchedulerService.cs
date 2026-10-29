@@ -402,14 +402,17 @@ public sealed partial class DownloadSchedulerService : IDisposable
 
     public async Task<BatchActionResponse> BatchStopDownloadsAsync(IReadOnlyCollection<string> taskIds, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var result = new BatchActionResponse();
         foreach (var id in taskIds)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var response = await StopDownloadAsync(id, cancellationToken);
-                if (response.Status == "stopping") result.Stopped.Add(id); else result.Failed.Add(id);
+                if (response.Status is "stopping" or "stopped") result.Stopped.Add(id); else result.Failed.Add(id);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch { result.Failed.Add(id); }
         }
         return result;
@@ -421,13 +424,21 @@ public sealed partial class DownloadSchedulerService : IDisposable
         var result = new BatchActionResponse();
         foreach (var id in taskIds)
         {
-            if (_downloads.TryGetValue(id, out var state) && IsTerminal(CloneTask(state).Status) && _downloads.TryRemove(id, out _))
+            if (!_downloads.TryGetValue(id, out var state))
             {
-                _creationOrder.TryRemove(id, out _);
-                state.Dispose();
-                result.Deleted.Add(id);
+                result.Failed.Add(id);
+                continue;
             }
-            else result.Failed.Add(id);
+            lock (state.Gate)
+            {
+                if (IsTerminal(state.Dto.Status) && state.Worker?.IsCompleted != false && _downloads.TryRemove(id, out _))
+                {
+                    _creationOrder.TryRemove(id, out _);
+                    state.Dispose();
+                    result.Deleted.Add(id);
+                }
+                else result.Failed.Add(id);
+            }
         }
         SaveQueue();
         return Task.FromResult(result);
@@ -477,7 +488,9 @@ public sealed partial class DownloadSchedulerService : IDisposable
         return Task.FromResult(result);
     }
 
-    public async Task<BatchActionResponse> BatchDeleteChaptersAsync(
+    // Task-list deletion removes queue records only, never library images or metadata.
+    // Restored tasks intentionally have no resolved Manga object; chapter DTOs are sufficient.
+    public Task<BatchActionResponse> BatchDeleteChaptersAsync(
         string taskId,
         IReadOnlyCollection<string> chapterIds,
         CancellationToken cancellationToken = default)
@@ -487,72 +500,44 @@ public sealed partial class DownloadSchedulerService : IDisposable
         var requested = chapterIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.Ordinal);
-        var candidates = new List<(string Id, JmChapter Chapter, string DirectoryName)>();
-        CancellationTokenSource? activeChapterSource = null;
+        var result = new BatchActionResponse();
 
         lock (state.Gate)
         {
-            foreach (var progress in state.Dto.Chapters.Where(chapter => requested.Contains(chapter.Id)).ToList())
+            // Do not race a worker rebuilding progress or writing chapter metadata.
+            if (state.Worker?.IsCompleted == false || !(IsTerminal(state.Dto.Status) || state.Dto.Status == "paused"))
             {
-                var chapter = state.Manga?.Chapters.FirstOrDefault(item => item.Id == progress.Id);
-                if (chapter is null)
+                result.Failed.AddRange(requested);
+                return Task.FromResult(result);
+            }
+            foreach (var id in requested)
+            {
+                if (state.Dto.Chapters.RemoveAll(chapter => chapter.Id == id) == 0)
                 {
+                    result.Failed.Add(id);
                     continue;
                 }
-
-                state.StoppedChapterIds.Add(progress.Id);
-                state.DeletedChapterIds.Add(progress.Id);
-                candidates.Add((progress.Id, chapter, progress.DirectoryName));
+                state.StoppedChapterIds.Add(id);
+                state.DeletedChapterIds.Add(id);
+                result.Deleted.Add(id);
             }
-
-            if (state.CurrentChapterId is { Length: > 0 } currentId && requested.Contains(currentId))
+            state.TotalChapterCount = state.Dto.Chapters.Count;
+            RecalculateTaskProgressLocked(state);
+            if (result.Deleted.Count > 0 && state.Dto.Chapters.Count == 0 && _downloads.TryRemove(taskId, out _))
             {
-                activeChapterSource = state.CurrentChapterStopSource;
+                _creationOrder.TryRemove(taskId, out _);
+                state.Dispose();
+                result.RemovedTasks.Add(taskId);
+            }
+            else if (result.Deleted.Count > 0)
+            {
+                state.Dto.TaskError = null;
+                state.Dto.StatusText = $"已移除 {result.Deleted.Count} 个章节记录，保留本地文件";
+                AppendLog(state, "info", state.Dto.StatusText);
             }
         }
-
-        activeChapterSource?.Cancel();
-        var result = new BatchActionResponse();
-        foreach (var candidate in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!await WaitForChapterReleaseAsync(state, candidate.Id, cancellationToken))
-            {
-                result.Failed.Add(candidate.Id);
-                continue;
-            }
-
-            try
-            {
-                DeleteChapterDirectories(state.RootDirectory, candidate.Chapter, candidate.DirectoryName);
-                lock (state.Gate)
-                {
-                    state.Dto.Chapters.RemoveAll(chapter => chapter.Id == candidate.Id);
-                    state.TotalChapterCount = state.Dto.Chapters.Count;
-                    RecalculateTaskProgressLocked(state);
-                }
-                result.Deleted.Add(candidate.Id);
-            }
-            catch
-            {
-                result.Failed.Add(candidate.Id);
-            }
-        }
-
-        foreach (var missingId in requested.Except(candidates.Select(candidate => candidate.Id)))
-        {
-            result.Failed.Add(missingId);
-        }
-
-        if (result.Deleted.Count > 0)
-        {
-            AppendLog(state, "info", $"已删除 {result.Deleted.Count} 个章节及其本地文件");
-            if (state.Manga is not null)
-            {
-                SaveLibraryMetadata(state, false, []);
-            }
-        }
-        return result;
+        SaveQueue();
+        return Task.FromResult(result);
     }
 
     // ---- 下载历史 ----
@@ -1199,30 +1184,6 @@ public sealed partial class DownloadSchedulerService : IDisposable
         state.Dto.Progress = state.Dto.Chapters.Count == 0
             ? 0
             : state.Dto.Chapters.Sum(chapter => Math.Clamp(chapter.Progress, 0, 100)) / state.Dto.Chapters.Count;
-    }
-
-    private static async Task<bool> WaitForChapterReleaseAsync(
-        NativeDownloadTask state,
-        string chapterId,
-        CancellationToken cancellationToken)
-    {
-        var started = Stopwatch.GetTimestamp();
-        while (true)
-        {
-            lock (state.Gate)
-            {
-                if (!string.Equals(state.CurrentChapterId, chapterId, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(10))
-            {
-                return false;
-            }
-            await Task.Delay(50, cancellationToken);
-        }
     }
 
     public static void DeleteChapterDirectories(

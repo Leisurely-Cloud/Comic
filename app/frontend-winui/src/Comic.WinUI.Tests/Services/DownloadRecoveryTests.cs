@@ -62,6 +62,48 @@ public sealed class DownloadRecoveryTests
     }
 
     [TestMethod]
+    public async Task BatchStop_RestoredPausedTaskReportsSuccessAndPersistsStoppedState()
+    {
+        using var library = TestServiceFactory.CreateLibrary(_root);
+        AtomicJsonFile.Write(Path.Combine(_root, ".comic_state", "task_queue.json"), new[]
+        {
+            new { Request = new DownloadCreateRequest { Url = "123" }, Task = new DownloadTaskDto { Id = "paused", Status = "paused" }, Order = 1 },
+        });
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        using var client = new HttpClient(handler);
+        using (var scheduler = new DownloadSchedulerService(new JmComicService(client), library))
+        {
+            var result = await scheduler.BatchStopDownloadsAsync(["paused"]);
+            CollectionAssert.AreEqual(new[] { "paused" }, result.Stopped);
+            Assert.AreEqual(0, result.Failed.Count);
+            Assert.AreEqual("stopped", (await scheduler.GetDownloadAsync("paused")).Status);
+        }
+        using var restored = new DownloadSchedulerService(new JmComicService(client), library);
+        Assert.AreEqual("stopped", (await restored.GetDownloadAsync("paused")).Status);
+        Assert.AreEqual(0, handler.RequestedUris.Count);
+    }
+
+    [TestMethod]
+    public async Task BatchStop_CancelledRequestDoesNotBecomePerTaskFailure()
+    {
+        using var library = TestServiceFactory.CreateLibrary(_root);
+        AtomicJsonFile.Write(Path.Combine(_root, ".comic_state", "task_queue.json"), new[]
+        {
+            new { Request = new DownloadCreateRequest { Url = "123" }, Task = new DownloadTaskDto { Id = "paused", Status = "paused" }, Order = 1 },
+        });
+        using var handler = FakeHttpMessageHandler.AlwaysFails();
+        using var client = new HttpClient(handler);
+        using var scheduler = new DownloadSchedulerService(new JmComicService(client), library);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => scheduler.BatchStopDownloadsAsync(["paused"], cancellation.Token));
+
+        Assert.AreEqual("paused", (await scheduler.GetDownloadAsync("paused")).Status);
+    }
+
+    [TestMethod]
     public async Task MalformedQueueItems_DoNotCrashStartupOrPeriodicSaving()
     {
         using var library = TestServiceFactory.CreateLibrary(_root);

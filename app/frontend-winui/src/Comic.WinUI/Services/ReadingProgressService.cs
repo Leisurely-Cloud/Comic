@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
+using Comic.WinUI.Models;
 
 namespace Comic.WinUI.Services;
 
@@ -18,6 +18,7 @@ public sealed class ReadingProgressService
     private readonly object _gate = new();
     private readonly string _filePath;
     private Dictionary<string, ReadingProgressEntry> _entries;
+    private readonly Dictionary<string, ReadingStatus> _statuses = new(StringComparer.OrdinalIgnoreCase);
 
     public ReadingProgressService(ApplicationSettingsService applicationSettings)
         : this(applicationSettings.SettingsDirectory)
@@ -46,6 +47,34 @@ public sealed class ReadingProgressService
 
     public DateTimeOffset? GetLastReadAt(string rootDirectory) => Get(rootDirectory)?.UpdatedAtUtc;
 
+    public ReadingStatus GetReadingStatus(string rootDirectory)
+    {
+        var key = NormalizeRootDirectory(rootDirectory);
+        lock (_gate)
+        {
+            if (_statuses.TryGetValue(key, out var status)) return status;
+            return _entries.ContainsKey(key) ? ReadingStatus.Reading : ReadingStatus.ToRead;
+        }
+    }
+
+    /// <summary>Persist manual status changes before reporting success; never discard the saved page.</summary>
+    public bool SetReadingStatus(string rootDirectory, ReadingStatus status)
+    {
+        var key = NormalizeRootDirectory(rootDirectory);
+        if (string.IsNullOrEmpty(key) || !Enum.IsDefined(status)) return false;
+
+        lock (_gate)
+        {
+            var hadStatus = _statuses.TryGetValue(key, out var previous);
+            if (hadStatus && previous == status) return true;
+            _statuses[key] = status;
+            if (SaveToDisk()) return true;
+            if (hadStatus) _statuses[key] = previous;
+            else _statuses.Remove(key);
+            return false;
+        }
+    }
+
     public void Save(string rootDirectory, string chapterDirectoryName, int pageIndex)
     {
         var key = NormalizeRootDirectory(rootDirectory);
@@ -55,9 +84,11 @@ public sealed class ReadingProgressService
 
         lock (_gate)
         {
+            var hadStatus = _statuses.TryGetValue(key, out var status);
+            var resumeToRead = hadStatus && status == ReadingStatus.ToRead;
             if (_entries.TryGetValue(key, out var existing) &&
                 string.Equals(existing.ChapterDirectoryName, chapterDirectoryName, StringComparison.Ordinal) &&
-                existing.PageIndex == pageIndex)
+                existing.PageIndex == pageIndex && !resumeToRead)
             {
                 return;
             }
@@ -67,7 +98,11 @@ public sealed class ReadingProgressService
                 chapterDirectoryName,
                 pageIndex,
                 DateTimeOffset.UtcNow);
-            SaveToDisk();
+            if (resumeToRead) _statuses.Remove(key);
+            if (SaveToDisk()) return;
+            if (existing is not null) _entries[key] = existing;
+            else _entries.Remove(key);
+            if (resumeToRead) _statuses[key] = status;
         }
     }
 
@@ -78,8 +113,12 @@ public sealed class ReadingProgressService
 
         lock (_gate)
         {
-            if (!_entries.Remove(key)) return;
-            SaveToDisk();
+            _entries.Remove(key, out var entry);
+            var hadStatus = _statuses.Remove(key, out var status);
+            if (entry is null && !hadStatus) return;
+            if (SaveToDisk()) return;
+            if (entry is not null) _entries[key] = entry;
+            if (hadStatus) _statuses[key] = status;
         }
     }
 
@@ -87,7 +126,12 @@ public sealed class ReadingProgressService
     {
         try
         {
-            var document = AtomicJsonFile.Read<ReadingProgressDocument>(_filePath, JsonOptions);
+            var document = AtomicJsonFile.Read<ReadingProgressDocument>(_filePath, JsonOptions, IsValid);
+            foreach (var state in document?.Statuses ?? [])
+            {
+                var key = NormalizeRootDirectory(state.RootDirectory);
+                if (!string.IsNullOrEmpty(key) && Enum.IsDefined(state.Status)) _statuses[key] = state.Status;
+            }
             return (document?.Entries ?? [])
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.RootDirectory) &&
                                 !string.IsNullOrWhiteSpace(entry.ChapterDirectoryName))
@@ -112,7 +156,7 @@ public sealed class ReadingProgressService
         }
     }
 
-    private void SaveToDisk()
+    private bool SaveToDisk()
     {
         try
         {
@@ -121,12 +165,16 @@ public sealed class ReadingProgressService
                 Entries = _entries.Values
                     .OrderByDescending(entry => entry.UpdatedAtUtc)
                     .ToList(),
+                Statuses = _statuses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(pair => new ReadingStatusEntry(pair.Key, pair.Value)).ToList(),
             };
             AtomicJsonFile.Write(_filePath, document, JsonOptions);
+            return true;
         }
         catch
         {
             // Reading progress is helpful state and must never block the reader.
+            return false;
         }
     }
 
@@ -151,7 +199,15 @@ public sealed class ReadingProgressService
     internal sealed class ReadingProgressDocument
     {
         public List<ReadingProgressEntry> Entries { get; set; } = [];
+        public List<ReadingStatusEntry> Statuses { get; set; } = [];
     }
+
+    internal static bool IsValid(ReadingProgressDocument document) =>
+        document.Entries is not null && document.Entries.All(entry => entry is not null) &&
+        document.Statuses is not null && document.Statuses.All(state => state is not null &&
+            !string.IsNullOrWhiteSpace(state.RootDirectory) && Enum.IsDefined(state.Status));
+
+    internal sealed record ReadingStatusEntry(string RootDirectory, ReadingStatus Status);
 }
 
 public sealed record ReadingProgressEntry(

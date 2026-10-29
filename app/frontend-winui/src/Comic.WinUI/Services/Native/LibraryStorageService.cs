@@ -95,15 +95,9 @@ public sealed class LibraryStorageService : IDisposable
         try
         {
             var path = Path.Combine(rootDirectory, "元数据.json");
-            var metadata = AtomicJsonFile.Read<LibraryMetadata>(path, JsonOptions);
-            if (metadata is null) return null;
-            var json = JsonSerializer.Serialize(metadata, JsonOptions);
-            // 兼容第三方元数据别名；损坏主文件时使用备份的原始内容。
-            foreach (var candidate in new[] { path, path + ".bak" })
-            {
-                try { using var check = JsonDocument.Parse(File.ReadAllText(candidate)); json = File.ReadAllText(candidate); break; }
-                catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { }
-            }
+            var metadata = AtomicJsonFile.Read<LibraryMetadata>(path, out var json, JsonOptions);
+            if (metadata is null || json is null) return null;
+            // 兼容字段直接使用已接受的 JSON；不重复读盘，也不混入无效主文件的字段。
             using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind != JsonValueKind.Object) return metadata;
 
@@ -177,11 +171,12 @@ public sealed class LibraryStorageService : IDisposable
         InvalidateLibraryCache(rootDirectory);
     }
 
-    public IReadOnlyList<LibraryEntry> EnumerateLibraryEntries()
+    public IReadOnlyList<LibraryEntry> EnumerateLibraryEntries(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_libraryCacheLock)
         {
-            return MergeEntries(_index.GetEntries(BuildLibraryEntry));
+            return MergeEntries(_index.GetEntries(BuildLibraryEntry, cancellationToken));
         }
     }
 

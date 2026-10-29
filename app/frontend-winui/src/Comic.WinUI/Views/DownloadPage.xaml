@@ -34,12 +34,17 @@
             </Border>
         </Grid>
 
-        <InfoBar Grid.Row="1"
-                 IsOpen="{x:Bind ViewModel.HasDownloadNotice, Mode=OneWay}"
-                 IsClosable="False"
-                 Severity="Success"
-                 Title="无需重复下载"
-                 Message="{x:Bind ViewModel.DownloadNotice, Mode=OneWay}" />
+        <StackPanel Grid.Row="1" Spacing="8">
+            <InfoBar IsOpen="{x:Bind ViewModel.HasDownloadNotice, Mode=OneWay}"
+                     IsClosable="False"
+                     Severity="Success"
+                     Title="无需重复下载"
+                     Message="{x:Bind ViewModel.DownloadNotice, Mode=OneWay}" />
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Error"
+                     Title="操作未完成"
+                     Message="{x:Bind ViewModel.PageError, Mode=OneWay}"
+                     Visibility="{x:Bind ViewModel.PageError, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+        </StackPanel>
 
         <Grid Grid.Row="2">
             <Grid x:Name="DiscoveryWorkspace" RowSpacing="12">
@@ -48,8 +53,15 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <controls:SearchBarControl x:Name="SearchBarControl1"
-                                           ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <controls:SearchBarControl x:Name="SearchBarControl1"
+                                               ViewModel="{x:Bind ViewModel, Mode=OneWay}" />
+                    <Button Grid.Column="1" Content="批量导入" Click="OnBatchImportClick" VerticalAlignment="Center" />
+                </Grid>
 
                 <Grid Grid.Row="1" ColumnSpacing="14">
                     <Grid.ColumnDefinitions>

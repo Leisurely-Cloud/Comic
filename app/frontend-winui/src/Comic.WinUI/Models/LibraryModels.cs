@@ -51,6 +51,9 @@ public sealed class LibraryItemDto
 
     [JsonPropertyName("last_read_at")]
     public DateTimeOffset? LastReadAt { get; set; }
+
+    [JsonPropertyName("reading_status")]
+    public ReadingStatus ReadingStatus { get; set; }
 }
 
 public sealed class LibraryListResponse
@@ -66,8 +69,14 @@ public sealed class LibraryListResponse
 
     [JsonPropertyName("page_size")]
     public int PageSize { get; set; }
+
+    public int ToReadCount { get; set; }
+    public int ReadingCount { get; set; }
+    public int ReadCount { get; set; }
+    public LibraryItemDto? LatestReadingItem { get; set; }
 }
 
+public enum ReadingStatus { ToRead, Reading, Read }
 public enum LibraryCompletionFilter { All, Completed, Incomplete }
 public enum LibrarySort { RecentRead, DownloadedAt, ChapterCount }
 

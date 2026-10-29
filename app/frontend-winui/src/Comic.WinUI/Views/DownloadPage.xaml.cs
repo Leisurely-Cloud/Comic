@@ -46,6 +46,7 @@ public sealed partial class DownloadPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _batchImportDialog?.Hide();
         // ViewModel 是 transient,每次 OnNavigatedTo 都会新建。离开时必须取消它的
         // 状态轮询,否则被丢弃的实例会继续以 150ms 周期轮询下去。
         ViewModel?.Dispose();

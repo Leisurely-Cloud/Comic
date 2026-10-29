@@ -37,6 +37,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     private int _lastEventId;
     private int _searchPage;
     private int _lastSearchPageSize;
+    private readonly HashSet<string> _removedTaskIds = new(StringComparer.Ordinal);
 
     public const int CommentPageSize = 10;
 
@@ -73,6 +74,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Dispose()
     {
+        _downloadPageDisposed = true;
+        _batchImport?.Dispose();
         CancelAndDispose(ref _subscriptionCts);
         CancelAndDispose(ref _searchCts);
         CancelAndDispose(ref _resolveCts);
@@ -387,7 +390,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         {
             var list = await _backendClient.GetDownloadsAsync(cancellationToken);
             Tasks.Clear();
-            foreach (var task in list.Items)
+            foreach (var task in list.Items.Where(task => !_removedTaskIds.Contains(task.Id)))
             {
                 var vm = DownloadTaskItemViewModel.FromDto(task);
                 vm.IsBatchMode = IsBatchMode;
@@ -1345,12 +1348,8 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
                 failedCount += result.Failed.Count;
                 foreach (var taskId in result.Stopped)
                 {
-                    var task = Tasks.FirstOrDefault(item => item.Id == taskId);
-                    if (task is not null)
-                    {
-                        task.Status = "stopping";
-                        task.StatusText = "正在停止";
-                    }
+                    var refreshed = await _backendClient.GetDownloadAsync(taskId, cancellationToken);
+                    UpsertTask(refreshed);
                 }
             }
 
@@ -1418,11 +1417,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
                 failedCount += result.Failed.Count;
                 foreach (var taskId in result.Deleted)
                 {
-                    var task = Tasks.FirstOrDefault(item => item.Id == taskId);
-                    if (task is not null)
-                    {
-                        Tasks.Remove(task);
-                    }
+                    RemoveTaskRecord(taskId);
                 }
             }
 
@@ -1433,13 +1428,20 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
                     group.ChapterIds,
                     cancellationToken);
                 failedCount += result.Failed.Count;
-                var refreshed = await _backendClient.GetDownloadAsync(group.Task.Id, cancellationToken);
-                UpsertTask(refreshed);
+                if (result.RemovedTasks.Contains(group.Task.Id))
+                {
+                    RemoveTaskRecord(group.Task.Id);
+                }
+                else
+                {
+                    var refreshed = await _backendClient.GetDownloadAsync(group.Task.Id, cancellationToken);
+                    UpsertTask(refreshed);
+                }
             }
 
             if (failedCount > 0)
             {
-                PageError = $"{failedCount} 个项目未能删除；正在下载的章节可能仍在释放文件。";
+                PageError = $"{failedCount} 个项目未能删除；请先停止未结束的任务，等待下载退出后再删除。";
             }
             if (CurrentTask is not null && !Tasks.Contains(CurrentTask))
             {
@@ -1655,10 +1657,12 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         }
         catch (BackendApiException ex)
         {
+            if (cancellationToken.IsCancellationRequested || _removedTaskIds.Contains(taskId)) return;
             PageError = ex.Error.Message;
         }
         catch (Exception ex)
         {
+            if (cancellationToken.IsCancellationRequested || _removedTaskIds.Contains(taskId)) return;
             PageError = $"任务状态订阅异常: {ex.Message}";
             var snapshot = await _backendClient.GetDownloadAsync(taskId, CancellationToken.None);
             UpsertTask(snapshot);
@@ -1708,6 +1712,7 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
 
     private void UpsertTask(DownloadTaskDto dto)
     {
+        if (_removedTaskIds.Contains(dto.Id)) return;
         var existing = Tasks.FirstOrDefault(item => string.Equals(item.Id, dto.Id, StringComparison.Ordinal));
         if (existing is null)
         {
@@ -1724,6 +1729,16 @@ public partial class DownloadPageViewModel : ObservableObject, IDisposable
         {
             NotifyTaskControlCanExecuteChanged();
         }
+    }
+
+    private void RemoveTaskRecord(string taskId)
+    {
+        _removedTaskIds.Add(taskId);
+        if (CurrentTaskId == taskId) CancelAndDispose(ref _subscriptionCts);
+        var task = Tasks.FirstOrDefault(item => item.Id == taskId);
+        if (task is null) return;
+        task.PropertyChanged -= OnTaskSelectionPropertyChanged;
+        Tasks.Remove(task);
     }
 
     internal void ApplyDownloadNotice(DownloadTaskDto dto)

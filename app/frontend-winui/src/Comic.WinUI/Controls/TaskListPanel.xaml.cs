@@ -102,7 +102,7 @@ public sealed partial class TaskListPanel : UserControl
         }
 
         var details = ViewModel.SelectedDownloadChapterCount > 0
-            ? $"将永久删除 {ViewModel.SelectedDownloadChapterCount} 个章节的本地图片。"
+            ? $"将移除 {ViewModel.SelectedDownloadChapterCount} 个章节的任务记录；移除全部章节后，空任务也会退出列表。"
             : "将删除选中的已结束任务记录。";
         if (ViewModel.SelectedTaskCount > 0 && ViewModel.SelectedDownloadChapterCount > 0)
         {
@@ -112,7 +112,7 @@ public sealed partial class TaskListPanel : UserControl
         var dialog = new ContentDialog
         {
             Title = "确认删除所选内容？",
-            Content = details + " 此操作无法撤销。",
+            Content = details + " 不会删除本地漫画图片或下载历史。未结束的任务请先停止。",
             PrimaryButtonText = "确认删除",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,

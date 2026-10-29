@@ -5,10 +5,28 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Comic.WinUI.ViewModels"
     mc:Ignorable="d"
-    KeyDown="OnKeyDown"
+    IsTabStop="True"
+    PreviewKeyDown="OnKeyDown"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
+    <Page.Resources>
+        <DataTemplate x:Key="ReaderThumbnailTemplate" x:DataType="vm:ReaderStripImageItemViewModel">
+            <Grid Width="120" Height="150" RowSpacing="4" ToolTipService.ToolTip="{x:Bind Error, Mode=OneWay}">
+                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="4">
+                    <Grid>
+                        <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="Uniform" />
+                        <ProgressRing Width="20" Height="20" IsActive="{x:Bind IsLoading, Mode=OneWay}" />
+                        <TextBlock Text="预览失败，仍可跳转" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="{x:Bind HasError, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    </Grid>
+                </Border>
+                <TextBlock Grid.Row="1" Text="{x:Bind PageLabel}" HorizontalAlignment="Center" />
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -47,6 +65,14 @@
                     <ToggleButton Content="从右向左" IsChecked="{x:Bind ViewModel.IsRightToLeft, Mode=TwoWay}"
                                   Visibility="{x:Bind ViewModel.IsStripMode, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
                     <Button Content="快捷键" Click="OnShortcutSettingsClick" />
+                    <Button Content="导航">
+                        <Button.Flyout>
+                            <MenuFlyout Placement="Bottom">
+                                <MenuFlyoutItem Text="书签与备注" Click="OnBookmarksClick" />
+                                <MenuFlyoutItem Text="页码与缩略图" Click="OnPageNavigatorClick" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                     <Button Content="全屏" Click="OnFullscreenClick" />
                 </StackPanel>
             </Grid>
@@ -251,6 +277,8 @@
                        Style="{StaticResource BodyTextBlockStyle}"
                        Opacity="0.7"
                        HorizontalAlignment="Center" />
+            <Button Content="取消加载" Command="{x:Bind ViewModel.CancelLoadingCommand}"
+                    HorizontalAlignment="Center" />
         </StackPanel>
 
         <!-- Bottom bar: page navigation -->

@@ -75,6 +75,66 @@ public sealed class DataMaintenanceServiceTests
     }
 
     [TestMethod]
+    public void Backup_RestoresReadingStatusesWithAndWithoutSavedPages()
+    {
+        var progress = new ReadingProgressService(_settingsDir);
+        var unopened = Path.Combine(_libraryDir, "尚未打开");
+        progress.Save(_mangaDir, "001_第一话", 7);
+        Assert.IsTrue(progress.SetReadingStatus(_mangaDir, ReadingStatus.ToRead));
+        Assert.IsTrue(progress.SetReadingStatus(unopened, ReadingStatus.Read));
+        var zip = Path.Combine(_root, "reading-status.zip");
+        _service.ExportBackup(zip);
+
+        Assert.IsTrue(progress.SetReadingStatus(_mangaDir, ReadingStatus.Read));
+        Assert.IsTrue(progress.SetReadingStatus(unopened, ReadingStatus.ToRead));
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+
+        var restored = new ReadingProgressService(_settingsDir);
+        Assert.AreEqual(ReadingStatus.ToRead, restored.GetReadingStatus(_mangaDir));
+        Assert.AreEqual(7, restored.Get(_mangaDir)!.PageIndex);
+        Assert.AreEqual(ReadingStatus.Read, restored.GetReadingStatus(unopened));
+        Assert.IsNull(restored.Get(unopened));
+    }
+
+    [TestMethod]
+    public void OlderReadingProgressBackup_InfersReadingWithoutLosingSavedPage()
+    {
+        var path = Path.Combine(_settingsDir, "reading-progress.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            Entries = new[] { new ReadingProgressEntry(_mangaDir, "001_第一话", 4, DateTimeOffset.UtcNow) },
+        }));
+        var zip = Path.Combine(_root, "older-progress.zip");
+        _service.ExportBackup(zip);
+        Assert.IsTrue(new ReadingProgressService(_settingsDir).SetReadingStatus(_mangaDir, ReadingStatus.Read));
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+
+        var restored = new ReadingProgressService(_settingsDir);
+        Assert.AreEqual(ReadingStatus.Reading, restored.GetReadingStatus(_mangaDir));
+        Assert.AreEqual(4, restored.Get(_mangaDir)!.PageIndex);
+    }
+
+    [TestMethod]
+    [DataRow("null")]
+    [DataRow("[null]")]
+    [DataRow("[{\"RootDirectory\":\"manga\",\"Status\":99}]")]
+    public void RepairPreview_RejectsMalformedReadingStatusesAndUsesValidBackup(string statuses)
+    {
+        var progress = new ReadingProgressService(_settingsDir);
+        Assert.IsTrue(progress.SetReadingStatus(_mangaDir, ReadingStatus.Read));
+        var path = Path.Combine(_settingsDir, "reading-progress.json");
+        File.Copy(path, path + ".bak");
+        File.WriteAllText(path, "{\"Entries\":[],\"Statuses\":" + statuses + "}");
+
+        var issue = _service.PreviewRepairs().Single(item => item.CanRepair);
+        Assert.AreEqual(1, _service.StageRepairs([issue]));
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+        Assert.AreEqual(ReadingStatus.Read, new ReadingProgressService(_settingsDir).GetReadingStatus(_mangaDir));
+    }
+
+    [TestMethod]
     public void BackupRejectsTamperingAndTraversalBeforeStaging()
     {
         var zip = Path.Combine(_root, "data.zip");
@@ -94,6 +154,101 @@ public sealed class DataMaintenanceServiceTests
             writer.Write("{}");
         }
         Assert.ThrowsExactly<InvalidDataException>(() => _service.PreviewBackup(zip));
+    }
+
+    [TestMethod]
+    public void Backup_IncludesPersonalOrganizationAndBookmarksWithoutImages()
+    {
+        var bookmarks = new ReadingBookmarkService(_settingsDir);
+        bookmarks.Save(_mangaDir, "001_第一话", "第一话", 0, "保留备注");
+        var organization = new LibraryOrganizationService(_settingsDir);
+        var shelf = organization.SaveShelf(null, "待看");
+        organization.SetBooks([_mangaDir], [shelf.Id], ["长篇"]);
+        var zip = Path.Combine(_root, "personal.zip");
+        _service.ExportBackup(zip);
+        using (var archive = ZipFile.OpenRead(zip))
+        {
+            Assert.IsNotNull(archive.GetEntry("app/reading-bookmarks.json"));
+            Assert.IsNotNull(archive.GetEntry("app/library-organization.json"));
+            Assert.IsFalse(archive.Entries.Any(entry => entry.FullName.EndsWith(".jpg")));
+        }
+        bookmarks.Save(_mangaDir, "001_第一话", "第一话", 0, "后来修改");
+        organization.SetBooks([_mangaDir], [], []);
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+        Assert.AreEqual("保留备注", new ReadingBookmarkService(_settingsDir).Get(_mangaDir).Single().Note);
+        Assert.IsTrue(new LibraryOrganizationService(_settingsDir).Matches(_mangaDir, shelf.Id, "长篇"));
+    }
+
+    [TestMethod]
+    public void OlderBackupWithoutPersonalFiles_DoesNotEraseNewPersonalData()
+    {
+        var zip = Path.Combine(_root, "older.zip");
+        _service.ExportBackup(zip);
+        var bookmarks = new ReadingBookmarkService(_settingsDir);
+        bookmarks.Save(_mangaDir, "001_第一话", "第一话", 0, "新功能备注");
+        var organization = new LibraryOrganizationService(_settingsDir);
+        var shelf = organization.SaveShelf(null, "后来创建");
+        organization.SetBooks([_mangaDir], [shelf.Id], ["保留"]);
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+        Assert.AreEqual("新功能备注", new ReadingBookmarkService(_settingsDir).Get(_mangaDir).Single().Note);
+        Assert.IsTrue(new LibraryOrganizationService(_settingsDir).Matches(_mangaDir, shelf.Id, "保留"));
+    }
+
+    [TestMethod]
+    public void Backup_RestoresRecentArchivesWithoutIncludingArchiveContents()
+    {
+        var archivePath = Path.Combine(_root, "最近阅读.cbz");
+        File.WriteAllBytes(archivePath, [4, 5, 6]);
+        var recent = new RecentArchiveService(_settingsDir);
+        Assert.IsTrue(recent.RecordOpened(archivePath));
+        var zip = Path.Combine(_root, "recent-backup.zip");
+        _service.ExportBackup(zip);
+        using (var archive = ZipFile.OpenRead(zip))
+        {
+            Assert.IsNotNull(archive.GetEntry("app/recent-archives.json"));
+            Assert.IsFalse(archive.Entries.Any(entry => entry.FullName.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase)));
+        }
+        Assert.IsTrue(recent.Clear());
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+
+        Assert.AreEqual(archivePath, new RecentArchiveService(_settingsDir).GetAll().Single().FilePath);
+        CollectionAssert.AreEqual(new byte[] { 4, 5, 6 }, File.ReadAllBytes(archivePath));
+    }
+
+    [TestMethod]
+    public void OlderBackupWithoutRecentArchives_PreservesNewHistory()
+    {
+        var zip = Path.Combine(_root, "before-recent-archives.zip");
+        _service.ExportBackup(zip);
+        var archive = Path.Combine(_root, "new.cbz");
+        Assert.IsTrue(new RecentArchiveService(_settingsDir).RecordOpened(archive));
+        _service.StageRestore(zip);
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+
+        Assert.AreEqual(archive, new RecentArchiveService(_settingsDir).GetAll().Single().FilePath);
+    }
+
+    [TestMethod]
+    [DataRow("{}")]
+    [DataRow("{\"Entries\":null}")]
+    [DataRow("{\"Entries\":[null]}")]
+    [DataRow("{\"Entries\":[{\"FilePath\":\"relative.cbz\",\"LastOpenedAtUtc\":\"2026-10-22T00:00:00Z\"}]}")]
+    public void RepairPreview_RejectsInvalidRecentArchiveSchemaAndRestoresValidBackup(string malformed)
+    {
+        var archive = Path.Combine(_root, "Book.cbz");
+        Assert.IsTrue(new RecentArchiveService(_settingsDir).RecordOpened(archive));
+        var path = Path.Combine(_settingsDir, "recent-archives.json");
+        File.Copy(path, path + ".bak");
+        File.WriteAllText(path, malformed);
+
+        var issue = _service.PreviewRepairs().Single(item => item.CanRepair);
+        Assert.AreEqual(path, issue.Path);
+        Assert.AreEqual(1, _service.StageRepairs([issue]));
+        StringAssert.Contains(DataMaintenanceService.ApplyPendingRestore(_settingsDir)!, "恢复完成");
+        Assert.AreEqual(archive, new RecentArchiveService(_settingsDir).GetAll().Single().FilePath);
     }
 
     [TestMethod]

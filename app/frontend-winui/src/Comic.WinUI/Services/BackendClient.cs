@@ -21,6 +21,7 @@ public sealed class BackendClient
     private readonly ReaderService _reader;
     private readonly ApplicationSettingsService _applicationSettings;
     private readonly ReadingProgressService? _readingProgress;
+    public LibraryOrganizationService LibraryOrganization { get; }
     private readonly IJmCredentialStore _jmCredentials;
     private readonly SemaphoreSlim _restoreLoginGate = new(1, 1);
     private int _loginGeneration;
@@ -34,8 +35,10 @@ public sealed class BackendClient
         ReaderService reader,
         ApplicationSettingsService applicationSettings,
         IJmCredentialStore? jmCredentials = null,
-        ReadingProgressService? readingProgress = null)
+        ReadingProgressService? readingProgress = null,
+        LibraryOrganizationService? organization = null)
     {
+        LibraryOrganization = organization ?? new LibraryOrganizationService(applicationSettings);
         _jmComic = jmComic;
         _downloads = downloads;
         _library = library;
@@ -163,52 +166,72 @@ public sealed class BackendClient
         bool favoritesOnly = false,
         bool updatesOnly = false,
         LibrarySort sort = LibrarySort.DownloadedAt,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        string shelfId = "",
+        string tag = "",
+        ReadingStatus? readingStatus = null) =>
         InvokeAsync(() => Task.Run(() =>
         {
             // 书库枚举要逐部漫画遍历章节目录并读取元数据,是重量级同步 IO。
             // 必须离开 UI 线程,否则大书库会直接卡住界面。
             // 调用方在 UI 线程 await,续体仍会回到 UI 线程,集合更新的线程性不变。
             cancellationToken.ThrowIfCancellationRequested();
-            var entries = _library.EnumerateLibraryEntries()
+            var organizationFilter = LibraryOrganization.CreateFilter(shelfId, tag);
+            var entries = _library.EnumerateLibraryEntries(cancellationToken)
                 .Where(entry => (string.IsNullOrWhiteSpace(keyword) ||
                     entry.Title.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
                     entry.Author.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase) ||
                     entry.MangaId.Contains(keyword.Trim(), StringComparison.OrdinalIgnoreCase)) &&
                     (completion == LibraryCompletionFilter.All || completion == LibraryCompletionFilter.Completed && entry.Completed || completion == LibraryCompletionFilter.Incomplete && !entry.Completed) &&
                     (!favoritesOnly || entry.IsFavorite) &&
-                    (!updatesOnly || _libraryUpdates.Contains(entry.RootDirectory)))
-                .OrderByDescending(entry => sort == LibrarySort.RecentRead ? _readingProgress?.GetLastReadAt(entry.RootDirectory) : null)
+                    (!updatesOnly || _libraryUpdates.Contains(entry.RootDirectory)) &&
+                    organizationFilter(entry.RootDirectory))
+                .Select(entry => ToLibraryItem(entry))
+                .ToList();
+            var toReadCount = entries.Count(entry => entry.ReadingStatus == ReadingStatus.ToRead);
+            var readingCount = entries.Count(entry => entry.ReadingStatus == ReadingStatus.Reading);
+            var readCount = entries.Count(entry => entry.ReadingStatus == ReadingStatus.Read);
+            var latestReading = entries.Where(entry => entry.ReadingStatus == ReadingStatus.Reading)
+                .OrderByDescending(entry => entry.LastReadAt)
+                .ThenByDescending(entry => entry.SavedAt).FirstOrDefault();
+            entries = entries.Where(entry => readingStatus is null || entry.ReadingStatus == readingStatus)
+                .OrderByDescending(entry => sort == LibrarySort.RecentRead ? entry.LastReadAt : null)
                 .ThenByDescending(entry => sort == LibrarySort.ChapterCount ? entry.DownloadedChapterCount : 0)
                 .ThenByDescending(entry => entry.IsFavorite)
-                .ThenByDescending(entry => entry.SavedAt)
-                .ToList();
+                .ThenByDescending(entry => entry.SavedAt).ToList();
             var safePageSize = Math.Clamp(pageSize, 1, 100);
             var totalPages = Math.Max((int)Math.Ceiling(entries.Count / (double)safePageSize), 1);
             var safePage = Math.Clamp(page, 1, totalPages);
             return new LibraryListResponse
             {
-                Items = entries.Skip((safePage - 1) * safePageSize).Take(safePageSize).Select(entry => new LibraryItemDto
-                {
-                    Title = entry.Title,
-                    SiteName = entry.SiteName,
-                    Author = entry.Author,
-                    RootDir = entry.RootDirectory,
-                    MangaUrl = entry.MangaUrl,
-                    CoverUrl = entry.CoverUrl,
-                    DownloadedChapterCount = entry.DownloadedChapterCount,
-                    LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
-                    IsFavorite = entry.IsFavorite,
-                    DuplicateDirectoryCount = entry.DuplicateDirectoryCount,
-                    MangaId = entry.MangaId,
-                    Completed = entry.Completed,
-                    DiskUsageBytes = entry.DiskUsageBytes,
-                    SavedAt = entry.SavedAt,
-                    LastReadAt = _readingProgress?.GetLastReadAt(entry.RootDirectory),
-                }).ToList(),
+                Items = entries.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToList(),
                 Total = entries.Count,
                 Page = safePage,
                 PageSize = safePageSize,
+                ToReadCount = toReadCount,
+                ReadingCount = readingCount,
+                ReadCount = readCount,
+                LatestReadingItem = latestReading,
+            };
+
+            LibraryItemDto ToLibraryItem(LibraryEntry entry) => new()
+            {
+                Title = entry.Title,
+                SiteName = entry.SiteName,
+                Author = entry.Author,
+                RootDir = entry.RootDirectory,
+                MangaUrl = entry.MangaUrl,
+                CoverUrl = entry.CoverUrl,
+                DownloadedChapterCount = entry.DownloadedChapterCount,
+                LastDownloadedChapterTitle = entry.LastDownloadedChapterTitle,
+                IsFavorite = entry.IsFavorite,
+                DuplicateDirectoryCount = entry.DuplicateDirectoryCount,
+                MangaId = entry.MangaId,
+                Completed = entry.Completed,
+                DiskUsageBytes = entry.DiskUsageBytes,
+                SavedAt = entry.SavedAt,
+                LastReadAt = _readingProgress?.GetLastReadAt(entry.RootDirectory),
+                ReadingStatus = _readingProgress?.GetReadingStatus(entry.RootDirectory) ?? ReadingStatus.ToRead,
             };
         }, cancellationToken), "library_failed");
 
@@ -281,9 +304,13 @@ public sealed class BackendClient
             return await _library.GetSettingsAsync(cancellationToken);
         }, "settings_update_failed");
 
-    public async Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default)
+    public Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesAsync(CancellationToken cancellationToken = default) =>
+        // 冷索引和章节核对都可能扫描大量文件，整个检查流程在后台执行。
+        Task.Run(() => CheckLibraryUpdatesCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<LibraryCheckUpdatesResponse> CheckLibraryUpdatesCoreAsync(CancellationToken cancellationToken)
     {
-        var entries = _library.EnumerateLibraryEntries()
+        var entries = _library.EnumerateLibraryEntries(cancellationToken)
             .Where(entry => !string.IsNullOrWhiteSpace(entry.MangaUrl))
             .ToList();
         using var concurrencyGate = new SemaphoreSlim(3, 3);
@@ -402,6 +429,11 @@ public sealed class BackendClient
 
     public Task<ReaderChaptersResponse> GetReaderChaptersAsync(string rootDir, CancellationToken cancellationToken = default) =>
         InvokeAsync(() => _reader.GetReaderChaptersAsync(rootDir, cancellationToken), "reader_failed");
+
+    public Task<ReaderChaptersResponse> OpenArchiveAsync(string archivePath, CancellationToken cancellationToken = default) =>
+        InvokeAsync(() => _reader.OpenArchiveAsync(archivePath, cancellationToken), "reader_archive_failed");
+
+    public void CloseArchive(string archivePath) => _reader.CloseArchive(archivePath);
 
     public Task<ReaderImagesResponse> GetChapterImagesAsync(
         string rootDir,

@@ -216,7 +216,11 @@ public sealed class CbzExportService : IDisposable
                 foreach (var imagePath in images)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var entry = archive.CreateEntry(Path.GetFileName(imagePath), CompressionLevel.Optimal);
+                    // JPEG/PNG/WebP/GIF 已压缩，直接存储以免再次 Deflate 消耗 CPU；BMP 继续压缩。
+                    var compression = string.Equals(Path.GetExtension(imagePath), ".bmp", StringComparison.OrdinalIgnoreCase)
+                        ? CompressionLevel.Optimal
+                        : CompressionLevel.NoCompression;
+                    var entry = archive.CreateEntry(Path.GetFileName(imagePath), compression);
                     await using var target = entry.Open();
                     await using var source = File.OpenRead(imagePath);
                     await source.CopyToAsync(target, cancellationToken);

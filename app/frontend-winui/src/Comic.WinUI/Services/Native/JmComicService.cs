@@ -761,21 +761,10 @@ public sealed partial class JmComicService : IDisposable
                     : source.Url + "?ts=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 using var request = new HttpRequestMessage(HttpMethod.Get, uri);
                 request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/*,*/*;q=0.8");
-                using var response = await _httpClient.SendAsync(
-                    request,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
+                using var response = await SendImageRequestAsync(request, cancellationToken);
                 response.EnsureSuccessStatusCode();
                 using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-                using var buffer = new MemoryStream();
-                var chunk = new byte[64 * 1024];
-                while (true)
-                {
-                    var read = await input.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken);
-                    if (read == 0) break;
-                    await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
-                }
-                var imageData = buffer.ToArray();
+                var imageData = await ReadImageDataAsync(input, cancellationToken);
                 if (imageData.Length == 0) throw new InvalidDataException("图片内容为空");
 
                 return source.BlockCount > 0

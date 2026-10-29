@@ -45,6 +45,25 @@ public sealed class LibraryStorageServiceTests
     }
 
     [TestMethod]
+    [DataRow("null")]
+    [DataRow("[]")]
+    [DataRow("{\"authors\":42,\"title\":\"错误主文件书名\",\"author\":\"错误主文件作者\"}")]
+    public void LoadMetadata_InvalidPrimaryUsesAliasesFromAcceptedBackup(string invalidPrimary)
+    {
+        var path = Path.Combine(_mangaRoot, "元数据.json");
+        File.WriteAllText(path, invalidPrimary);
+        File.WriteAllText(path + ".bak", """{"name":"备份书名","author":["备份作者"]}""");
+        using var service = TestServiceFactory.CreateLibrary(_storageRoot);
+
+        var metadata = service.LoadLibraryMetadata(_mangaRoot);
+
+        Assert.IsNotNull(metadata);
+        Assert.AreEqual("备份书名", metadata.MangaTitle);
+        CollectionAssert.AreEqual(new[] { "备份作者" }, metadata.Authors);
+        Assert.AreEqual(invalidPrimary, File.ReadAllText(path), "读取不能改写主文件。");
+    }
+
+    [TestMethod]
     public void Library_RecognizesMetadataFreeJmDirectoryLayout()
     {
         var jmRoot = Path.Combine(_storageRoot, "123");

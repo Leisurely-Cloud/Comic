@@ -57,6 +57,146 @@ public sealed class BackendClientTests
     }
 
     [TestMethod]
+    public async Task Library_ShelfAndTagFiltersApplyBeforePagination()
+    {
+        var first = Path.Combine(_storageRoot, "A");
+        var second = Path.Combine(_storageRoot, "B");
+        Directory.CreateDirectory(Path.Combine(first, "001_第一话"));
+        Directory.CreateDirectory(Path.Combine(second, "001_第一话"));
+        File.WriteAllBytes(Path.Combine(first, "001_第一话", "001.jpg"), [1]);
+        File.WriteAllBytes(Path.Combine(second, "001_第一话", "001.jpg"), [1]);
+        using var http = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter, TestServiceFactory.CreateReader(library), settings);
+        var shelf = client.LibraryOrganization.SaveShelf(null, "待看");
+        client.LibraryOrganization.SetBooks([second], [shelf.Id], ["长篇"]);
+        var filtered = await client.GetLibraryAsync(page: 2, pageSize: 1, shelfId: shelf.Id, tag: "长篇");
+        Assert.AreEqual(1, filtered.Total);
+        Assert.AreEqual(1, filtered.Page);
+        Assert.AreEqual(second, filtered.Items.Single().RootDir);
+        Assert.AreEqual(0, (await client.GetLibraryAsync(shelfId: shelf.Id, tag: "短篇")).Total);
+        Assert.AreEqual(2, (await client.GetLibraryAsync()).Total);
+    }
+
+    [TestMethod]
+    public async Task Library_ReadingStatusCombinesFiltersBeforePaginationAndCountsOtherMatches()
+    {
+        var roots = Enumerable.Range(0, 8).Select(index => Path.Combine(_storageRoot, "manga-" + index)).ToArray();
+        for (var index = 0; index < roots.Length; index++)
+        {
+            Directory.CreateDirectory(Path.Combine(roots[index], "001_第一话"));
+            File.WriteAllBytes(Path.Combine(roots[index], "001_第一话", "001.jpg"), [1]);
+            File.WriteAllText(Path.Combine(roots[index], "元数据.json"), JsonSerializer.Serialize(new
+            {
+                manga_title = index == 5 ? "其他漫画" : "目标漫画" + index,
+                completed = index != 3,
+                is_favorite = index != 4,
+            }));
+        }
+        using var http = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        var progress = new ReadingProgressService(settings);
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings, readingProgress: progress);
+        var shelf = client.LibraryOrganization.SaveShelf(null, "阅读计划");
+        client.LibraryOrganization.SetBooks(roots.Take(6), [shelf.Id], ["长篇"]);
+        client.LibraryOrganization.SetBooks([roots[7]], [shelf.Id], ["短篇"]);
+        foreach (var root in roots.Skip(1)) progress.Save(root, "001_第一话", 3);
+        Assert.IsTrue(progress.SetReadingStatus(roots[2], ReadingStatus.Read));
+
+        var filtered = await client.GetLibraryAsync(keyword: "目标", page: 9, pageSize: 1,
+            completion: LibraryCompletionFilter.Completed, favoritesOnly: true, shelfId: shelf.Id,
+            tag: "长篇", readingStatus: ReadingStatus.Reading);
+
+        Assert.AreEqual(1, filtered.Total);
+        Assert.AreEqual(1, filtered.Page);
+        Assert.AreEqual(roots[1], filtered.Items.Single().RootDir);
+        Assert.AreEqual(ReadingStatus.Reading, filtered.Items.Single().ReadingStatus);
+        Assert.AreEqual(1, filtered.ToReadCount);
+        Assert.AreEqual(1, filtered.ReadingCount);
+        Assert.AreEqual(1, filtered.ReadCount);
+        Assert.AreEqual(roots[1], filtered.LatestReadingItem?.RootDir);
+        var allStatuses = await client.GetLibraryAsync(keyword: "目标", completion: LibraryCompletionFilter.Completed,
+            favoritesOnly: true, shelfId: shelf.Id, tag: "长篇");
+        Assert.AreEqual(3, allStatuses.Total);
+        var readOnly = await client.GetLibraryAsync(keyword: "目标", completion: LibraryCompletionFilter.Completed,
+            favoritesOnly: true, shelfId: shelf.Id, tag: "长篇", readingStatus: ReadingStatus.Read);
+        Assert.AreEqual(roots[2], readOnly.Items.Single().RootDir);
+    }
+
+    [TestMethod]
+    public async Task LibraryUpdates_CancelledRequestDoesNotScanLibrary()
+    {
+        var chapter = Path.Combine(_storageRoot, "123", "1");
+        Directory.CreateDirectory(chapter);
+        File.WriteAllBytes(Path.Combine(chapter, "001.jpg"), [1]);
+        using var http = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => client.CheckLibraryUpdatesAsync(cancellation.Token));
+
+        Assert.AreEqual(0, library.IndexedEntryBuildCount, "已取消的检查不应继续扫描书库。");
+    }
+
+    [TestMethod]
+    public async Task LibraryUpdates_RunsOutsideCallerSynchronizationContext()
+    {
+        var chapter = Path.Combine(_storageRoot, "123", "1");
+        Directory.CreateDirectory(chapter);
+        File.WriteAllBytes(Path.Combine(chapter, "001.jpg"), [1]);
+        var callerContext = new SynchronizationContext();
+        var usedCallerContext = false;
+        using var handler = new FakeHttpMessageHandler(request =>
+        {
+            usedCallerContext |= ReferenceEquals(callerContext, SynchronizationContext.Current);
+            return BuildEncryptedResponse(request,
+                """{"id":"123","name":"后台检查测试","series":[{"id":"2001","name":"第1话"}]}""");
+        });
+        using var http = new HttpClient(handler);
+        using var jm = new JmComicService(http);
+        var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
+        using var library = TestServiceFactory.CreateLibrary(_storageRoot);
+        using var scheduler = TestServiceFactory.CreateScheduler(jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), settings);
+        var previousContext = SynchronizationContext.Current;
+        Task<LibraryCheckUpdatesResponse> check;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(callerContext);
+            check = client.CheckLibraryUpdatesAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        var response = await check;
+
+        Assert.AreEqual(1, response.CheckedCount);
+        Assert.AreEqual(0, response.FailedCount);
+        Assert.AreEqual(1, handler.RequestedUris.Count);
+        Assert.IsFalse(usedCallerContext, "检查流程不能占用调用方的界面上下文。");
+    }
+
+    [TestMethod]
     public async Task Settings_RejectsEmptyStorageRoot()
     {
         using var httpClient = new HttpClient();

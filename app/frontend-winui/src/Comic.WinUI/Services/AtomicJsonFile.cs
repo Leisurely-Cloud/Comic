@@ -6,16 +6,26 @@ internal static class AtomicJsonFile
 {
     private static readonly object Gate = new();
 
-    public static T? Read<T>(string path, JsonSerializerOptions? options = null)
+    public static T? Read<T>(string path, JsonSerializerOptions? options = null, Func<T, bool>? validate = null) =>
+        Read<T>(path, out _, options, validate);
+
+    /// <summary>同时返回通过反序列化及校验的原始内容，保证额外字段来自同一份文件快照。</summary>
+    public static T? Read<T>(string path, out string? acceptedJson, JsonSerializerOptions? options = null, Func<T, bool>? validate = null)
     {
+        acceptedJson = null;
         foreach (var candidate in new[] { path, path + ".bak" })
         {
             try
             {
                 if (File.Exists(candidate))
                 {
-                    var value = JsonSerializer.Deserialize<T>(File.ReadAllText(candidate), options);
-                    if (value is not null) return value;
+                    var json = File.ReadAllText(candidate);
+                    var value = JsonSerializer.Deserialize<T>(json, options);
+                    if (value is not null && (validate is null || validate(value)))
+                    {
+                        acceptedJson = json;
+                        return value;
+                    }
                 }
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { }

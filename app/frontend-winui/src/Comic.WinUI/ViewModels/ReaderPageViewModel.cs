@@ -24,32 +24,46 @@ public partial class ReaderPageViewModel : ObservableObject
     private readonly BackendClient _backendClient;
     private readonly IDispatcher _dispatcherQueue;
     private readonly ReadingProgressService _readingProgressService;
+    private readonly RecentArchiveService _recentArchives;
     private readonly ReaderPreferenceService _readerPreferences;
     private readonly string _defaultReaderMode;
     private readonly int _defaultStripZoom;
     private readonly Func<byte[], CancellationToken, Task<BitmapImage>> _decodePagedImage;
+    private readonly Func<byte[], BitmapImage> _decodeStripImage;
     private CancellationTokenSource? _pagedImageCts;
     private int _pagedImageRequest;
     private int _failedPagedImageIndex = -1;
     internal Task PagedImageApplication { get; private set; } = Task.CompletedTask;
+    internal Task ImagePreloading { get; private set; } = Task.CompletedTask;
 
     private CancellationTokenSource? _imageCts;
+    private CancellationTokenSource? _sessionCts;
     private CancellationTokenSource? _preloadCts;
     private byte[]? _nextImageCache;
     private int _nextImageCacheIndex = -1;
     private string _rootDir = string.Empty;
+    private string? _archivePath;
+    private bool _archiveRecorded;
     private bool _isOnlineMode;
     private List<string> _currentImagePaths = [];
     private List<JmImageSource> _currentImageSources = [];
     private int _pendingImageIndex = -1;
+    private ChapterImages? _pendingChapterImages;
+
+    private sealed record ChapterImages(List<string> Paths, List<JmImageSource> Sources)
+    {
+        public int Count => Paths.Count + Sources.Count;
+    }
 
     public ReaderPageViewModel(
         BackendClient backendClient,
         ApplicationSettingsService applicationSettings,
         ReadingProgressService readingProgressService,
         ReaderPreferenceService readerPreferences,
-        IDispatcher dispatcher)
-        : this(backendClient, applicationSettings, readingProgressService, readerPreferences, dispatcher, DecodePagedImageAsync)
+        IDispatcher dispatcher,
+        ReadingBookmarkService? bookmarks = null,
+        RecentArchiveService? recentArchives = null)
+        : this(backendClient, applicationSettings, readingProgressService, readerPreferences, dispatcher, DecodePagedImageAsync, bookmarks, recentArchives)
     {
     }
 
@@ -59,12 +73,18 @@ public partial class ReaderPageViewModel : ObservableObject
         ReadingProgressService readingProgressService,
         ReaderPreferenceService readerPreferences,
         IDispatcher dispatcher,
-        Func<byte[], CancellationToken, Task<BitmapImage>> decodePagedImage)
+        Func<byte[], CancellationToken, Task<BitmapImage>> decodePagedImage,
+        ReadingBookmarkService? bookmarks = null,
+        RecentArchiveService? recentArchives = null,
+        Func<byte[], BitmapImage>? decodeStripImage = null)
     {
+        _bookmarks = bookmarks ?? new ReadingBookmarkService(applicationSettings);
         _decodePagedImage = decodePagedImage;
+        _decodeStripImage = decodeStripImage ?? DecodeStripImage;
         _backendClient = backendClient;
         _dispatcherQueue = dispatcher;
         _readingProgressService = readingProgressService;
+        _recentArchives = recentArchives ?? new RecentArchiveService(applicationSettings);
         _readerPreferences = readerPreferences;
         _defaultReaderMode = applicationSettings.DefaultReaderMode;
         _defaultStripZoom = applicationSettings.DefaultStripZoomPercent;
@@ -193,18 +213,30 @@ public partial class ReaderPageViewModel : ObservableObject
     public bool HasNextImageOrChapter => CanGoNext();
 
     [RelayCommand]
-    public async Task LoadAsync(string rootDir, CancellationToken cancellationToken = default)
+    public Task LoadAsync(string rootDir, CancellationToken cancellationToken = default) =>
+        LoadLocalCoreAsync(rootDir, false, cancellationToken);
+
+    [RelayCommand]
+    public Task LoadArchiveAsync(string archivePath, CancellationToken cancellationToken = default) =>
+        LoadLocalCoreAsync(archivePath, true, cancellationToken);
+
+    private async Task LoadLocalCoreAsync(string rootDir, bool archive, CancellationToken cancellationToken)
     {
+        cancellationToken = BeginSession(cancellationToken);
         _rootDir = rootDir;
         _isOnlineMode = false;
-        ApplyReaderPreference(rootDir);
         OnPropertyChanged(nameof(CanToggleReaderMode));
         IsLoading = true;
         PageError = string.Empty;
 
         try
         {
-            var result = await _backendClient.GetReaderChaptersAsync(rootDir, cancellationToken);
+            if (archive) _rootDir = _archivePath = Path.GetFullPath(rootDir);
+            ApplyReaderPreference(_rootDir);
+            var result = await (archive
+                ? _backendClient.OpenArchiveAsync(_rootDir, cancellationToken)
+                : _backendClient.GetReaderChaptersAsync(_rootDir, cancellationToken));
+            cancellationToken.ThrowIfCancellationRequested();
             MangaTitle = result.MangaTitle;
 
             Chapters.Clear();
@@ -217,7 +249,7 @@ public partial class ReaderPageViewModel : ObservableObject
             if (Chapters.Count > 0)
             {
                 var selectedChapter = Chapters[0];
-                var progress = _readingProgressService.Get(rootDir);
+                var progress = _readingProgressService.Get(_rootDir);
                 if (progress is not null)
                 {
                     foreach (var chapter in Chapters)
@@ -244,15 +276,16 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (BackendApiException ex)
         {
-            PageError = ex.Error.Message;
+            if (!cancellationToken.IsCancellationRequested) PageError = ex.Error.Message;
         }
         catch (Exception ex)
         {
-            PageError = $"加载章节异常: {ex.Message}";
+            if (!cancellationToken.IsCancellationRequested) PageError = $"加载章节异常: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            // After selecting a chapter, its image load owns the busy state through decoding.
+            if (_sessionCts?.Token == cancellationToken && SelectedChapter is null) IsLoading = false;
         }
     }
 
@@ -260,6 +293,7 @@ public partial class ReaderPageViewModel : ObservableObject
     [RelayCommand]
     public async Task LoadOnlineAsync(string mangaUrl, CancellationToken cancellationToken = default)
     {
+        cancellationToken = BeginSession(cancellationToken);
         _rootDir = mangaUrl;
         _isOnlineMode = true;
         ApplyReaderPreference(mangaUrl);
@@ -276,6 +310,7 @@ public partial class ReaderPageViewModel : ObservableObject
                     SiteKey = SiteCatalog.Key,
                 },
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             MangaTitle = detail.Title;
 
             Chapters.Clear();
@@ -323,15 +358,15 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (BackendApiException ex)
         {
-            PageError = ex.Error.Message;
+            if (!cancellationToken.IsCancellationRequested) PageError = ex.Error.Message;
         }
         catch (Exception ex)
         {
-            PageError = $"加载在线章节异常: {ex.Message}";
+            if (!cancellationToken.IsCancellationRequested) PageError = $"加载在线章节异常: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            if (_sessionCts?.Token == cancellationToken && SelectedChapter is null) IsLoading = false;
         }
     }
 
@@ -350,7 +385,9 @@ public partial class ReaderPageViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNextImageOrChapter));
         if (value is not null)
         {
-            _ = LoadChapterImagesAsync(value);
+            var prepared = _pendingChapterImages;
+            _pendingChapterImages = null;
+            ChapterLoading = LoadChapterImagesAsync(value, _sessionCts?.Token ?? CancellationToken.None, prepared);
         }
     }
 
@@ -432,11 +469,24 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public void ResetPagedZoom() => PagedZoomPercent = 100;
 
-    private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default)
+    private async Task<ChapterImages> ReadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken token)
+    {
+        if (_isOnlineMode)
+        {
+            var sources = await _backendClient.GetOnlineChapterImageSourcesAsync(chapter.DirName, token);
+            return new([], sources.ToList());
+        }
+        var result = await _backendClient.GetChapterImagesAsync(_rootDir, chapter.DirName, token);
+        return new(result.Images, []);
+    }
+
+    private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default,
+        ChapterImages? prepared = null)
     {
         Interlocked.Increment(ref _pagedImageRequest);
         _pagedImageCts?.Cancel();
         _imageCts?.Cancel();
+        _imageCts?.Dispose();
         _imageCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _imageCts.Token;
         ClearImageCache();
@@ -455,16 +505,10 @@ public partial class ReaderPageViewModel : ObservableObject
 
         try
         {
-            if (_isOnlineMode)
-            {
-                var sources = await _backendClient.GetOnlineChapterImageSourcesAsync(chapter.DirName, token);
-                _currentImageSources = sources.ToList();
-            }
-            else
-            {
-                var result = await _backendClient.GetChapterImagesAsync(_rootDir, chapter.DirName, token);
-                _currentImagePaths = result.Images;
-            }
+            var images = prepared ?? await ReadChapterImagesAsync(chapter, token);
+            token.ThrowIfCancellationRequested();
+            _currentImagePaths = images.Paths;
+            _currentImageSources = images.Sources;
 
             var totalCount = CurrentImageCount;
             chapter.ImageCount = totalCount;
@@ -495,11 +539,11 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (BackendApiException ex)
         {
-            PageError = ex.Error.Message;
+            if (!token.IsCancellationRequested) PageError = ex.Error.Message;
         }
         catch (Exception ex)
         {
-            PageError = $"加载图片异常: {ex.Message}";
+            if (!token.IsCancellationRequested) PageError = $"加载图片异常: {ex.Message}";
         }
         finally
         {
@@ -568,7 +612,15 @@ public partial class ReaderPageViewModel : ObservableObject
     [RelayCommand]
     public async Task GoToImageAsync(int index, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (index < 0 || index >= TotalImages) return;
+        if (IsStripMode)
+        {
+            SaveReadingProgress(index);
+            NotifyImageNavigationChanged();
+            StripPositionRestoreRequested?.Invoke(index);
+            return;
+        }
         await ShowImageAsync(index, cancellationToken);
     }
 
@@ -667,8 +719,9 @@ public partial class ReaderPageViewModel : ObservableObject
             _failedPagedImageIndex = -1;
             IsLoading = false;
             SaveReadingProgress(index);
+            RecordArchiveOpened();
             var next = index + (secondaryBytes is null ? 1 : 2);
-            if (next < CurrentImageCount) _ = PreloadImageAsync(next);
+            if (next < CurrentImageCount) ImagePreloading = PreloadImageAsync(next);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
@@ -685,6 +738,23 @@ public partial class ReaderPageViewModel : ObservableObject
         using var stream = new MemoryStream(bytes);
         await bitmap.SetSourceAsync(stream.AsRandomAccessStream()).AsTask(token);
         return bitmap;
+    }
+
+    private static BitmapImage DecodeStripImage(byte[] bytes)
+    {
+        var bitmap = new BitmapImage { DecodePixelWidth = 1200 };
+        using var stream = new MemoryStream(bytes);
+        bitmap.SetSource(stream.AsRandomAccessStream());
+        return bitmap;
+    }
+
+    private void RecordArchiveOpened()
+    {
+        if (_archiveRecorded || _archivePath is null || _sessionCts is null || _sessionCts.IsCancellationRequested) return;
+        // A chapter index, thumbnail or preloaded byte array does not mean a page was readable.
+        // Best-effort history persistence must not interrupt reading if the settings disk is full.
+        _archiveRecorded = true;
+        _recentArchives.RecordOpened(_archivePath);
     }
 
     private bool IsCurrentPagedRequest(int requestId, CancellationToken token) =>
@@ -726,12 +796,13 @@ public partial class ReaderPageViewModel : ObservableObject
     private async Task PreloadImageAsync(int index)
     {
         _preloadCts?.Cancel();
-        _preloadCts = new CancellationTokenSource();
-        var token = _preloadCts.Token;
+        var request = CancellationTokenSource.CreateLinkedTokenSource(_imageCts?.Token ?? CancellationToken.None);
+        _preloadCts = request;
+        var token = request.Token;
         try
         {
             var bytes = await GetImageBytesAtAsync(index, token);
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested || !ReferenceEquals(_preloadCts, request)) return;
             _nextImageCache = bytes;
             _nextImageCacheIndex = index;
         }
@@ -740,8 +811,16 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch
         {
-            _nextImageCache = null;
-            _nextImageCacheIndex = -1;
+            if (!token.IsCancellationRequested && ReferenceEquals(_preloadCts, request))
+            {
+                _nextImageCache = null;
+                _nextImageCacheIndex = -1;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_preloadCts, request)) _preloadCts = null;
+            request.Dispose();
         }
     }
 
@@ -768,11 +847,9 @@ public partial class ReaderPageViewModel : ObservableObject
                 if (!item.CanComplete(token.Value)) return;
                 try
                 {
-                    var bitmap = new BitmapImage { DecodePixelWidth = 1200 };
-                    using var stream = new MemoryStream(bytes);
-                    stream.Position = 0;
-                    bitmap.SetSource(stream.AsRandomAccessStream());
+                    var bitmap = _decodeStripImage(bytes);
                     item.Complete(token.Value, bitmap);
+                    RecordArchiveOpened();
                 }
                 catch (Exception ex)
                 {
@@ -782,6 +859,7 @@ public partial class ReaderPageViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            item.CancelLoad(token.Value);
         }
         catch (Exception ex)
         {
@@ -790,6 +868,56 @@ public partial class ReaderPageViewModel : ObservableObject
     }
 
     public void UnloadStripImage(ReaderStripImageItemViewModel item) => item.Unload();
+
+    private CancellationToken BeginSession(CancellationToken parent)
+    {
+        Deactivate();
+        _sessionCts = CancellationTokenSource.CreateLinkedTokenSource(parent);
+        return _sessionCts.Token;
+    }
+
+    [RelayCommand]
+    public void CancelLoading()
+    {
+        if (!IsLoading) return;
+        Deactivate();
+        PageError = "已取消加载，可返回后重新打开漫画。";
+    }
+
+    /// <summary>Leave the reader: stop network reads and prevent queued callbacks from restoring images.</summary>
+    public void Deactivate()
+    {
+        Interlocked.Increment(ref _pagedImageRequest);
+        _pagedImageCts?.Cancel();
+        _imageCts?.Cancel();
+        _imageCts?.Dispose();
+        _imageCts = null;
+        _sessionCts?.Cancel();
+        _sessionCts?.Dispose();
+        _sessionCts = null;
+        var archivePath = _archivePath;
+        _archivePath = null;
+        _archiveRecorded = false;
+        if (archivePath is not null) _backendClient.CloseArchive(archivePath);
+        ClearImageCache();
+        ClearStripImages();
+        _currentImagePaths.Clear();
+        _currentImageSources.Clear();
+        CurrentImage = null;
+        SecondaryImage = null;
+        TotalImages = 0;
+        IsLoading = false;
+        _pendingImageIndex = -1;
+        _pendingChapterImages = null;
+        _failedPagedImageIndex = -1;
+        HasFailedPagedImage = false;
+        PageError = string.Empty;
+        CurrentImageIndex = 0;
+        SelectedChapter = null;
+        Chapters.Clear();
+        OnPropertyChanged(nameof(HasChapters));
+        NotifyImageNavigationChanged();
+    }
 
     public void SaveReadingProgress(int? pageIndex = null)
     {
@@ -897,13 +1025,13 @@ public partial class ReaderStripImageItemViewModel : ObservableObject
 
     public bool HasError => !string.IsNullOrWhiteSpace(Error);
 
-    internal CancellationToken? BeginLoad(CancellationToken chapterToken)
+    internal CancellationToken? BeginLoad(CancellationToken chapterToken, CancellationToken dialogToken = default)
     {
         if (Image is not null || IsLoading) return null;
 
         _loadCts?.Cancel();
         _loadCts?.Dispose();
-        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(chapterToken);
+        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(chapterToken, dialogToken);
         IsLoading = true;
         Error = string.Empty;
         OnPropertyChanged(nameof(HasError));
@@ -938,6 +1066,11 @@ public partial class ReaderStripImageItemViewModel : ObservableObject
         IsLoading = false;
     }
 
+    internal void CancelLoad(CancellationToken token)
+    {
+        if (_loadCts?.Token == token) Unload();
+    }
+
     private void ReleaseLoadSource()
     {
         _loadCts?.Dispose();
@@ -945,5 +1078,5 @@ public partial class ReaderStripImageItemViewModel : ObservableObject
     }
 }
 
-/// <summary>阅读器导航参数:本地书库目录与在线漫画链接二选一。</summary>
-public sealed record ReaderNavigationArgs(string? LocalRootDir, string? OnlineMangaUrl);
+/// <summary>阅读器导航参数:本地书库目录、在线漫画链接与明确选择的归档文件三选一。</summary>
+public sealed record ReaderNavigationArgs(string? LocalRootDir, string? OnlineMangaUrl, string? ArchivePath = null);

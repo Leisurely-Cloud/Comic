@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Comic.WinUI.Controls.BatchImportPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Comic.WinUI.ViewModels">
+    <Grid Width="640" MaxHeight="530" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="100" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="支持数字编号、JM123 或 https://站点/album/123 链接。每行一条，也可用空格、逗号或分号分隔；最多 100 条（重复条目也计入），同一漫画自动去重。批量导入会选择每部漫画的全部章节。"
+                   TextWrapping="Wrap" FontSize="12" Opacity="0.8" />
+        <TextBox Grid.Row="1" Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                 AcceptsReturn="True" TextWrapping="Wrap" Height="100" MaxLength="32768"
+                 IsEnabled="{Binding IsIdle}" PlaceholderText="123456&#x0a;JM234567&#x0a;https://站点/album/345678"
+                 AutomationProperties.Name="批量导入编号或链接" />
+        <TextBlock Grid.Row="2" Text="{Binding InputSummary}" FontSize="12" TextWrapping="Wrap" />
+        <Grid Grid.Row="3" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button Content="解析预览" Command="{Binding PreviewCommand}" />
+            <Button Grid.Column="1" Content="加入下载队列" Command="{Binding SubmitSelectedCommand}"
+                    Style="{StaticResource AccentButtonStyle}" />
+            <Button Grid.Column="2" Content="取消当前操作" Command="{Binding CancelOperationCommand}" />
+            <ProgressRing Grid.Column="3" IsActive="{Binding IsBusy}" Width="22" Height="22" HorizontalAlignment="Right" />
+        </Grid>
+        <ListView Grid.Row="4" ItemsSource="{Binding Items}" SelectionMode="None" IsItemClickEnabled="False"
+                  IsEnabled="{Binding IsIdle}" MaxHeight="210" AutomationProperties.Name="批量导入解析预览">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:BatchImportItemViewModel">
+                    <Grid Padding="0,5" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox IsChecked="{x:Bind IsSelected, Mode=TwoWay}" IsEnabled="{x:Bind CanSelect, Mode=OneWay}"
+                                  VerticalAlignment="Top" AutomationProperties.Name="{x:Bind DisplayTitle, Mode=OneWay}" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{x:Bind DisplayTitle, Mode=OneWay}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{x:Bind IdentityText, Mode=OneWay}" FontSize="12" Opacity="0.75" />
+                            <TextBlock Text="{x:Bind StatusText, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+        <StackPanel Grid.Row="5" Spacing="5">
+            <TextBlock Text="{Binding SelectionSummary}" FontSize="12" />
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+        <Button Grid.Row="6" Content="打开下载任务列表" IsEnabled="{Binding HasSubmittedItems}" Click="OnOpenTasksClick"
+                HorizontalAlignment="Left" />
+    </Grid>
+</UserControl>
