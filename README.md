@@ -8,7 +8,7 @@
 
 **[下载最新版](https://github.com/Leisurely-Cloud/Comic/releases/latest)**
 
-![应用截图](docs/screenshot.png)
+![v2.9.2 软件主页](docs/screenshot.png)
 
 ## 主要功能
 
