@@ -83,6 +83,8 @@ public sealed partial class LibraryPage : Page
     {
         var selected = ViewModel.SelectedItem;
         if (selected is null || string.IsNullOrWhiteSpace(selected.RootDir)) return;
+        var selectedRoot = selected.RootDir;
+        var selectedTitle = selected.Title;
         using var archiveBlock = BlockArchiveInput();
 
         var duplicateMessage = selected.DuplicateDirectoryCount > 0
@@ -92,7 +94,7 @@ public sealed partial class LibraryPage : Page
         {
             XamlRoot = XamlRoot,
             Title = "删除本地漫画？",
-            Content = $"《{selected.Title}》及其 {selected.DownloadedChapterCount} 个本地章节将移入 Windows 回收站，可从回收站恢复。{duplicateMessage}",
+            Content = $"《{selectedTitle}》及其 {selected.DownloadedChapterCount} 个本地章节将移入 Windows 回收站，可从回收站恢复。{duplicateMessage}",
             PrimaryButtonText = "移入回收站",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,
@@ -100,7 +102,7 @@ public sealed partial class LibraryPage : Page
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
-            await ViewModel.DeleteSelectedMangaCommand.ExecuteAsync(null);
+            await ViewModel.DeleteMangaAsync(selectedRoot, selectedTitle);
         }
     }
 

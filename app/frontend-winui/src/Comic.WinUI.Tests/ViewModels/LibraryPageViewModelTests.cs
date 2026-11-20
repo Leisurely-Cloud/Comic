@@ -90,6 +90,54 @@ public sealed class LibraryPageViewModelTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ConfirmedDeletion_UsesSnapshotAfterRefreshChangesSelection(bool clearSelection)
+    {
+        var recycled = new List<string>();
+        var recycledRoot = Path.Combine(_directory, "recycled");
+        Directory.CreateDirectory(recycledRoot);
+        using var library = new LibraryStorageService(_libraryRoot, recycleDirectory: path =>
+        {
+            var resolvedSource = Path.GetFullPath(path);
+            var destination = Path.GetFullPath(Path.Combine(recycledRoot, Path.GetFileName(path)));
+            Assert.IsTrue(resolvedSource.StartsWith(Path.GetFullPath(_libraryRoot) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase));
+            Assert.IsTrue(destination.StartsWith(Path.GetFullPath(recycledRoot) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase));
+            recycled.Add(resolvedSource);
+            Directory.Move(resolvedSource, destination);
+        });
+        using var scheduler = TestServiceFactory.CreateScheduler(_jm, library);
+        using var exporter = TestServiceFactory.CreateExporter(library);
+        var client = TestServiceFactory.CreateClient(_jm, scheduler, library, exporter,
+            TestServiceFactory.CreateReader(library), _settings, readingProgress: _progress);
+        var viewModel = new LibraryPageViewModel(client, new(client), _settings, _progress);
+        await viewModel.LoadAsync();
+        var confirmedRoot = viewModel.Items[1].RootDir;
+        var confirmedTitle = viewModel.Items[1].Title;
+        viewModel.SelectedItem = viewModel.Items[1];
+
+        // A load that was already in flight can complete while the confirmation dialog is open.
+        await viewModel.LoadAsync();
+        var otherRoot = viewModel.SelectedItem!.RootDir;
+        Assert.AreNotEqual(confirmedRoot, otherRoot);
+        if (clearSelection) viewModel.SelectedItem = null;
+        _progress.Save(confirmedRoot, "001_第一章", 0);
+        _progress.Save(otherRoot, "001_第一章", 0);
+
+        await viewModel.DeleteMangaAsync(confirmedRoot, confirmedTitle);
+
+        CollectionAssert.AreEqual(new[] { confirmedRoot }, recycled);
+        Assert.IsFalse(Directory.Exists(confirmedRoot));
+        Assert.IsTrue(Directory.Exists(otherRoot));
+        Assert.IsNull(_progress.Get(confirmedRoot));
+        Assert.IsNotNull(_progress.Get(otherRoot));
+        StringAssert.Contains(viewModel.LibraryStatus, confirmedTitle);
+        Assert.IsFalse(viewModel.IsDeleting);
+    }
+
+    [TestMethod]
     public async Task ReadingStatusChange_RefreshesCountsDetailsAndActiveFilter()
     {
         await _viewModel.LoadAsync();

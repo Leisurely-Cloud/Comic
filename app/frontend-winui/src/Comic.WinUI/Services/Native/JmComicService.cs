@@ -617,9 +617,7 @@ public sealed partial class JmComicService : IDisposable
             throw new InvalidDataException("禁漫天堂章节结构无效");
         }
 
-        var imageNames = GetStringArray(payload, "images")
-            .Where(IsSupportedImageName)
-            .ToList();
+        var imageNames = GetChapterImageNames(payload, chapter.Id);
         if (imageNames.Count == 0)
         {
             throw new InvalidDataException($"禁漫天堂章节 {chapter.Id} 没有可下载图片");
@@ -720,9 +718,7 @@ public sealed partial class JmComicService : IDisposable
             throw new InvalidDataException("禁漫天堂章节结构无效");
         }
 
-        var imageNames = GetStringArray(payload, "images")
-            .Where(IsSupportedImageName)
-            .ToList();
+        var imageNames = GetChapterImageNames(payload, chapterId.ToString());
         if (imageNames.Count == 0)
         {
             throw new InvalidDataException($"禁漫天堂章节 {chapterId} 没有可读取图片");
@@ -1414,6 +1410,15 @@ public sealed partial class JmComicService : IDisposable
         text = WebUtility.HtmlDecode(text).Replace("\r\n", "\n").Replace('\r', '\n');
         text = Regex.Replace(text, @"\n{3,}", "\n\n").Trim();
         return string.IsNullOrWhiteSpace(text) ? "（无文字内容）" : ChineseTextConverter.ToSimplified(text);
+    }
+
+    private static List<string> GetChapterImageNames(JsonElement payload, string chapterId)
+    {
+        if (payload.TryGetProperty("images", out var images) &&
+            images.ValueKind == JsonValueKind.Array && images.GetArrayLength() == 0)
+            throw new JmChapterUnavailableException(chapterId);
+
+        return GetStringArray(payload, "images").Where(IsSupportedImageName).ToList();
     }
 
     private static List<string> GetStringArray(JsonElement element, string propertyName)

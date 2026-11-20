@@ -48,6 +48,8 @@ public partial class ReaderPageViewModel : ObservableObject
     private List<string> _currentImagePaths = [];
     private List<JmImageSource> _currentImageSources = [];
     private int _pendingImageIndex = -1;
+    private bool _pendingChapterEnd;
+    private bool _hasRecordedVisiblePage;
     private ChapterImages? _pendingChapterImages;
 
     private sealed record ChapterImages(List<string> Paths, List<JmImageSource> Sources)
@@ -169,7 +171,9 @@ public partial class ReaderPageViewModel : ObservableObject
 
     public bool HasPreviousImage => CurrentImageIndex > 0;
 
-    public bool HasNextImage => CurrentImageIndex < TotalImages - 1;
+    private int ImageNavigationStep => IsDoublePage && !IsStripMode ? 2 : 1;
+
+    public bool HasNextImage => CurrentImageIndex < TotalImages - ImageNavigationStep;
 
     public string PageIndicator => TotalImages > 0
         ? IsDoublePage && CurrentImageIndex + 1 < TotalImages
@@ -387,7 +391,9 @@ public partial class ReaderPageViewModel : ObservableObject
         {
             var prepared = _pendingChapterImages;
             _pendingChapterImages = null;
-            ChapterLoading = LoadChapterImagesAsync(value, _sessionCts?.Token ?? CancellationToken.None, prepared);
+            var startAtEnd = _pendingChapterEnd;
+            _pendingChapterEnd = false;
+            ChapterLoading = LoadChapterImagesAsync(value, _sessionCts?.Token ?? CancellationToken.None, prepared, startAtEnd);
         }
     }
 
@@ -481,7 +487,7 @@ public partial class ReaderPageViewModel : ObservableObject
     }
 
     private async Task LoadChapterImagesAsync(ReaderChapterDto chapter, CancellationToken cancellationToken = default,
-        ChapterImages? prepared = null)
+        ChapterImages? prepared = null, bool startAtEnd = false)
     {
         Interlocked.Increment(ref _pagedImageRequest);
         _pagedImageCts?.Cancel();
@@ -517,8 +523,11 @@ public partial class ReaderPageViewModel : ObservableObject
 
             if (totalCount > 0)
             {
-                var startIndex = _pendingImageIndex >= 0 && _pendingImageIndex < totalCount
-                    ? _pendingImageIndex : 0;
+                // Resolve backward chapter navigation from the fresh image list, including online chapters
+                // whose catalog count is unknown. Keep the final spread aligned with forward navigation.
+                var startIndex = startAtEnd
+                    ? (totalCount - 1) / ImageNavigationStep * ImageNavigationStep
+                    : _pendingImageIndex >= 0 && _pendingImageIndex < totalCount ? _pendingImageIndex : 0;
                 _pendingImageIndex = -1;
                 CurrentImageIndex = startIndex;
                 if (IsStripMode)
@@ -556,14 +565,15 @@ public partial class ReaderPageViewModel : ObservableObject
     {
         if (CurrentImageIndex > 0)
         {
-            await ShowImageAsync(Math.Max(0, CurrentImageIndex - (IsDoublePage ? 2 : 1)), cancellationToken);
+            await ShowImageAsync(Math.Max(0, CurrentImageIndex - ImageNavigationStep), cancellationToken);
         }
         else if (SelectedChapter is not null)
         {
             var idx = Chapters.IndexOf(SelectedChapter);
             if (idx > 0)
             {
-                _pendingImageIndex = Chapters[idx - 1].ImageCount - 1;
+                _pendingImageIndex = -1;
+                _pendingChapterEnd = true;
                 SelectedChapter = Chapters[idx - 1];
             }
         }
@@ -572,9 +582,9 @@ public partial class ReaderPageViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     public async Task NextImageAsync(CancellationToken cancellationToken = default)
     {
-        if (CurrentImageIndex < TotalImages - 1)
+        if (HasNextImage)
         {
-            await ShowImageAsync(Math.Min(TotalImages - 1, CurrentImageIndex + (IsDoublePage ? 2 : 1)), cancellationToken);
+            await ShowImageAsync(CurrentImageIndex + ImageNavigationStep, cancellationToken);
         }
         else if (SelectedChapter is not null)
         {
@@ -600,7 +610,7 @@ public partial class ReaderPageViewModel : ObservableObject
 
     private bool CanGoNext()
     {
-        if (CurrentImageIndex < TotalImages - 1) return true;
+        if (HasNextImage) return true;
         if (SelectedChapter is not null)
         {
             var idx = Chapters.IndexOf(SelectedChapter);
@@ -718,7 +728,7 @@ public partial class ReaderPageViewModel : ObservableObject
             HasFailedPagedImage = false;
             _failedPagedImageIndex = -1;
             IsLoading = false;
-            SaveReadingProgress(index);
+            SaveVisibleReadingProgress(index);
             RecordArchiveOpened();
             var next = index + (secondaryBytes is null ? 1 : 2);
             if (next < CurrentImageCount) ImagePreloading = PreloadImageAsync(next);
@@ -848,8 +858,13 @@ public partial class ReaderPageViewModel : ObservableObject
                 try
                 {
                     var bitmap = _decodeStripImage(bytes);
+                    if (!item.CanComplete(token.Value)) return;
                     item.Complete(token.Value, bitmap);
-                    RecordArchiveOpened();
+                    if (!token.Value.IsCancellationRequested)
+                    {
+                        if (!_hasRecordedVisiblePage) SaveVisibleReadingProgress();
+                        RecordArchiveOpened();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -908,6 +923,8 @@ public partial class ReaderPageViewModel : ObservableObject
         TotalImages = 0;
         IsLoading = false;
         _pendingImageIndex = -1;
+        _pendingChapterEnd = false;
+        _hasRecordedVisiblePage = false;
         _pendingChapterImages = null;
         _failedPagedImageIndex = -1;
         HasFailedPagedImage = false;
@@ -919,7 +936,15 @@ public partial class ReaderPageViewModel : ObservableObject
         NotifyImageNavigationChanged();
     }
 
-    public void SaveReadingProgress(int? pageIndex = null)
+    private void SaveVisibleReadingProgress(int? pageIndex = null)
+    {
+        SaveReadingProgress(pageIndex, refreshLastReadAt: !_hasRecordedVisiblePage);
+        _hasRecordedVisiblePage = true;
+    }
+
+    public void SaveReadingProgress(int? pageIndex = null) => SaveReadingProgress(pageIndex, refreshLastReadAt: false);
+
+    private void SaveReadingProgress(int? pageIndex, bool refreshLastReadAt)
     {
         if (!IsStripMode && (HasFailedPagedImage || IsLoading)) return;
         if (SelectedChapter is null ||
@@ -936,7 +961,7 @@ public partial class ReaderPageViewModel : ObservableObject
             NotifyImageNavigationChanged();
         }
 
-        _readingProgressService.Save(_rootDir, SelectedChapter.DirName, normalizedIndex);
+        _readingProgressService.Save(_rootDir, SelectedChapter.DirName, normalizedIndex, refreshLastReadAt);
     }
 
     private void RebuildStripImages()

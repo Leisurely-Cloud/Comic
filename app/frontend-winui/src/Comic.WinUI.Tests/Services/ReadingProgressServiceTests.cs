@@ -177,6 +177,64 @@ public sealed class ReadingProgressServiceTests
     }
 
     [TestMethod]
+    [DataRow(ReadingStatus.Reading)]
+    [DataRow(ReadingStatus.Read)]
+    public void ReopeningSamePage_RefreshesLastReadTimeOnceAndPreservesStatus(ReadingStatus status)
+    {
+        var firstRoot = Path.Combine(_container, "first-manga");
+        var secondRoot = Path.Combine(_container, "second-manga");
+        var firstTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTime = firstTime.AddMinutes(1);
+        var secondEntry = new ReadingProgressEntry(secondRoot, "chapter-1", 0, secondTime);
+        var path = Path.Combine(_container, "reading-progress.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            Entries = new[] { new ReadingProgressEntry(firstRoot, "chapter-3", 14, firstTime), secondEntry },
+            Statuses = new[] { new { RootDirectory = firstRoot, Status = status } },
+        }));
+        var service = new ReadingProgressService(_container);
+
+        service.Save(firstRoot, "chapter-3", 14, refreshLastReadAt: true);
+
+        var reloaded = new ReadingProgressService(_container);
+        var reopened = reloaded.Get(firstRoot);
+        Assert.IsNotNull(reopened);
+        Assert.IsTrue(reopened.UpdatedAtUtc > secondTime, "重新成功打开同一页也应成为最近阅读的漫画。");
+        Assert.AreEqual("chapter-3", reopened.ChapterDirectoryName);
+        Assert.AreEqual(14, reopened.PageIndex);
+        Assert.AreEqual(status, reloaded.GetReadingStatus(firstRoot));
+        Assert.AreEqual(secondEntry, reloaded.Get(secondRoot));
+
+        var persisted = File.ReadAllText(path);
+        service.Save(firstRoot, "chapter-3", 14);
+        Assert.AreEqual(reopened, service.Get(firstRoot), "同一会话的重复回调不应继续刷新时间。");
+        Assert.AreEqual(persisted, File.ReadAllText(path), "普通同页保存仍应去重，避免重复写盘。");
+    }
+
+    [TestMethod]
+    public void FailedLastReadRefresh_RestoresTimestampPageAndToReadStatus()
+    {
+        var root = Path.Combine(_container, "manga");
+        var original = new ReadingProgressEntry(root, "chapter-3", 14,
+            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var path = Path.Combine(_container, "reading-progress.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            Entries = new[] { original },
+            Statuses = new[] { new { RootDirectory = root, Status = ReadingStatus.ToRead } },
+        }));
+        var service = new ReadingProgressService(_container);
+        File.Move(path, path + ".saved");
+        Directory.CreateDirectory(path);
+
+        service.Save(root, "chapter-3", 14, refreshLastReadAt: true);
+
+        Assert.AreEqual(original, service.Get(root));
+        Assert.AreEqual(ReadingStatus.ToRead, service.GetReadingStatus(root));
+        Assert.AreEqual(0, Directory.GetFiles(_container, "*.tmp").Length);
+    }
+
+    [TestMethod]
     public void FailedManualStatusSave_ReturnsFalseAndRollsBackInMemory()
     {
         var root = Path.Combine(_container, "manga");

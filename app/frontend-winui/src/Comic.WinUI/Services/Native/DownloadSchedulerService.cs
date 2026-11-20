@@ -755,6 +755,13 @@ public sealed partial class DownloadSchedulerService : IDisposable
                             break;
                         }
                         catch (OperationCanceledException) { throw; }
+                        catch (JmChapterUnavailableException ex)
+                        {
+                            chapterStopSource.Token.ThrowIfCancellationRequested();
+                            lastError = ex;
+                            AppendLog(state, "warn", $"源站暂无图片，跳过本轮自动重试：{chapter.Title}");
+                            break;
+                        }
                         catch (Exception ex)
                         {
                             lastError = ex;

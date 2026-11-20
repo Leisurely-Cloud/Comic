@@ -222,6 +222,173 @@ public sealed class ReaderPageViewModelTests
     }
 
     [TestMethod]
+    public async Task SpreadLastPair_NextAdvancesChapterWithoutRepeatingVisibleLastPage()
+    {
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => Task.FromResult<BitmapImage>(null!));
+        await viewModel.LoadAsync(_mangaRoot);
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+        viewModel.IsDoublePage = true;
+        await ApplyPagedAsync(viewModel, dispatcher);
+        await viewModel.GoToImageAsync(6);
+        await ApplyPagedAsync(viewModel, dispatcher);
+        Assert.AreEqual("7-8 / 8", viewModel.PageIndicator);
+        Assert.IsFalse(viewModel.HasNextImage, "末组的第二张已经显示，不应再次作为下一页。");
+        Assert.IsTrue(viewModel.NextImageCommand.CanExecute(null), "还有下一章时仍应允许继续。");
+
+        await viewModel.NextImageAsync();
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+
+        Assert.AreEqual(SecondChapterDir, viewModel.SelectedChapter!.DirName);
+        Assert.AreEqual(0, viewModel.CurrentImageIndex);
+        Assert.AreEqual(SecondChapterDir, progress.Get(_mangaRoot)!.ChapterDirectoryName);
+    }
+
+    [TestMethod]
+    [DataRow(3)]
+    [DataRow(4)]
+    public async Task SpreadLastGroup_FinalChapterDisablesNext(int imageCount)
+    {
+        CreateChapter(SecondChapterDir, imageCount);
+        var lastGroupStart = (imageCount - 1) / 2 * 2;
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        progress.Save(_mangaRoot, SecondChapterDir, lastGroupStart);
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => Task.FromResult<BitmapImage>(null!));
+        await viewModel.LoadAsync(_mangaRoot);
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+        viewModel.IsDoublePage = true;
+        await ApplyPagedAsync(viewModel, dispatcher);
+
+        Assert.AreEqual(imageCount, viewModel.TotalImages);
+        Assert.IsFalse(viewModel.HasNextImage);
+        Assert.IsFalse(viewModel.HasNextImageOrChapter);
+        Assert.IsFalse(viewModel.NextImageCommand.CanExecute(null));
+        await viewModel.NextImageAsync();
+        Assert.AreEqual(lastGroupStart, viewModel.CurrentImageIndex);
+        Assert.AreEqual(lastGroupStart, progress.Get(_mangaRoot)!.PageIndex);
+    }
+
+    [TestMethod]
+    [DataRow(false, 8, 7)]
+    [DataRow(true, 8, 6)]
+    [DataRow(true, 7, 6)]
+    public async Task PreviousPage_UnvisitedOnlineChapterLoadsActualLastGroup(bool spread, int imageCount, int lastGroupStart)
+    {
+        ConfigureOnlineChapters(imageCount);
+        var dispatcher = new DeferredDispatcher();
+        var progress = new ReadingProgressService(Path.Combine(_container, "progress"));
+        const string key = "https://18comic.vip/album/456";
+        progress.Save(key, "124", 0);
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => Task.FromResult<BitmapImage>(null!));
+        await viewModel.LoadOnlineAsync(key);
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+        if (spread)
+        {
+            viewModel.IsDoublePage = true;
+            await ApplyPagedAsync(viewModel, dispatcher);
+        }
+        Assert.AreEqual("124", viewModel.SelectedChapter!.DirName);
+        Assert.AreEqual(0, viewModel.Chapters[0].ImageCount, "前一章尚未解析，不能依赖目录里的图片数。");
+
+        await viewModel.PreviousImageAsync();
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+
+        Assert.AreEqual("123", viewModel.SelectedChapter!.DirName);
+        Assert.AreEqual(imageCount, viewModel.TotalImages);
+        Assert.AreEqual(lastGroupStart, viewModel.CurrentImageIndex);
+        Assert.AreEqual(lastGroupStart, progress.Get(key)!.PageIndex);
+    }
+
+    [TestMethod]
+    public async Task ReopenSamePage_RefreshesRecencyOnlyAfterVisibleDecode()
+    {
+        var oldTime = DateTimeOffset.UtcNow.AddDays(-1);
+        var progress = CreateHistoricalProgress(oldTime);
+        var dispatcher = new DeferredDispatcher();
+        var decoded = new TaskCompletionSource<BitmapImage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => decoded.Task);
+        await viewModel.LoadAsync(_mangaRoot);
+        await viewModel.ChapterLoading;
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot));
+        dispatcher.FlushFirst();
+        Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot), "异步解码完成前不能刷新最近阅读。");
+
+        decoded.SetResult(null!);
+        await viewModel.PagedImageApplication.WaitAsync(TimeSpan.FromSeconds(5));
+        var reopenedTime = progress.GetLastReadAt(_mangaRoot);
+        Assert.IsTrue(reopenedTime > oldTime);
+        Assert.AreEqual(0, progress.Get(_mangaRoot)!.PageIndex);
+        viewModel.SaveReadingProgress();
+        await viewModel.GoToImageAsync(0);
+        await ApplyPagedAsync(viewModel, dispatcher);
+        Assert.AreEqual(reopenedTime, progress.GetLastReadAt(_mangaRoot), "同一会话的重复解码或保存仍应去重。");
+    }
+
+    [TestMethod]
+    public async Task ReopenSamePage_FailedDecodePreservesRecencyUntilSuccessfulRetry()
+    {
+        var oldTime = DateTimeOffset.UtcNow.AddDays(-1);
+        var progress = CreateHistoricalProgress(oldTime);
+        var dispatcher = new DeferredDispatcher();
+        var fails = true;
+        var viewModel = CreateViewModel(dispatcher, progress, decoder: (_, _) => fails
+            ? Task.FromException<BitmapImage>(new IOException("损坏图片"))
+            : Task.FromResult<BitmapImage>(null!));
+        await viewModel.LoadAsync(_mangaRoot);
+        await viewModel.ChapterLoading;
+        await ApplyPagedAsync(viewModel, dispatcher);
+        Assert.IsTrue(viewModel.HasFailedPagedImage);
+        Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot));
+
+        fails = false;
+        await viewModel.RetryPagedImageAsync();
+        await ApplyPagedAsync(viewModel, dispatcher);
+        Assert.IsTrue(progress.GetLastReadAt(_mangaRoot) > oldTime);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ReopenSamePage_StripRefreshRequiresSuccessfulVisibleDecode(bool fails)
+    {
+        var oldTime = DateTimeOffset.UtcNow.AddDays(-1);
+        var progress = CreateHistoricalProgress(oldTime);
+        var dispatcher = new DeferredDispatcher();
+        var viewModel = CreateViewModel(dispatcher, progress, useStripMode: true,
+            decoder: (_, _) => Task.FromResult<BitmapImage>(null!),
+            stripDecoder: _ => fails ? throw new IOException("损坏图片") : null!);
+        await viewModel.LoadAsync(_mangaRoot);
+        await viewModel.ChapterLoading;
+        Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot), "只解析条漫目录不能刷新最近阅读。");
+        var item = viewModel.StripImages[0];
+        await viewModel.LoadStripImageAsync(item);
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot), "只有图片字节仍不代表成功阅读。");
+        dispatcher.FlushFirst();
+        if (fails)
+        {
+            Assert.IsTrue(item.HasError);
+            Assert.AreEqual(oldTime, progress.GetLastReadAt(_mangaRoot));
+            fails = false;
+            await viewModel.LoadStripImageAsync(item);
+            dispatcher.FlushFirst();
+        }
+        Assert.IsTrue(progress.GetLastReadAt(_mangaRoot) > oldTime);
+        var reopenedTime = progress.GetLastReadAt(_mangaRoot);
+        await viewModel.LoadStripImageAsync(viewModel.StripImages[1]);
+        dispatcher.FlushFirst();
+        Assert.AreEqual(reopenedTime, progress.GetLastReadAt(_mangaRoot));
+    }
+
+    [TestMethod]
     public async Task DoublePage_SecondaryDecodeFailureDoesNotCommitPartialSpread()
     {
         var dispatcher = new DeferredDispatcher();
@@ -704,6 +871,50 @@ public sealed class ReaderPageViewModelTests
         }
     }
 
+    private ReadingProgressService CreateHistoricalProgress(DateTimeOffset timestamp)
+    {
+        var directory = Path.Combine(_container, "progress");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "reading-progress.json"), JsonSerializer.Serialize(new
+        {
+            Entries = new[] { new ReadingProgressEntry(_mangaRoot, FirstChapterDir, 0, timestamp) }
+        }));
+        return new ReadingProgressService(directory);
+    }
+
+    private static async Task ApplyPagedAsync(ReaderPageViewModel viewModel, DeferredDispatcher dispatcher)
+    {
+        await dispatcher.WaitForPendingAsync(1, TimeSpan.FromSeconds(5));
+        dispatcher.FlushFirst();
+        await viewModel.PagedImageApplication.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private void ConfigureOnlineChapters(int firstChapterImages)
+    {
+        _handler.Dispose();
+        _handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/album")) return EncryptedApiResponse(request,
+                """{"id":"456","name":"在线测试","series":[{"id":"123","name":"第一话"},{"id":"124","name":"第二话"}]}""");
+            if (path.EndsWith("/chapter"))
+            {
+                var first = request.RequestUri.Query.Contains("123");
+                return EncryptedApiResponse(request, JsonSerializer.Serialize(new
+                {
+                    id = first ? "123" : "124",
+                    name = first ? "第一话" : "第二话",
+                    images = Enumerable.Range(1, first ? firstChapterImages : 3).Select(index => $"{index:0000}.jpg").ToArray()
+                }));
+            }
+            if (path.EndsWith("/chapter_view_template")) return new(HttpStatusCode.OK)
+            { Content = new StringContent("<script>var scramble_id = 220980;</script>") };
+            if (path.Contains("/media/photos/")) return new(HttpStatusCode.OK)
+            { Content = new ByteArrayContent([1, 2, 3]) };
+            return new(HttpStatusCode.NotFound);
+        });
+    }
+
     private void ConfigureOnlineHandler(int imageCount, Func<CancellationToken, Task<HttpResponseMessage>> imageResponse)
     {
         _handler.Dispose();
@@ -729,7 +940,8 @@ public sealed class ReaderPageViewModelTests
         IDispatcher dispatcher,
         ReadingProgressService progressService,
         bool useStripMode = false,
-        Func<byte[], CancellationToken, Task<BitmapImage>>? decoder = null)
+        Func<byte[], CancellationToken, Task<BitmapImage>>? decoder = null,
+        Func<byte[], BitmapImage>? stripDecoder = null)
     {
         var settings = TestServiceFactory.CreateSettings(Path.Combine(_container, "settings"));
         if (useStripMode)
@@ -758,7 +970,7 @@ public sealed class ReaderPageViewModelTests
         var preferences = new ReaderPreferenceService(Path.Combine(_container, "reader-preferences"));
         _viewModel = decoder is null
             ? new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher)
-            : new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher, decoder);
+            : new ReaderPageViewModel(backendClient, settings, progressService, preferences, dispatcher, decoder, decodeStripImage: stripDecoder);
         return _viewModel;
     }
 

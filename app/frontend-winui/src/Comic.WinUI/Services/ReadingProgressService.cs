@@ -75,7 +75,8 @@ public sealed class ReadingProgressService
         }
     }
 
-    public void Save(string rootDirectory, string chapterDirectoryName, int pageIndex)
+    /// <summary>Refresh recency once when a reading session first displays a page; deduplicate later same-page callbacks.</summary>
+    public void Save(string rootDirectory, string chapterDirectoryName, int pageIndex, bool refreshLastReadAt = false)
     {
         var key = NormalizeRootDirectory(rootDirectory);
         if (string.IsNullOrEmpty(key) || string.IsNullOrWhiteSpace(chapterDirectoryName)) return;
@@ -88,7 +89,7 @@ public sealed class ReadingProgressService
             var resumeToRead = hadStatus && status == ReadingStatus.ToRead;
             if (_entries.TryGetValue(key, out var existing) &&
                 string.Equals(existing.ChapterDirectoryName, chapterDirectoryName, StringComparison.Ordinal) &&
-                existing.PageIndex == pageIndex && !resumeToRead)
+                existing.PageIndex == pageIndex && !resumeToRead && !refreshLastReadAt)
             {
                 return;
             }

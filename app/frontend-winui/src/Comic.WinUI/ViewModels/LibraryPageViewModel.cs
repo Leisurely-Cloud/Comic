@@ -293,12 +293,21 @@ public partial class LibraryPageViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public async Task DeleteSelectedMangaAsync(CancellationToken cancellationToken = default)
+    public Task DeleteSelectedMangaAsync(CancellationToken cancellationToken = default)
     {
-        if (SelectedItem is null || string.IsNullOrWhiteSpace(SelectedItem.RootDir) || IsDeleting) return;
+        var selected = SelectedItem;
+        return selected is null
+            ? Task.CompletedTask
+            : DeleteMangaAsync(selected.RootDir, selected.Title, cancellationToken);
+    }
 
-        var selectedRoot = SelectedItem.RootDir;
-        var selectedTitle = SelectedItem.Title;
+    public async Task DeleteMangaAsync(string rootDirectory, string title, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(rootDirectory) || IsDeleting) return;
+
+        // The confirmed target must not change when an in-flight library refresh changes the selection.
+        var selectedRoot = rootDirectory;
+        var selectedTitle = title;
         PageError = string.Empty;
         LibraryStatus = string.Empty;
         IsDeleting = true;
